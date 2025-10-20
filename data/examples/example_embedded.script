@@ -1,0 +1,44 @@
+# GTKTerm Automation Script
+# Test embedded system bootloader
+
+# Reset device with DTR
+log Resetting device...
+set_dtr 0
+delay 100
+set_dtr 1
+delay 500
+
+# Wait for bootloader prompt
+expect Bootloader v
+delay 100
+
+# Send erase command
+log Erasing flash...
+send erase\r\n
+expect Erase complete
+delay 1000
+
+# Load firmware
+log Loading firmware...
+send load\r\n
+expect Ready for data
+
+# In real use, you would trigger XMODEM transfer here
+# This is just a demonstration
+
+delay 100
+send \x03
+delay 100
+
+# Verify
+log Verifying firmware...
+send verify\r\n
+expect CRC: OK
+delay 500
+
+# Boot
+log Booting application...
+send boot\r\n
+expect Application started
+
+log Firmware update completed!

@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  NMEA 0183 Language Definition for GtkSourceView
+
+  Syntax highlighting for NMEA sentences used by GPS/GNSS devices,
+  marine electronics, and navigation systems.
+-->
+<language id="nmea" name="NMEA 0183" version="2.0" _section="Serial Protocols">
+  <metadata>
+    <property name="mimetypes">text/x-nmea</property>
+    <property name="globs">*.nmea;*.nme</property>
+  </metadata>
+
+  <styles>
+    <style id="sentence-start" name="Sentence Start" map-to="def:keyword"/>
+    <style id="talker-id" name="Talker ID" map-to="def:type"/>
+    <style id="sentence-type" name="Sentence Type" map-to="def:function"/>
+    <style id="field" name="Field" map-to="def:string"/>
+    <style id="checksum" name="Checksum" map-to="def:special-char"/>
+    <style id="separator" name="Separator" map-to="def:operator"/>
+    <style id="number" name="Number" map-to="def:number"/>
+  </styles>
+
+  <definitions>
+    <!-- NMEA sentence structure: $GPGGA,fields*checksum\r\n -->
+
+    <!-- Sentence start ($) -->
+    <context id="sentence-start" style-ref="sentence-start">
+      <match>\$</match>
+    </context>
+
+    <!-- Talker IDs (2 letters after $) -->
+    <context id="talker-id" style-ref="talker-id">
+      <prefix>\$</prefix>
+      <keyword>GP</keyword>  <!-- GPS -->
+      <keyword>GL</keyword>  <!-- GLONASS -->
+      <keyword>GA</keyword>  <!-- Galileo -->
+      <keyword>GB</keyword>  <!-- BeiDou -->
+      <keyword>GN</keyword>  <!-- Multi-GNSS -->
+      <keyword>BD</keyword>  <!-- BeiDou -->
+      <keyword>QZ</keyword>  <!-- QZSS -->
+      <keyword>II</keyword>  <!-- Integrated Instrumentation -->
+      <keyword>EC</keyword>  <!-- Electronic Chart -->
+      <keyword>LC</keyword>  <!-- Loran-C -->
+      <keyword>SD</keyword>  <!-- Sounder -->
+      <keyword>YX</keyword>  <!-- Transducer -->
+      <keyword>HC</keyword>  <!-- Heading/Compass -->
+      <keyword>TI</keyword>  <!-- Turn Indicator -->
+      <keyword>VW</keyword>  <!-- Mechanical Speed -->
+    </context>
+
+    <!-- Sentence types (3 letters after talker ID) -->
+    <context id="sentence-type" style-ref="sentence-type">
+      <keyword>GGA</keyword>  <!-- Global Positioning System Fix Data -->
+      <keyword>GLL</keyword>  <!-- Geographic Position -->
+      <keyword>GSA</keyword>  <!-- GNSS DOP and Active Satellites -->
+      <keyword>GSV</keyword>  <!-- GNSS Satellites in View -->
+      <keyword>RMC</keyword>  <!-- Recommended Minimum -->
+      <keyword>VTG</keyword>  <!-- Track Made Good and Ground Speed -->
+      <keyword>GBS</keyword>  <!-- GNSS Satellite Fault Detection -->
+      <keyword>GRS</keyword>  <!-- GNSS Range Residuals -->
+      <keyword>GST</keyword>  <!-- GNSS Pseudorange Error Statistics -->
+      <keyword>ZDA</keyword>  <!-- Time & Date -->
+      <keyword>DBT</keyword>  <!-- Depth Below Transducer -->
+      <keyword>HDT</keyword>  <!-- Heading True -->
+      <keyword>HDM</keyword>  <!-- Heading Magnetic -->
+      <keyword>MTW</keyword>  <!-- Water Temperature -->
+      <keyword>MWV</keyword>  <!-- Wind Speed and Angle -->
+      <keyword>VHW</keyword>  <!-- Water Speed and Heading -->
+      <keyword>VLW</keyword>  <!-- Dual Ground/Water Distance -->
+      <keyword>DPT</keyword>  <!-- Depth -->
+      <keyword>ROT</keyword>  <!-- Rate of Turn -->
+    </context>
+
+    <!-- Checksum (after *) -->
+    <context id="checksum" style-ref="checksum">
+      <match>\*[0-9A-Fa-f]{2}</match>
+    </context>
+
+    <!-- Numbers (coordinates, time, etc.) -->
+    <context id="number" style-ref="number">
+      <match>\b[0-9]+\.?[0-9]*\b</match>
+    </context>
+
+    <!-- Field separators -->
+    <context id="separator" style-ref="separator">
+      <match>,</match>
+    </context>
+
+    <!-- Field content -->
+    <context id="field" style-ref="field">
+      <match>[A-Z][^,\*\r\n]*</match>
+    </context>
+
+    <!-- Main context -->
+    <context id="nmea" class="no-spell-check">
+      <include>
+        <context ref="sentence-start"/>
+        <context ref="talker-id"/>
+        <context ref="sentence-type"/>
+        <context ref="checksum"/>
+        <context ref="number"/>
+        <context ref="separator"/>
+        <context ref="field"/>
+      </include>
+    </context>
+  </definitions>
+</language>

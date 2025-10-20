@@ -1,0 +1,34 @@
+# GTKTerm Automation Script Example
+# Test modem AT commands
+
+# Send AT command to check if modem is alive
+log Testing modem connection...
+send AT\r\n
+expect OK
+delay 500
+
+# Get manufacturer info
+log Getting manufacturer information...
+send AT+CGMI\r\n
+expect OK
+delay 500
+
+# Get model identification
+log Getting model...
+send AT+CGMM\r\n
+expect OK
+delay 500
+
+# Check signal quality
+log Checking signal quality...
+send AT+CSQ\r\n
+expect \+CSQ: (\d+),(\d+)
+delay 500
+
+# Get IMEI number
+log Getting IMEI...
+send AT+CGSN\r\n
+expect \d{15}
+delay 500
+
+log Modem test completed successfully!

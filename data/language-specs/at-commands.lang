@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AT Commands Language Definition for GtkSourceView
+
+  Syntax highlighting for Hayes AT command set used by modems,
+  cellular modules, and serial devices.
+-->
+<language id="at-commands" name="AT Commands" version="2.0" _section="Serial Protocols">
+  <metadata>
+    <property name="mimetypes">text/x-at-commands</property>
+    <property name="globs">*.at</property>
+    <property name="line-comment-start">//</property>
+  </metadata>
+
+  <styles>
+    <style id="command" name="Command" map-to="def:keyword"/>
+    <style id="parameter" name="Parameter" map-to="def:type"/>
+    <style id="response" name="Response" map-to="def:string"/>
+    <style id="error" name="Error" map-to="def:error"/>
+    <style id="number" name="Number" map-to="def:number"/>
+    <style id="separator" name="Separator" map-to="def:operator"/>
+  </styles>
+
+  <definitions>
+    <!-- AT Command prefix -->
+    <context id="at-prefix" style-ref="command">
+      <prefix>^</prefix>
+      <keyword>AT</keyword>
+      <keyword>at</keyword>
+    </context>
+
+    <!-- Common AT Commands -->
+    <context id="standard-commands" style-ref="command">
+      <prefix>AT</prefix>
+      <suffix>[\?=\+]?</suffix>
+      <keyword>A</keyword>       <!-- Answer call -->
+      <keyword>D</keyword>       <!-- Dial -->
+      <keyword>E</keyword>       <!-- Echo -->
+      <keyword>H</keyword>       <!-- Hook control -->
+      <keyword>I</keyword>       <!-- Identification -->
+      <keyword>L</keyword>       <!-- Speaker loudness -->
+      <keyword>M</keyword>       <!-- Speaker mode -->
+      <keyword>O</keyword>       <!-- Return to online -->
+      <keyword>P</keyword>       <!-- Pulse dialing -->
+      <keyword>Q</keyword>       <!-- Quiet mode -->
+      <keyword>S</keyword>       <!-- S-register -->
+      <keyword>T</keyword>       <!-- Tone dialing -->
+      <keyword>V</keyword>       <!-- Verbose mode -->
+      <keyword>X</keyword>       <!-- Extended result codes -->
+      <keyword>Z</keyword>       <!-- Reset -->
+      <keyword>\&amp;C</keyword> <!-- DCD control -->
+      <keyword>\&amp;D</keyword> <!-- DTR control -->
+      <keyword>\&amp;F</keyword> <!-- Factory defaults -->
+      <keyword>\&amp;K</keyword> <!-- Flow control -->
+      <keyword>\&amp;W</keyword> <!-- Store profile -->
+    </context>
+
+    <!-- Extended AT Commands (with + prefix) -->
+    <context id="extended-commands" style-ref="command">
+      <prefix>AT\+</prefix>
+      <keyword>CGMI</keyword>    <!-- Manufacturer ID -->
+      <keyword>CGMM</keyword>    <!-- Model ID -->
+      <keyword>CGMR</keyword>    <!-- Revision ID -->
+      <keyword>CGSN</keyword>    <!-- Serial number -->
+      <keyword>CIMI</keyword>    <!-- IMSI -->
+      <keyword>CCID</keyword>    <!-- SIM card ID -->
+      <keyword>CMUX</keyword>    <!-- Multiplexing mode -->
+      <keyword>CREG</keyword>    <!-- Network registration -->
+      <keyword>COPS</keyword>    <!-- Operator selection -->
+      <keyword>CSQ</keyword>     <!-- Signal quality -->
+      <keyword>CPIN</keyword>    <!-- Enter PIN -->
+      <keyword>CMGF</keyword>    <!-- Message format -->
+      <keyword>CMGS</keyword>    <!-- Send message -->
+      <keyword>CMGR</keyword>    <!-- Read message -->
+      <keyword>CMGD</keyword>    <!-- Delete message -->
+      <keyword>CIPSTART</keyword><!-- Start TCP connection -->
+      <keyword>CIPCLOSE</keyword><!-- Close TCP connection -->
+      <keyword>CIPSEND</keyword> <!-- Send data -->
+      <keyword>CIPSTATUS</keyword><!-- Connection status -->
+      <keyword>GMI</keyword>     <!-- Manufacturer -->
+      <keyword>GMM</keyword>     <!-- Model -->
+      <keyword>GMR</keyword>     <!-- Revision -->
+      <keyword>GSN</keyword>     <!-- Serial number -->
+    </context>
+
+    <!-- Response codes -->
+    <context id="ok-response" style-ref="response">
+      <keyword>OK</keyword>
+      <keyword>CONNECT</keyword>
+      <keyword>RING</keyword>
+      <keyword>NO CARRIER</keyword>
+      <keyword>NO DIALTONE</keyword>
+      <keyword>BUSY</keyword>
+      <keyword>NO ANSWER</keyword>
+    </context>
+
+    <!-- Error responses -->
+    <context id="error-response" style-ref="error">
+      <keyword>ERROR</keyword>
+      <keyword>\+CME ERROR</keyword>
+      <keyword>\+CMS ERROR</keyword>
+    </context>
+
+    <!-- Numbers -->
+    <context id="number" style-ref="number">
+      <match>\b[0-9]+\b</match>
+    </context>
+
+    <!-- Separators and operators -->
+    <context id="separator" style-ref="separator">
+      <match>[,;:=\?]</match>
+    </context>
+
+    <!-- Main context -->
+    <context id="at-commands" class="no-spell-check">
+      <include>
+        <context ref="at-prefix"/>
+        <context ref="standard-commands"/>
+        <context ref="extended-commands"/>
+        <context ref="ok-response"/>
+        <context ref="error-response"/>
+        <context ref="number"/>
+        <context ref="separator"/>
+      </include>
+    </context>
+  </definitions>
+</language>

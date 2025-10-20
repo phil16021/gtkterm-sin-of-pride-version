@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Hexdump Language Definition for GtkSourceView
+
+  Syntax highlighting for hexadecimal data dumps, commonly used in
+  serial communication, binary file analysis, and debugging.
+-->
+<language id="hexdump" name="Hexadecimal Dump" version="2.0" _section="Serial Protocols">
+  <metadata>
+    <property name="mimetypes">text/x-hexdump</property>
+    <property name="globs">*.hex;*.hexdump</property>
+  </metadata>
+
+  <styles>
+    <style id="offset" name="Offset" map-to="def:type"/>
+    <style id="hex-byte" name="Hex Byte" map-to="def:number"/>
+    <style id="ascii-printable" name="ASCII Printable" map-to="def:string"/>
+    <style id="ascii-nonprint" name="ASCII Non-printable" map-to="def:special-char"/>
+    <style id="separator" name="Separator" map-to="def:operator"/>
+    <style id="null-byte" name="Null Byte" map-to="def:comment"/>
+    <style id="control-char" name="Control Character" map-to="def:keyword"/>
+  </styles>
+
+  <definitions>
+    <!-- Offset/Address (typically 8 hex digits at start of line) -->
+    <context id="offset" style-ref="offset">
+      <match>^[0-9A-Fa-f]{8}</match>
+    </context>
+
+    <!-- Hex bytes -->
+    <context id="hex-byte" style-ref="hex-byte">
+      <match>\b[0-9A-Fa-f]{2}\b</match>
+    </context>
+
+    <!-- Null bytes (00) - often want to highlight differently -->
+    <context id="null-byte" style-ref="null-byte">
+      <match>\b00\b</match>
+    </context>
+
+    <!-- Control characters (01-1F, 7F-FF in hex) -->
+    <context id="control-char" style-ref="control-char">
+      <match>\b[0-1][0-9A-Fa-f]\b</match>
+      <match>\b7[Ff]\b</match>
+      <match>\b[8-9A-Fa-f][0-9A-Fa-f]\b</match>
+    </context>
+
+    <!-- Separator (pipe or vertical bar) -->
+    <context id="separator" style-ref="separator">
+      <match>\|</match>
+    </context>
+
+    <!-- ASCII representation (printable characters) -->
+    <context id="ascii-printable" style-ref="ascii-printable">
+      <match>(?&lt;=\|)[!-~]+</match>
+    </context>
+
+    <!-- ASCII non-printable (dots or special chars) -->
+    <context id="ascii-nonprint" style-ref="ascii-nonprint">
+      <match>(?&lt;=\|)\.+</match>
+    </context>
+
+    <!-- Main context -->
+    <context id="hexdump" class="no-spell-check">
+      <include>
+        <context ref="offset"/>
+        <context ref="null-byte"/>
+        <context ref="control-char"/>
+        <context ref="hex-byte"/>
+        <context ref="separator"/>
+        <context ref="ascii-printable"/>
+        <context ref="ascii-nonprint"/>
+      </include>
+    </context>
+  </definitions>
+</language>

@@ -1,95 +1,100 @@
-# GTKTerm: A GTK+ Serial Port Terminal
+# GTKTerm - Sin of Pride Version
 
-[![CircleCI Badge](https://circleci.com/gh/Jeija/gtkterm.svg?style=shield)](https://circleci.com/gh/Jeija/gtkterm)
-<img src="data/gtkterm_256x256.png" align="right" width="20%"/>
+My custom terminal app with real-time chart visualizations!
 
-GTKTerm is a simple, graphical serial port terminal emulator for Linux and possibly other POSIX-compliant operating systems. It can be used to communicate with all kinds of devices with a serial interface, such as embedded computers, microcontrollers, modems, GPS receivers, CNC machines and more.
+![Screenshot](screenshot.png)
 
-<p align="center">
-    <img src="screenshot.png" width="60%"/>
-</p>
+## What is this?
 
-## Usage
-### Keyboard Shortcuts 
-As GTKTerm is often used like a terminal emulator,
-the shortcut keys are assigned to `<ctrl><shift>`, rather than just `<ctrl>`. This allows the user to send keystrokes of the form `<ctrl>X` and not have GTKTerm intercept them.
+So basically I took GTKTerm and added this visualization feature I call "Sunshine". You can send specially formatted data from your Arduino (or whatever microcontroller) and it'll show up as live charts. I made this for a class project but it actually turned out pretty useful for monitoring sensors and debugging embedded stuff.
 
-Key Combination | Effect
----:|---
-`<ctrl><shift>L` | Clear screen
-`<ctrl><shift>R` | Send file
-`<ctrl><shift>Q` | Quit
-`<ctrl><shift>S` | Configure port
-`<ctrl><shift>V` | Paste
-`<ctrl><shift>C` | Copy
-`<ctrl><shift>F` | Find
-`<ctrl><shift>K` | Clear Scrollback
-`<ctrl><shift>A` | Select All
-`<ctrl><shift>B` | Send Break
-`<ctrl>B` | Send break
-F5 | Open Port
-F6 | Close Port
-F7 | Toggle DTR
-F8 | Toggle RTS
+## Cool Features
 
-### Command Line Options
-See `man gtkterm` or `gtkterm --help` for more information on available command line interface options.
+- Normal serial terminal stuff (USB ports, TCP/UDP, different baud rates)
+- Hex and ASCII views
+- **Sunshine Visualizations** - the main thing I added:
+  - Line charts (for temperature over time and stuff like that)
+  - Bar charts (comparing multiple values)
+  - Scatter plots (finding correlations maybe?)
+  - Pie charts (percentages and distributions)
+- Some other things that were already in GTKTerm (macros, protocol decoders, logging)
 
-### Notes on RS485:
-The RS485 flow control is a software user-space emulation and therefore may not work for all configurations (won't respond quickly enough). If this is the case for your setup, you will need to either use a dedicated RS232 to RS485 converter, or look for a kernel level driver. This is an inherent limitation to user space programs.
+## How to Send Data (The Sunshine Format)
 
-### Scriptability with Signals
-Some microcontrollers and other embedded devices are flashed using the same serial interface that is also used for outputting debug information. To facilitate rapid development on these platforms, GTKTerm supports the following UNIX signals:
+Just send packets like this from your device:
+```
+{PacketID|SeriesName|R,G,B|value}
+```
 
-Signal | Action | Usage Example
----:|:---:|---
-`SIGUSR1` | Open Port | `killall -USR1 gtkterm`
-`SIGUSR2` | Close Port | `killall -USR2 gtkterm`
+Real examples that actually work:
+```
+{P0|Temperature|255,0,0|23.5}
+{P1|Roll|255,0,0|45.2|Pitch|0,255,0|12.3|Yaw|0,0,255|180.0}
+```
 
-You may find it useful to send these signals in your own firmware flashing scripts.
+The program automatically makes new charts when it sees a new packet ID. Pretty neat!
 
-## Installation
-GTKTerm has a few dependencies-
-* Gtk+3.0 (version 3.12 or higher)
-* vte (version 0.40 or higher)
-* intltool (version 0.40.0 or higher)
-* libgudev (version 229 or higher)
+You can put multiple data series in one packet if they're related (like the Roll/Pitch/Yaw example above).
 
-Once these dependencies are installed, most people should simply run:
+## Building It
 
-	meson build
-	ninja -C build
+You'll need these installed first:
+- GTK4 (version 4.6.0 or newer)
+- VTE (the terminal widget thing, version 0.69.92+)
+- GLib 2.0 (2.66+)
+- Meson (for building)
 
-To install GTKTerm system-wide, run:
+To build:
+```bash
+meson setup build
+ninja -C build
+```
 
-	ninja -C build install
-	gtk-update-icon-cache
+Run it without installing:
+```bash
+./build/src/gtkterm-sin-of-pride-version
+```
 
-If you wish to install GTKTerm someplace other than the default directory, e.g. in `/usr`, use:
+Or if you want to install it properly:
+```bash
+sudo ninja -C build install
+```
 
-	meson build -Dprefix=/usr
+## How to Use
 
-Then build and install as usual.
+1. Start the program
+2. Pick your serial port (dropdown at the top)
+3. Set the baud rate if needed (default is usually fine)
+4. Hit "Connect" or press F5
+5. To see charts: **Ctrl+Shift+V** shows/hides the visualization panel
+6. If the text looks weird with stair-stepping, enable "CR LF auto" from the menu
 
-## Uninstallation
-To uninstall GTKTerm, run:
+## Random Tips
 
-	ninja -C build uninstall
+- I added support for /dev/pts/* virtual ports so you can test without real hardware
+- Each chart has a "Renew" button that clears the data if you want to start fresh
+- The charts automatically scale to fit your data
+- Use different RGB values for each series so you can tell them apart
 
-If you already deleted the `build` directory, just compile and install GTKTerm again as explained in the [previous section](#installation) with the same target location prefix (`-Dprefix`) and perform the uninstall step afterwards.
+## Disclaimer
+
+This is a student project I made while learning GTK4 and Cairo. It's based on the original GTKTerm (which is way more professional than my code lol). The Sunshine part is all mine though!
+
+If you find bugs... well, that's probably my fault not theirs.
 
 ## License
-Original Code by: Julien Schmitt
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
+**Original Code by:** Julien Schmitt
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program. If not, see <http://www.gnu.org/licenses/>.

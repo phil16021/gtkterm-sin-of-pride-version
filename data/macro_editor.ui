@@ -1,0 +1,237 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <object class="GtkDialog" id="macro_editor_dialog">
+    <property name="title" translatable="yes">Macro Editor</property>
+    <property name="default-width">700</property>
+    <property name="default-height">500</property>
+    <property name="modal">1</property>
+    <child type="action">
+      <object class="GtkButton" id="close_button">
+        <property name="label" translatable="yes">_Close</property>
+        <property name="use-underline">1</property>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox">
+        <property name="orientation">horizontal</property>
+        <property name="spacing">12</property>
+        <property name="margin-start">12</property>
+        <property name="margin-end">12</property>
+        <property name="margin-top">12</property>
+        <property name="margin-bottom">12</property>
+
+        <!-- Left panel: Macro list -->
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="spacing">6</property>
+            <property name="hexpand">0</property>
+            <property name="width-request">250</property>
+
+            <child>
+              <object class="GtkLabel">
+                <property name="label" translatable="yes">Macros</property>
+                <property name="xalign">0</property>
+                <attributes>
+                  <attribute name="weight" value="bold"/>
+                </attributes>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkScrolledWindow">
+                <property name="vexpand">1</property>
+                <property name="min-content-height">300</property>
+                <child>
+                  <object class="GtkListView" id="macro_list">
+                    <property name="single-click-activate">1</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">6</property>
+                <property name="homogeneous">1</property>
+
+                <child>
+                  <object class="GtkButton" id="new_macro_button">
+                    <property name="label" translatable="yes">_New</property>
+                    <property name="use-underline">1</property>
+                    <property name="tooltip-text" translatable="yes">Create a new macro</property>
+                  </object>
+                </child>
+
+                <child>
+                  <object class="GtkButton" id="delete_macro_button">
+                    <property name="label" translatable="yes">_Delete</property>
+                    <property name="use-underline">1</property>
+                    <property name="tooltip-text" translatable="yes">Delete selected macro</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">6</property>
+                <property name="homogeneous">1</property>
+
+                <child>
+                  <object class="GtkButton" id="record_button">
+                    <property name="label" translatable="yes">_Record</property>
+                    <property name="use-underline">1</property>
+                    <property name="tooltip-text" translatable="yes">Start recording a macro</property>
+                  </object>
+                </child>
+
+                <child>
+                  <object class="GtkButton" id="play_button">
+                    <property name="label" translatable="yes">_Play</property>
+                    <property name="use-underline">1</property>
+                    <property name="tooltip-text" translatable="yes">Play selected macro</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <!-- Right panel: Macro details -->
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="spacing">12</property>
+            <property name="hexpand">1</property>
+
+            <child>
+              <object class="GtkLabel">
+                <property name="label" translatable="yes">Macro Details</property>
+                <property name="xalign">0</property>
+                <attributes>
+                  <attribute name="weight" value="bold"/>
+                </attributes>
+              </object>
+            </child>
+
+            <!-- Macro name -->
+            <child>
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">12</property>
+
+                <child>
+                  <object class="GtkLabel">
+                    <property name="label" translatable="yes">Name:</property>
+                    <property name="xalign">1</property>
+                    <property name="width-request">100</property>
+                  </object>
+                </child>
+
+                <child>
+                  <object class="GtkEntry" id="macro_name_entry">
+                    <property name="hexpand">1</property>
+                    <property name="placeholder-text" translatable="yes">Enter macro name...</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+
+            <!-- Keyboard shortcut -->
+            <child>
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">12</property>
+
+                <child>
+                  <object class="GtkLabel">
+                    <property name="label" translatable="yes">Shortcut:</property>
+                    <property name="xalign">1</property>
+                    <property name="width-request">100</property>
+                  </object>
+                </child>
+
+                <child>
+                  <object class="GtkEntry" id="macro_shortcut_entry">
+                    <property name="hexpand">1</property>
+                    <property name="placeholder-text" translatable="yes">e.g., &lt;Ctrl&gt;&lt;Alt&gt;1</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+
+            <!-- Commands list -->
+            <child>
+              <object class="GtkLabel">
+                <property name="label" translatable="yes">Commands:</property>
+                <property name="xalign">0</property>
+                <property name="margin-top">12</property>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkScrolledWindow">
+                <property name="vexpand">1</property>
+                <property name="min-content-height">200</property>
+                <child>
+                  <object class="GtkTextView" id="commands_text_view">
+                    <property name="monospace">1</property>
+                    <property name="editable">1</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+
+            <!-- Command buttons -->
+            <child>
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">6</property>
+
+                <child>
+                  <object class="GtkButton" id="add_send_button">
+                    <property name="label" translatable="yes">Add Send</property>
+                    <property name="tooltip-text" translatable="yes">Add a send command</property>
+                  </object>
+                </child>
+
+                <child>
+                  <object class="GtkButton" id="add_wait_button">
+                    <property name="label" translatable="yes">Add Wait</property>
+                    <property name="tooltip-text" translatable="yes">Add a wait command</property>
+                  </object>
+                </child>
+
+                <child>
+                  <object class="GtkButton" id="clear_commands_button">
+                    <property name="label" translatable="yes">Clear All</property>
+                    <property name="tooltip-text" translatable="yes">Clear all commands</property>
+                  </object>
+                </child>
+
+                <child>
+                  <object class="GtkBox">
+                    <property name="hexpand">1</property>
+                  </object>
+                </child>
+
+                <child>
+                  <object class="GtkButton" id="save_macro_button">
+                    <property name="label" translatable="yes">_Save</property>
+                    <property name="use-underline">1</property>
+                    <style>
+                      <class name="suggested-action"/>
+                    </style>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>

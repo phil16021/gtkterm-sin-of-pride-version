@@ -1,2 +1,30 @@
 *~
 build
+
+# Claude Code
+.claude
+
+# Generated documentation
+doc
+
+# IDE and editor files
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Build artifacts
+*.o
+*.a
+*.so
+*.la
+*.lo
+.deps
+.libs
+autom4te.cache
+compile_commands.json
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Modbus ASCII Language Definition for GtkSourceView
+
+  Syntax highlighting for Modbus ASCII protocol used in industrial automation,
+  SCADA systems, and process control.
+-->
+<language id="modbus-ascii" name="Modbus ASCII" version="2.0" _section="Serial Protocols">
+  <metadata>
+    <property name="mimetypes">text/x-modbus-ascii</property>
+    <property name="globs">*.modbus;*.mba</property>
+  </metadata>
+
+  <styles>
+    <style id="start-char" name="Start Character" map-to="def:keyword"/>
+    <style id="address" name="Slave Address" map-to="def:type"/>
+    <style id="function" name="Function Code" map-to="def:function"/>
+    <style id="data" name="Data" map-to="def:string"/>
+    <style id="lrc" name="LRC Checksum" map-to="def:special-char"/>
+    <style id="end-char" name="End Characters" map-to="def:keyword"/>
+    <style id="hex-digit" name="Hex Digit" map-to="def:number"/>
+    <style id="error" name="Error Response" map-to="def:error"/>
+  </styles>
+
+  <definitions>
+    <!-- Modbus ASCII frame: :AAFFDDDD...DDLRCR\LF -->
+    <!-- : = Start character -->
+    <!-- AA = 2-char hex slave address (00-FF) -->
+    <!-- FF = 2-char hex function code (01-7F) -->
+    <!-- DDDD... = 2N-char hex data -->
+    <!-- LR = 2-char hex LRC checksum -->
+    <!-- CR\LF = End characters -->
+
+    <!-- Start character (:) -->
+    <context id="start-char" style-ref="start-char">
+      <match>^:</match>
+    </context>
+
+    <!-- Slave address (2 hex digits after :) -->
+    <context id="address" style-ref="address">
+      <match>(?&lt;=:)[0-9A-Fa-f]{2}</match>
+    </context>
+
+    <!-- Function codes -->
+    <context id="function-code" style-ref="function">
+      <match>(?&lt;=:[0-9A-Fa-f]{2})[0-9A-Fa-f]{2}</match>
+    </context>
+
+    <!-- Error responses (function code with high bit set: 81-FF) -->
+    <context id="error-response" style-ref="error">
+      <match>(?&lt;=:[0-9A-Fa-f]{2})[8-9A-Fa-f][0-9A-Fa-f]</match>
+    </context>
+
+    <!-- Data bytes (hex pairs) -->
+    <context id="data-bytes" style-ref="data">
+      <match>[0-9A-Fa-f]{2}</match>
+    </context>
+
+    <!-- LRC checksum (2 hex digits before CR/LF) -->
+    <context id="lrc" style-ref="lrc">
+      <match>[0-9A-Fa-f]{2}(?=\r?\n)</match>
+    </context>
+
+    <!-- End characters -->
+    <context id="end-char" style-ref="end-char">
+      <match>\r?\n</match>
+    </context>
+
+    <!-- Main context -->
+    <context id="modbus-ascii" class="no-spell-check">
+      <include>
+        <context ref="start-char"/>
+        <context ref="address"/>
+        <context ref="error-response"/>
+        <context ref="function-code"/>
+        <context ref="lrc"/>
+        <context ref="end-char"/>
+        <context ref="data-bytes"/>
+      </include>
+    </context>
+  </definitions>
+</language>

@@ -1,14 +1,18 @@
 project(
-	'gtkterm',
+	'GTKTerm',
 	'c',
-	version: '1.3.1',
-	meson_version : '>= 0.46.0'
+	version: '1.99.1',
+	meson_version : '>= 0.60.0'
 )
 
 # Find dependencies
-gtk_deps = dependency('gtk+-3.0', version : '>= 3.0.0')
-vte_deps = dependency('vte-2.91', version : '>= 0.28.0')
+gtk_deps = dependency('gtk4', version : '>= 4.6.0')
+vte_deps = dependency('vte-2.91-gtk4', version : '>= 0.69.92')
 gudev_deps = dependency('gudev-1.0', version: '>= 230')
+json_glib_deps = dependency('json-glib-1.0', required: true)
+gtksourceview_deps = dependency('gtksourceview-5', version: '>= 5.0.0', required: false)
+glib_dep = dependency('glib-2.0', version: '>= 2.66')
+math_dep = meson.get_compiler('c').find_library('m', required: false)
 
 # Find install paths
 prefix = get_option('prefix')
@@ -17,9 +21,10 @@ localedir = join_paths(prefix, get_option('localedir'))
 
 # Configure GTKTerm
 conf = configuration_data()
-conf.set_quoted('VERSION', meson.project_version())
+conf.set_quoted('PACKAGE_VERSION', meson.project_version())
 conf.set_quoted('PACKAGE', meson.project_name())
-conf.set_quoted('RELEASE_DATE', 'May 2024')
+conf.set_quoted('RELEASE_DATE', 'September 2022')
+conf.set_quoted('BUILD_DIR',  meson.project_build_root())
 conf.set_quoted('LOCALEDIR', localedir)
 
 cc = meson.get_compiler('c')
@@ -28,9 +33,30 @@ if have_serial_h
   conf.set('HAVE_LINUX_SERIAL_H', '1')
 endif
 
+# Check for GtkSourceView support
+if gtksourceview_deps.found()
+  conf.set('HAVE_GTKSOURCEVIEW', '1')
+  message('GtkSourceView 5 found - syntax highlighting enabled')
+else
+  warning('GtkSourceView 5 not found - syntax highlighting disabled')
+endif
+
+doxygen = find_program('doxygen', required : false)
+if doxygen.found()
+  message('Doxygen found')
+else
+  warning('Documentation disabled without doxygen')
+endif
+
 configure_file(output : 'config.h', configuration : conf)
-config = declare_dependency(include_directories : include_directories('.'))
+config = declare_dependency(include_directories : include_directories('.', 'src'))
 
 subdir('data')
 subdir('src')
+subdir('convert')
 subdir('po')
+subdir('doc')
+
+install_man('data/gtkterm.1')
+
+meson.add_install_script('meson_post_install.py')

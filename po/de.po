@@ -10,7 +10,6 @@ msgstr ""
 "POT-Creation-Date: 2020-03-09 10:39+0100\n"
 "PO-Revision-Date: 2020-11-13 19:21+0200\n"
 "Last-Translator: Markus Hiereth <translation@hiereth.de>\n"
-"Last-Translator: Christian Weickhmann <christian.weickhmann@gmx.de>\n"
 "Language-Team: debian-l10n-german <debian-l10n-german@lists.debian.org>\n"
 "Language: de\n"
 "MIME-Version: 1.0\n"
@@ -20,7 +19,7 @@ msgstr ""
 "X-Generator: Virtaal 0.7.1\n"
 
 #: ../src/buffer.c:164
-msgid "ERROR: Buffer is not initialized!\n"
+msgid "ERROR : Buffer is not initialized !\n"
 msgstr "FEHLER: Puffer ist nicht initialisiert!\n"
 
 #: ../src/cmdline.c:37
@@ -45,7 +44,7 @@ msgstr ""
 "Dieses Programm wird unter den Bedingungen der GPL V.2 veröffentlicht\n"
 
 #: ../src/cmdline.c:40
-msgid "\t ** Use at your own risks! **\n"
+msgid "\t ** Use at your own risks ! **\n"
 msgstr "\t ** Gebrauch auf eigenes Risiko! **\n"
 
 #: ../src/cmdline.c:41
@@ -57,77 +56,77 @@ msgstr ""
 "Befehlszeilenoptionen\n"
 
 #: ../src/cmdline.c:42
-msgid "--help or -h: this help screen\n"
+msgid "--help or -h : this help screen\n"
 msgstr "--help oder -h: Diese Hilfe ausgeben\n"
 
 #: ../src/cmdline.c:43
-msgid "--config <configuration> or -c: load configuration\n"
+msgid "--config <configuration> or -c : load configuration\n"
 msgstr "--config <Konfiguration> oder -c: Konfiguration laden\n"
 
 #: ../src/cmdline.c:44
-msgid "--port <device> or -p: serial port device (default /dev/ttyS0)\n"
+msgid "--port <device> or -p : serial port device (default /dev/ttyS0)\n"
 msgstr "--port <Gerät> oder -p: serieller Port (/dev/ttyS0 ist voreingestellt)\n"
 
 #: ../src/cmdline.c:45
-msgid "--speed <speed> or -s: serial port speed (default 9600)\n"
+msgid "--speed <speed> or -s : serial port speed (default 9600)\n"
 msgstr ""
 "--speed <Rate> oder -s: Übertragungsrate des seriellen Ports\n"
 "(9600 ist voreingestellt)\n"
 
 #: ../src/cmdline.c:46
-msgid "--bits <bits> or -b: number of bits (default 8)\n"
+msgid "--bits <bits> or -b : number of bits (default 8)\n"
 msgstr "--bits <Bits> oder -b: Anzahl der Bits (Voreinstellung ist 8)\n"
 
 #: ../src/cmdline.c:47
-msgid "--stopbits <stopbits> or -t: number of stopbits (default 1)\n"
+msgid "--stopbits <stopbits> or -t : number of stopbits (default 1)\n"
 msgstr ""
 "--stopbits <Stoppbits> oder -t: Anzahl der Stoppbits (Voreinstellung ist 1)\n"
 
 #: ../src/cmdline.c:48
-msgid "--parity <odd | even> or -a: parity (default none)\n"
+msgid "--parity <odd | even> or -a : parity (default none)\n"
 msgstr "--parity <odd | even> oder -a: Parität (ohne ist voreingestellt)\n"
 
 #: ../src/cmdline.c:49
-msgid "--flow <Xon | RTS | RS485> or -w: flow control (default none)\n"
+msgid "--flow <Xon | RTS | RS-485> or -w : flow control (default none)\n"
 msgstr ""
-"--flow <Xon | RTS | RS485> oder -w: Fluss-Steuerung (ohne ist voreingestellt)\n"
+"--flow <Xon | RTS | RS-485> oder -w: Fluss-Steuerung (ohne ist voreingestellt)\n"
 
 #: ../src/cmdline.c:50
-msgid "--delay <ms> or -d: end of line delay in ms (default none)\n"
+msgid "--delay <ms> or -d : end of line delay in ms (default none)\n"
 msgstr ""
 "--delay <ms> oder -d: Verzögerung am Zeilenende in ms. (keine ist voreingestellt)\n"
 
 #: ../src/cmdline.c:51
 msgid ""
-"--char <char> or -r: wait for a special char at end of line (default none)\n"
+"--char <char> or -r : wait for a special char at end of line (default none)\n"
 msgstr ""
 "--char <Zeichen> oder -r: erwarte ein spezielles Zeichen als Zeilenende "
 "(Kein Zeichen ist voreingestellt)\n"
 
 #: ../src/cmdline.c:52
-msgid "--file <filename> or -f: default file to send (default none)\n"
+msgid "--file <filename> or -f : default file to send (default none)\n"
 msgstr ""
 "--file <Dateiname> oder -f: standardmäßig zu sendende Datei (keine ist "
 "voreingestellt)\n"
 
 #: ../src/cmdline.c:53
 msgid ""
-"--rts_time_before <ms> or -x: for RS-485, time in ms before transmit with "
+"--rts_time_before <ms> or -x : for RS-485, time in ms before transmit with "
 "rts on\n"
 msgstr ""
-"--rts_time_before <ms> oder -x: für RS-485: Zeit in Millisekunden mit »rts "
+"--rts_time_before <ms> oder -x : für RS-485: Zeit in Millisekunden mit »rts "
 "on«, ehe Daten übertragen werden\n"
 
 #: ../src/cmdline.c:54
 msgid ""
-"--rts_time_after <ms> or -y: for RS-485, time in ms after transmit with rts "
+"--rts_time_after <ms> or -y : for RS-485, time in ms after transmit with rts "
 "on\n"
 msgstr ""
-"--rts_time_after <ms> oder -y: für RS-485: Zeit in Millisekunden mit »rts "
+"--rts_time_after <ms> oder -y : für RS-485: Zeit in Millisekunden mit »rts "
 "on« nach der Übertragung\n"
 
 #: ../src/cmdline.c:55
-msgid "--echo or -e: switch on local echo\n"
+msgid "--echo or -e : switch on local echo\n"
 msgstr "--echo oder -e: Lokales Echo anschalten\n"
 
 #: ../src/cmdline.c:56
@@ -161,7 +160,7 @@ msgstr "Fehler beim Öffnen der Datei\n"
 
 #: ../src/files.c:110
 #, c-format
-msgid "%s: transfer in progress..."
+msgid "%s : transfer in progress..."
 msgstr "%s: Übertragung im Gang ..."
 
 #: ../src/files.c:128
@@ -200,140 +199,140 @@ msgstr "Datei %s kann nicht geöffnet werden: %s\n"
 #. Toplevel
 #: ../src/interface.c:145
 msgid "_File"
-msgstr "_Datei"
+msgstr "/_Datei"
 
 #: ../src/interface.c:146
 msgid "_Edit"
-msgstr "_Bearbeiten"
+msgstr "/_Bearbeiten"
 
 #: ../src/interface.c:147
 msgid "_Log"
-msgstr "_Logging"
+msgstr "/_Logging"
 
 #: ../src/interface.c:148
 msgid "_Configuration"
-msgstr "_Konfiguration"
+msgstr "/_Konfiguration"
 
 #: ../src/interface.c:149
 msgid "Control _signals"
-msgstr "_Steuersignale"
+msgstr "/_Steuersignale"
 
 #: ../src/interface.c:150
 msgid "_View"
-msgstr "_Ansicht"
+msgstr "/_Ansicht"
 
 #: ../src/interface.c:151
 msgid "Hexadecimal _chars"
-msgstr "Hexadezimale _Zeichen"
+msgstr "/Ansicht/Hexadezimale _Zeichen"
 
 #: ../src/interface.c:152
 msgid "_Help"
-msgstr "_Hilfe"
+msgstr "/_Hilfe"
 
 #: ../src/interface.c:156
 msgid "_Clear screen"
-msgstr "Bildschirm _leeren"
+msgstr "/Datei/Bildschirm _leeren"
 
 #: ../src/interface.c:157
 msgid "_Clear scrollback"
-msgstr "_Verlaufsspeicher leeren"
+msgstr "/Datei/_Verlaufsspeicher leeren"
 
 #: ../src/interface.c:158
 msgid "Send _RAW file"
-msgstr "Rohe Datei sen_den"
+msgstr "/Datei/Rohe Datei sen_den"
 
 #: ../src/interface.c:159
 msgid "_Save RAW file"
-msgstr "Rohe Datei _speichern"
+msgstr "/Datei/Rohe Datei _speichern"
 
 #. Log Menu
 #: ../src/interface.c:167
 msgid "To file..."
-msgstr "_In Datei ..."
+msgstr "/Logging/_In Datei ..."
 
 #. Confuguration Menu
 #: ../src/interface.c:173
 msgid "_Port"
-msgstr "_Port"
+msgstr "/Konfiguration/_Port"
 
 #: ../src/interface.c:174
 msgid "_Main window"
-msgstr "_Hauptfenster"
+msgstr "/Konfiguration/_Hauptfenster"
 
 #: ../src/interface.c:175
 msgid "_Macros"
-msgstr "_Makros"
+msgstr "/Konfiguration/_Makros"
 
 #: ../src/interface.c:176
 msgid "_Load configuration"
-msgstr "Konfiguration _laden"
+msgstr "/Konfiguration/Konfiguration _laden"
 
 #: ../src/interface.c:177
 msgid "_Save configuration"
-msgstr "Konfiguration _speichern"
+msgstr "/Konfiguration/Konfiguration _speichern"
 
 #: ../src/interface.c:178
 msgid "_Delete configuration"
-msgstr "Konfiguration lös_chen"
+msgstr "/Konfiguration/Konfiguration lös_chen"
 
 #. Signals Menu
 #: ../src/interface.c:181
 msgid "Send break"
-msgstr "Pause _senden"
+msgstr "/Steuersignale/Pause _senden"
 
 #: ../src/interface.c:182
 msgid "_Open Port"
-msgstr "Port _öffnen"
+msgstr "/Steuersignale/Port _öffnen"
 
 #: ../src/interface.c:183
 msgid "_Close Port"
-msgstr "Port s_chließen"
+msgstr "/Steuersignale/Port s_chließen"
 
 #: ../src/interface.c:184
 msgid "Toggle DTR"
-msgstr "_DTR-Umschaltung"
+msgstr "/Steuersignale/_DTR-Umschaltung"
 
 #: ../src/interface.c:185
 msgid "Toggle RTS"
-msgstr "_RTS-Umschaltung"
+msgstr "/Steuersignale/_RTS-Umschaltung"
 
 #. Configuration Menu
 #: ../src/interface.c:194
 msgid "Local _echo"
-msgstr "Lokales _Echo"
+msgstr "/Konfiguration/Lokales _Echo"
 
 #: ../src/interface.c:195
 msgid "_CR LF auto"
-msgstr "CR-LF-_Automatik"
+msgstr "/Konfiguration/CR-LF-_Automatik"
 
 #: ../src/interface.c:196
 msgid "Timestamp"
-msgstr "_Zeitstempel"
+msgstr "/Konfiguration/_Zeitstempel"
 
 #. View Menu
 #: ../src/interface.c:199
 msgid "Show _index"
-msgstr "Zeige _Index"
+msgstr "/Ansicht/Zeige _Index"
 
 #: ../src/interface.c:200
 msgid "_Send hexadecimal data"
-msgstr "Hexadezimale Daten sen_den"
+msgstr "/Ansicht/Hexadezimale Daten sen_den"
 
 #: ../src/interface.c:205
 msgid "_ASCII"
-msgstr "_ASCII"
+msgstr "/Ansicht/_ASCII"
 
 #: ../src/interface.c:206
 msgid "_Hexadecimal"
-msgstr "He_xadezimal"
+msgstr "/Ansicht/He_xadezimal"
 
 #. technischen Hintergrund klären: Fehlen Menütexte in Zeilen 168-170 von interface.c? 
 #: ../src/interface.c:422
 msgid "Resume"
-msgstr "_Wieder beginnen"
+msgstr "/Logging/_Wieder beginnen"
 
 #: ../src/interface.c:567
-msgid "Hexadecimal data to send (separator: ';' or space): "
+msgid "Hexadecimal data to send (separator : ';' or space) : "
 msgstr "Zu sendende hexadezimale Daten (getrennt durch Strichpunkt oder Leerzeichen):"
 
 #: ../src/interface.c:736
@@ -376,7 +375,7 @@ msgstr "Fehlschlag beim Logging\n"
 
 #: ../src/macros.c:144
 #, c-format
-msgid "Macro \"%s\" sent!"
+msgid "Macro \"%s\" sent !"
 msgstr "Makro »%s« gesendet!"
 
 #: ../src/macros.c:275
@@ -389,7 +388,7 @@ msgid ""
 "be entered, but also special chars, like \\n, \\t, \\r, etc. You can also "
 "enter hexadecimal data preceded by a '\\'. The hexadecimal data should not "
 "begin with a letter (eg. use \\0FF and not \\FF)\n"
-"Examples:\n"
+"Examples :\n"
 "\t\"Hello\\n\" sends \"Hello\" followed by a Line Feed\n"
 "\t\"Hello\\0A\" does the same thing but the LF is entered in hexadecimal"
 msgstr ""
