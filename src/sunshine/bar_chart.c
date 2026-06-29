@@ -306,7 +306,7 @@ static void calculate_y_range(GtkTermSunshineBarChart *self) {
 static void draw_grid_and_axes(cairo_t *cr, int width, int height,
                                gdouble y_min, gdouble y_max) {
     const int margin = 60;
-    const int plot_width = width - 2 * margin;
+    // Note: plot_width removed (was unused) - Code Analysis Fix
     const int plot_height = height - 2 * margin;
 
     // Grid
@@ -405,7 +405,8 @@ static void draw_bars(cairo_t *cr, GtkTermSunshineBarChart *self,
             // Calculate bar position and height
             double x = margin + point_idx * group_width + series_idx * bar_width;
             double y_range = self->y_max - self->y_min;
-            double zero_y = height - margin - ((0.0 - self->y_min) / y_range) * plot_height;
+            // Note: zero_y removed (was unused) - Code Analysis Fix
+            // (was: double zero_y = height - margin - ((0.0 - self->y_min) / y_range) * plot_height;)
             double bar_height = ((value - self->y_min) / y_range) * plot_height;
             double y = height - margin - bar_height;
 

@@ -36,7 +36,16 @@ void gtkterm_preset_free (GtkTermPreset *preset) {
 
 /**
  * @brief Clone preset
+ *
+ * NOTE: This function is currently unused (dead code).
+ * Commented out to remove compiler warning.
+ * Uncomment if needed in future development.
+ *
+ * HINWEIS: Diese Funktion wird derzeit nicht verwendet (Dead Code).
+ * Auskommentiert, um Compiler-Warning zu entfernen.
+ * Bei Bedarf für zukünftige Entwicklung wieder einkommentieren.
  */
+/*
 static GtkTermPreset *gtkterm_preset_clone (const GtkTermPreset *preset) {
     GtkTermPreset *clone = g_new0 (GtkTermPreset, 1);
     clone->name = g_strdup (preset->name);
@@ -44,6 +53,7 @@ static GtkTermPreset *gtkterm_preset_clone (const GtkTermPreset *preset) {
     memcpy (&clone->config, &preset->config, sizeof (GtkTermPortConfig));
     return clone;
 }
+*/
 
 /**
  * @brief Add preset
