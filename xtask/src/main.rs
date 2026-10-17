@@ -65,7 +65,18 @@ fn check() -> Result<()> {
         run("cargo", &["test", "-p", "gtkterm-mcp", "--features", "png"])?;
         run(
             "xvfb-run",
-            &["-a", "cargo", "test", "-p", "gtkterm-gui", "-p", "gtkterm-charts"],
+            &[
+                "-a",
+                "env",
+                "GTKTERM_GUI_TESTS=1",
+                "GSK_RENDERER=cairo",
+                "cargo",
+                "test",
+                "-p",
+                "gtkterm-gui",
+                "-p",
+                "gtkterm-charts",
+            ],
         )?;
     } else {
         eprintln!("note: GTK development packages missing, skipping GUI crates");

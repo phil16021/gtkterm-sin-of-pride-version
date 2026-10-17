@@ -1441,6 +1441,11 @@ mod tests {
 
     #[gtk::test]
     fn window_charts_actions_and_dialogs() {
+        // Opens real windows: only run when asked (xtask/CI run it inside xvfb-run).
+        if std::env::var_os("GTKTERM_GUI_TESTS").is_none() {
+            eprintln!("skipped: set GTKTERM_GUI_TESTS=1 (and use xvfb-run) to run the GUI test");
+            return;
+        }
         let (win, mut dev, _dir) = setup();
         win.window.set_default_size(1300, 800);
 

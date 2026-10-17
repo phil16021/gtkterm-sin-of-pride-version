@@ -32,7 +32,7 @@ cargo test --workspace                  # everything (needs libgtk-4-dev, libadw
 cargo clippy --workspace --all-targets -- -D warnings
 cargo xtask check                       # fmt + clippy + all tests (GUI under xvfb-run when GTK dev libs exist)
 cargo xtask install --destdir $SCRATCH/stage   # packaging check
-GSK_RENDERER=cairo xvfb-run -a cargo test -p gtkterm-gui
+GTKTERM_GUI_TESTS=1 GSK_RENDERER=cairo xvfb-run -a cargo test -p gtkterm-gui
 cargo +nightly fuzz run <target>        # fuzz/ (cargo-fuzz)
 ```
 
@@ -49,5 +49,5 @@ Virtual serial ports for manual testing:
 - GUI code (`crates/gtkterm-gui/src/gui/`) uses plain gtk4-rs widgets wired in Rust (no templates);
   `#[gtk::test]` tests build the real window on a loopback port and fail on GTK warnings
   (two documented upstream warnings are whitelisted in `window.rs`).
-- Screenshots for visual review: `xvfb-run -a cargo test -p gtkterm-gui` writes `target/gui-screenshots/`.
+- The GUI test only runs with `GTKTERM_GUI_TESTS=1` (never on the real desktop); it writes screenshots to `target/gui-screenshots/`.
 - Sunshine packet format: `{ID|Name|R,G,B|value|Name2|value2…}`; optional chart prefix `L:`/`B:`/`P:`/`S:` on the ID.
