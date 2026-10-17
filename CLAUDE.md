@@ -30,7 +30,8 @@ GUI dev packages; use `-p gtkterm-gui` / `--workspace` for those.
 cargo test                              # default members (no GTK needed)
 cargo test --workspace                  # everything (needs libgtk-4-dev, libadwaita-1-dev, libvte-2.91-gtk4-dev)
 cargo clippy --workspace --all-targets -- -D warnings
-cargo xtask check                       # fmt + clippy + tests
+cargo xtask check                       # fmt + clippy + all tests (GUI under xvfb-run when GTK dev libs exist)
+cargo xtask install --destdir $SCRATCH/stage   # packaging check
 GSK_RENDERER=cairo xvfb-run -a cargo test -p gtkterm-gui
 cargo +nightly fuzz run <target>        # fuzz/ (cargo-fuzz)
 ```
@@ -45,4 +46,8 @@ Virtual serial ports for manual testing:
 - Protocol logic stays sans-IO in `gtkterm-protocols` (no clocks, no I/O; timestamps are passed in).
 - GTK objects are only touched on the main thread; I/O runs on the tokio runtime and talks to the GUI via channels.
 - Plain Ctrl+letter shortcuts belong to the device; app shortcuts use Ctrl+Shift or F-keys. Never bind Super+Space.
+- GUI code (`crates/gtkterm-gui/src/gui/`) uses plain gtk4-rs widgets wired in Rust (no templates);
+  `#[gtk::test]` tests build the real window on a loopback port and fail on GTK warnings
+  (two documented upstream warnings are whitelisted in `window.rs`).
+- Screenshots for visual review: `xvfb-run -a cargo test -p gtkterm-gui` writes `target/gui-screenshots/`.
 - Sunshine packet format: `{ID|Name|R,G,B|value|Name2|value2…}`; optional chart prefix `L:`/`B:`/`P:`/`S:` on the ID.

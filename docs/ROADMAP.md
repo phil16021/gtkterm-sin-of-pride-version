@@ -1,5 +1,11 @@
 # GTKTerm Sunshine — Rust Rewrite: Implementation, Test & Debugging Plan
 
+> **Status 2026-10-17:** R0–R4 done (2.0.0-alpha.1): protocols, core I/O, sessions, Sunshine
+> store and charts, logging, MCP server (22 tools), CLI/headless/MCP modes, GTK 4 / libadwaita
+> GUI, packaging. Next: R5 (macros, presets), R6 (decoders), R7 (file transfer), R8
+> (scripting, port control, signal monitor), R9 (release). Deviation: the GUI is built from
+> plain gtk4-rs widgets in Rust instead of composite templates.
+
 ## Context
 
 The C fork (21k LOC, GTK4) was audited in depth:
