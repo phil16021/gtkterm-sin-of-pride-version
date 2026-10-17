@@ -45,6 +45,7 @@ async fn start_log(cli: &Cli, session: &Session, port_label: String) -> Result<(
 fn mcp_options(cli: &Cli) -> ServerOptions {
     ServerOptions {
         read_only: cli.mcp_read_only,
+        allowed_dirs: cli.mcp_allow_dir.clone(),
         ..ServerOptions::default()
     }
 }

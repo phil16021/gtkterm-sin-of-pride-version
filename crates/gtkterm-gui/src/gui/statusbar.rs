@@ -3,6 +3,7 @@
 use gtk::prelude::*;
 use gtkterm_core::port::ModemLines;
 use gtkterm_core::session::{PortState, SessionStatus};
+use gtkterm_core::transfer::{TransferState, TransferStatus};
 
 /// Status bar widgets.
 pub struct StatusBar {
@@ -21,6 +22,9 @@ pub struct StatusBar {
     log: gtk::Label,
     mcp: gtk::Label,
     activity: gtk::Label,
+    transfer: gtk::Box,
+    transfer_label: gtk::Label,
+    transfer_bar: gtk::ProgressBar,
 }
 
 fn human(bytes: u64) -> String {
@@ -78,11 +82,32 @@ impl StatusBar {
             .ellipsize(pango::EllipsizeMode::End)
             .max_width_chars(30)
             .build();
+        let transfer_label = gtk::Label::builder()
+            .ellipsize(pango::EllipsizeMode::Middle)
+            .max_width_chars(40)
+            .build();
+        transfer_label.add_css_class("numeric");
+        let transfer_bar = gtk::ProgressBar::builder()
+            .width_request(90)
+            .valign(gtk::Align::Center)
+            .build();
+        let cancel = gtk::Button::builder()
+            .icon_name("process-stop-symbolic")
+            .tooltip_text("Cancel the file transfer")
+            .action_name("win.cancel-transfer")
+            .build();
+        cancel.add_css_class("flat");
+        let transfer = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        transfer.append(&transfer_label);
+        transfer.append(&transfer_bar);
+        transfer.append(&cancel);
+        transfer.set_visible(false);
         widget.append(&profile);
         widget.append(&endpoint);
         widget.append(&state);
         widget.append(&counters);
         widget.append(&spacer);
+        widget.append(&transfer);
         widget.append(&activity);
         widget.append(&log);
         widget.append(&mcp);
@@ -103,7 +128,32 @@ impl StatusBar {
             log,
             mcp,
             activity,
+            transfer,
+            transfer_label,
+            transfer_bar,
         }
+    }
+
+    /// Show a running transfer; hidden when it is over.
+    pub fn set_transfer(&self, st: Option<&TransferStatus>) {
+        let Some(st) = st.filter(|s| s.state == TransferState::Running) else {
+            self.transfer.set_visible(false);
+            return;
+        };
+        self.transfer.set_visible(true);
+        self.transfer_label.set_text(&st.summary());
+        self.transfer_label
+            .set_tooltip_text(Some(&format!("{} · {} retries", st.summary(), st.retries)));
+        match st.fraction() {
+            Some(f) => self.transfer_bar.set_fraction(f),
+            None => self.transfer_bar.pulse(),
+        }
+    }
+
+    /// The transfer indicator is shown.
+    #[cfg(test)]
+    pub fn transfer_visible(&self) -> bool {
+        self.transfer.is_visible()
     }
 
     /// Show a session status.

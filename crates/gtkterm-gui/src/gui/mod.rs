@@ -17,6 +17,7 @@ mod shortcuts;
 mod state;
 mod statusbar;
 mod terminal;
+mod transfer;
 mod window;
 
 use std::cell::RefCell;
@@ -70,6 +71,7 @@ pub fn run(cli: Cli, resolved: Resolved) -> ExitCode {
         mcp_addr: cli.mcp_http,
         mcp_token: cli.mcp_token.clone(),
         mcp_read_only: cli.mcp_read_only,
+        mcp_allow_dirs: cli.mcp_allow_dir.clone(),
         log: cli.log_file.clone().map(|p| (p, cli.effective_log_format())),
         notice: resolved.import_message.clone(),
     }));

@@ -54,6 +54,10 @@ pub struct UiState {
     pub frames_visible: bool,
     /// Divider position between terminal and frames pane.
     pub frames_position: Option<i32>,
+    /// Last file transfer protocol (`ymodem`, ...).
+    pub transfer_protocol: Option<String>,
+    /// Last folder files were received into.
+    pub transfer_dir: Option<PathBuf>,
 }
 
 impl Default for UiState {
@@ -69,6 +73,8 @@ impl Default for UiState {
             macro_bar: false,
             frames_visible: false,
             frames_position: None,
+            transfer_protocol: None,
+            transfer_dir: None,
         }
     }
 }

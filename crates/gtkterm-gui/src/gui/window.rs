@@ -60,6 +60,7 @@ pub struct Win {
     recorder: RefCell<Option<super::macros::Recorder>>,
     running_macro: RefCell<Option<String>>,
     macro_editor: RefCell<Option<Rc<super::macros::MacroEditor>>>,
+    mcp_allow_dirs: RefCell<Vec<PathBuf>>,
 }
 
 /// Startup options passed from the command line.
@@ -72,6 +73,8 @@ pub struct StartOptions {
     pub mcp_token: Option<String>,
     /// `--mcp-read-only`.
     pub mcp_read_only: bool,
+    /// `--mcp-allow-dir`.
+    pub mcp_allow_dirs: Vec<PathBuf>,
     /// `--log-file` with its format.
     pub log: Option<(PathBuf, LogFormat)>,
     /// Message to show (e.g. legacy config import).
@@ -249,6 +252,7 @@ impl Win {
             recorder: RefCell::default(),
             running_macro: RefCell::default(),
             macro_editor: RefCell::default(),
+            mcp_allow_dirs: RefCell::new(start.mcp_allow_dirs.clone()),
         });
         win.install_actions(app);
         win.rebuild_macros();
@@ -573,6 +577,7 @@ impl Win {
             SessionEvent::Cleared => self.panel.sync(),
             SessionEvent::Frames(f) => self.frames.append(f),
             SessionEvent::Decoder(st) => self.on_decoder_status(st),
+            SessionEvent::Transfer(st) => self.on_transfer(st),
         }
     }
 
@@ -942,6 +947,14 @@ impl Win {
         add("rts", Box::new(|w| w.status.rts.emit_clicked()));
         add("send-hex", Box::new(Self::send_hex));
         add("send-file", Box::new(Self::send_file));
+        add("receive-file", Box::new(Self::receive_file));
+        add(
+            "cancel-transfer",
+            Box::new(|w| {
+                let s = w.session.clone();
+                spawn(async move { s.cancel_transfer().await }, |_| {});
+            }),
+        );
         add("save-raw", Box::new(Self::save_raw));
         add("log-start", Box::new(Self::log_start));
         add(
@@ -1294,31 +1307,150 @@ impl Win {
     }
 
     fn send_file(self: &Rc<Self>) {
-        let dialog = gtk::FileDialog::builder().title("Send file").modal(true).build();
+        let last = self.state.borrow().transfer_protocol.clone();
         let w = Rc::downgrade(self);
-        dialog.open(Some(&self.window), gio::Cancellable::NONE, move |res| {
-            let (Some(w), Ok(file)) = (w.upgrade(), res) else {
+        super::transfer::choose(&self.window, true, last.as_deref(), move |choice| {
+            if let Some(w) = w.upgrade() {
+                w.pick_files(choice);
+            }
+        });
+    }
+
+    fn pick_files(self: &Rc<Self>, choice: super::transfer::Choice) {
+        use super::transfer::Choice;
+        let multiple = matches!(choice, Choice::Protocol(p, _) if p.batch());
+        let dialog = gtk::FileDialog::builder()
+            .title(if multiple { "Send files" } else { "Send file" })
+            .modal(true)
+            .build();
+        let w = Rc::downgrade(self);
+        let done = move |paths: Vec<PathBuf>| {
+            let Some(w) = w.upgrade() else { return };
+            if paths.is_empty() {
+                return;
+            }
+            match choice.clone() {
+                Choice::Raw => w.send_raw(paths[0].clone()),
+                Choice::Protocol(protocol, _) => {
+                    w.state.borrow_mut().transfer_protocol = Some(protocol.id().to_owned());
+                    w.run_transfer(gtkterm_core::transfer::TransferRequest::Send {
+                        protocol,
+                        files: paths,
+                    });
+                }
+            }
+        };
+        if multiple {
+            dialog.open_multiple(Some(&self.window), gio::Cancellable::NONE, move |res| {
+                let Ok(list) = res else { return };
+                let paths = (0..list.n_items())
+                    .filter_map(|i| list.item(i).and_downcast::<gio::File>())
+                    .filter_map(|f| f.path())
+                    .collect();
+                done(paths);
+            });
+        } else {
+            dialog.open(Some(&self.window), gio::Cancellable::NONE, move |res| {
+                if let Some(path) = res.ok().and_then(|f| f.path()) {
+                    done(vec![path]);
+                }
+            });
+        }
+    }
+
+    fn send_raw(self: &Rc<Self>, path: PathBuf) {
+        let s = self.session.clone();
+        let ww = Rc::downgrade(self);
+        spawn(
+            async move {
+                let data = tokio::fs::read(&path)
+                    .await
+                    .map_err(|e| format!("{}: {e}", path.display()))?;
+                let n = data.len();
+                s.send(data).await.map_err(|e| e.to_string())?;
+                Ok::<_, String>(format!("Sent {} ({n} bytes)", path.display()))
+            },
+            move |r| {
+                if let Some(w) = ww.upgrade() {
+                    w.toast(&r.unwrap_or_else(|e| e));
+                }
+            },
+        );
+    }
+
+    fn receive_file(self: &Rc<Self>) {
+        let last = self.state.borrow().transfer_protocol.clone();
+        let w = Rc::downgrade(self);
+        super::transfer::choose(&self.window, false, last.as_deref(), move |choice| {
+            let (Some(w), super::transfer::Choice::Protocol(protocol, name)) = (w.upgrade(), choice) else {
                 return;
             };
-            let Some(path) = file.path() else { return };
-            let s = w.session.clone();
+            let dialog = gtk::FileDialog::builder()
+                .title("Save received files in")
+                .modal(true)
+                .build();
+            let initial = w
+                .state
+                .borrow()
+                .transfer_dir
+                .clone()
+                .or_else(|| glib::user_special_dir(glib::UserDirectory::Downloads));
+            if let Some(dir) = initial {
+                dialog.set_initial_folder(Some(&gio::File::for_path(dir)));
+            }
             let ww = Rc::downgrade(&w);
-            spawn(
-                async move {
-                    let data = tokio::fs::read(&path)
-                        .await
-                        .map_err(|e| format!("{}: {e}", path.display()))?;
-                    let n = data.len();
-                    s.send(data).await.map_err(|e| e.to_string())?;
-                    Ok::<_, String>(format!("Sent {} ({n} bytes)", path.display()))
-                },
-                move |r| {
-                    if let Some(w) = ww.upgrade() {
-                        w.toast(&r.unwrap_or_else(|e| e));
-                    }
-                },
-            );
+            dialog.select_folder(Some(&w.window), gio::Cancellable::NONE, move |res| {
+                let (Some(w), Some(dir)) = (ww.upgrade(), res.ok().and_then(|f| f.path())) else {
+                    return;
+                };
+                {
+                    let mut st = w.state.borrow_mut();
+                    st.transfer_protocol = Some(protocol.id().to_owned());
+                    st.transfer_dir = Some(dir.clone());
+                }
+                w.run_transfer(gtkterm_core::transfer::TransferRequest::Receive {
+                    protocol,
+                    dir,
+                    name,
+                    overwrite: false,
+                });
+            });
         });
+    }
+
+    fn run_transfer(self: &Rc<Self>, req: gtkterm_core::transfer::TransferRequest) {
+        let s = self.session.clone();
+        let ww = Rc::downgrade(self);
+        spawn(async move { s.start_transfer(req).await }, move |r| {
+            if let (Some(w), Err(e)) = (ww.upgrade(), r) {
+                w.toast(&format!("Cannot start the transfer: {e}"));
+            }
+        });
+    }
+
+    fn on_transfer(&self, st: &gtkterm_core::transfer::TransferStatus) {
+        use gtkterm_core::transfer::{TransferDirection, TransferState};
+        self.status.set_transfer(Some(st));
+        if st.state == TransferState::Running {
+            return;
+        }
+        let toast = adw::Toast::builder().title(st.summary()).timeout(6).build();
+        if st.direction == TransferDirection::Receive
+            && st.state == TransferState::Finished
+            && let Some(f) = st.files.first()
+        {
+            toast.set_button_label(Some("Show"));
+            let (file, window) = (gio::File::for_path(&f.path), self.window.downgrade());
+            toast.connect_button_clicked(move |_| {
+                let window = window.upgrade();
+                gtk::FileLauncher::new(Some(&file)).open_containing_folder(
+                    window.as_ref(),
+                    gio::Cancellable::NONE,
+                    |_| {},
+                );
+            });
+        }
+        self.toast.add_toast(toast);
     }
 
     fn save_raw(self: &Rc<Self>) {
@@ -1521,6 +1653,7 @@ impl Win {
             Arc::clone(&self.manager),
             ServerOptions {
                 read_only: settings.read_only,
+                allowed_dirs: self.mcp_allow_dirs.borrow().clone(),
                 ..ServerOptions::default()
             },
         );
@@ -1633,6 +1766,8 @@ fn main_menu() -> gio::Menu {
     let data = gio::Menu::new();
     data.append(Some("Send Hex Data…"), Some("win.send-hex"));
     data.append(Some("Send File…"), Some("win.send-file"));
+    data.append(Some("Receive File…"), Some("win.receive-file"));
+    data.append(Some("Cancel File Transfer"), Some("win.cancel-transfer"));
     data.append(Some("Save Received Data…"), Some("win.save-raw"));
     let log = gio::Menu::new();
     log.append(Some("Start Logging…"), Some("win.log-start"));
@@ -1822,6 +1957,36 @@ mod tests {
         false
     }
 
+    /// The device side of an XMODEM download: a native sender on the loopback port.
+    async fn device_send(
+        mut dev: gtkterm_core::port::loopback::DeviceEnd,
+        data: Vec<u8>,
+    ) -> gtkterm_core::port::loopback::DeviceEnd {
+        use gtkterm_protocols::xmodem::{FileData, Sender, Timing, Transfer, Variant};
+        let file = FileData {
+            name: String::new(),
+            data,
+            mtime: None,
+        };
+        let mut m = Sender::new(Variant::Xmodem, vec![file], Timing::default()).unwrap();
+        let t0 = std::time::Instant::now();
+        let now = || u64::try_from(t0.elapsed().as_millis()).unwrap();
+        let mut out = m.start(now());
+        while !m.is_done() || !out.bytes.is_empty() {
+            if !out.bytes.is_empty() {
+                dev.send(std::mem::take(&mut out.bytes)).await.unwrap();
+                out = m.drained(now());
+                continue;
+            }
+            out = match tokio::time::timeout(Duration::from_millis(100), dev.recv()).await {
+                Ok(Some(b)) => m.input(&b, now()),
+                Ok(None) => break,
+                Err(_) => m.tick(now()),
+            };
+        }
+        dev
+    }
+
     fn snapshot(widget: &impl IsA<gtk::Widget>, name: &str) {
         let paintable = gtk::WidgetPaintable::new(Some(widget));
         let (w, h) = (widget.width().max(1), widget.height().max(1));
@@ -1859,6 +2024,7 @@ mod tests {
             mcp_addr: None,
             mcp_token: None,
             mcp_read_only: false,
+            mcp_allow_dirs: Vec::new(),
             log: None,
             notice: None,
         };
@@ -2043,6 +2209,56 @@ mod tests {
             gio::prelude::ActionGroupExt::activate_action(&win.window, "frames", None);
             assert!(!win.frames.widget.is_visible());
             rt().block_on(async { while !dev.drain().is_empty() {} });
+        }
+
+        // File transfers: a device-side XMODEM sender; the file lands in the chosen folder and the
+        // status bar indicator goes away again. Then a transfer nobody answers is cancelled.
+        {
+            use gtkterm_core::transfer::{TransferProtocol, TransferRequest, TransferState};
+            let dir = tempfile::tempdir().unwrap();
+            let data: Vec<u8> = (0..3000u32).map(|i| (i % 251) as u8).collect();
+            rt().block_on(win.session.start_transfer(TransferRequest::Receive {
+                protocol: TransferProtocol::Xmodem,
+                dir: dir.path().to_owned(),
+                name: Some("dl.bin".into()),
+                overwrite: false,
+            }))
+            .unwrap();
+            let device = rt().spawn(device_send(dev, data.clone()));
+            assert!(pump_until(Duration::from_secs(10), || win
+                .session
+                .transfer_status()
+                .is_some_and(|t| t.state != TransferState::Running)));
+            dev = rt().block_on(device).unwrap();
+            pump_until(Duration::from_millis(100), || false);
+            assert_eq!(
+                win.session.transfer_status().unwrap().state,
+                TransferState::Finished
+            );
+            assert_eq!(std::fs::read(dir.path().join("dl.bin")).unwrap(), data);
+            assert!(!win.status.transfer_visible());
+
+            rt().block_on(win.session.start_transfer(TransferRequest::Receive {
+                protocol: TransferProtocol::Ymodem,
+                dir: dir.path().to_owned(),
+                name: None,
+                overwrite: false,
+            }))
+            .unwrap();
+            assert!(pump_until(Duration::from_secs(2), || win
+                .status
+                .transfer_visible()));
+            gio::prelude::ActionGroupExt::activate_action(&win.window, "cancel-transfer", None);
+            assert!(pump_until(Duration::from_secs(2), || win
+                .session
+                .transfer_status()
+                .is_some_and(|t| t.state == TransferState::Cancelled)));
+            rt().block_on(async { while !dev.drain().is_empty() {} });
+            for action in ["send-file", "receive-file"] {
+                gio::prelude::ActionGroupExt::activate_action(&win.window, action, None);
+                pump_until(Duration::from_millis(150), || false);
+            }
+            snapshot(&win.window, "transfer-dialog");
         }
 
         // Echo off by default, toggled on above: the TX chunk is displayed (no assertion on VTE

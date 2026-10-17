@@ -248,6 +248,9 @@ pub struct Cli {
     /// Only expose read-only MCP tools.
     #[arg(long = "mcp-read-only", help_heading = "MCP")]
     pub mcp_read_only: bool,
+    /// Let MCP `file_send` read files from DIR as well as the transfer directory (repeatable).
+    #[arg(long = "mcp-allow-dir", value_name = "DIR", help_heading = "MCP")]
+    pub mcp_allow_dir: Vec<PathBuf>,
     /// Bearer token for --mcp-http (default: random, printed at start).
     #[arg(long = "mcp-token", env = "GTKTERM_MCP_TOKEN", help_heading = "MCP")]
     pub mcp_token: Option<String>,

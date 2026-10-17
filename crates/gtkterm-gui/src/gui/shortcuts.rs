@@ -40,6 +40,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str)] = &[
     ),
     ("Data", "Send hex data", "win.send-hex", "<Control><Shift>h"),
     ("Data", "Send file", "win.send-file", "<Control><Shift>r"),
+    ("Data", "Receive file", "win.receive-file", "<Control><Shift>e"),
     ("Data", "Save received data", "win.save-raw", "<Control><Shift>s"),
     ("Data", "Start logging", "win.log-start", "<Control><Shift>o"),
     (
