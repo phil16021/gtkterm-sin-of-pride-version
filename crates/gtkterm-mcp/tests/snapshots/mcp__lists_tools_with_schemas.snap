@@ -1,6 +1,6 @@
 ---
 source: crates/gtkterm-mcp/tests/mcp.rs
-assertion_line: 99
+assertion_line: 102
 expression: names
 ---
 - clear_buffer
@@ -22,16 +22,22 @@ expression: names
 - macro_save
 - modbus_request
 - open_port
+- port_auto_baud
+- port_flush
 - preset_apply
 - preset_list
 - profile_get
 - profile_list
 - profile_save
 - read
+- script_check
+- script_run
+- script_stop
 - search_buffer
 - send
 - send_break
 - set_signals
+- signal_history
 - sunshine_clear
 - sunshine_export_csv
 - sunshine_export_png

@@ -758,3 +758,94 @@ async fn file_transfers_with_progress_and_sandbox() {
     assert_eq!(done["message"], "no transfer was running");
     assert_eq!(done["status"]["transfer"]["state"], "finished");
 }
+
+#[tokio::test]
+async fn scripts_signals_and_port_control() {
+    use gtkterm_core::port::loopback::InputLines;
+
+    let f = fixture(ServerOptions::default()).await;
+    let session = f.manager.first_or_create();
+    let (port, mut dev) = loopback::pair_with_lines("loop");
+    session.attach(port).await.unwrap();
+
+    // Check first: syntax errors carry the line.
+    let msg = tool_error(&f.client, "script_check", json!({"script": "send a\nbogus\n"})).await;
+    assert!(msg.contains("<script>:2: unknown command"), "{msg}");
+    let ok_check = ok(&f.client, "script_check", json!({"script": "exec ls\n"})).await;
+    assert_eq!(ok_check["uses_exec"], true);
+    assert_eq!(ok_check["exec_allowed"], false);
+    let msg = tool_error(&f.client, "script_run", json!({"script": "exec ls\n"})).await;
+    assert!(msg.contains("exec is disabled"), "{msg}");
+
+    // A script talking to the device, with variables and logs.
+    let device = async {
+        let got = dev.recv().await.unwrap();
+        assert_eq!(&got[..], b"ID?\r");
+        dev.send(&b"ID=4711\r\n"[..]).await.unwrap();
+    };
+    let script = "set_dtr 1\nsend ID?\\r\nexpect ID=(\\d+)\nlog device ${MATCH_1} for ${who}\n";
+    let (report, ()) = tokio::join!(
+        ok(
+            &f.client,
+            "script_run",
+            json!({"script": script, "vars": {"who": "agent"}})
+        ),
+        device
+    );
+    assert_eq!(report["log"], json!(["device 4711 for agent"]));
+    assert_eq!(report["vars"]["MATCH_1"], "4711");
+
+    // Failures name the line and include what was received.
+    dev.send(&b"noise\r\n"[..]).await.unwrap();
+    let msg = tool_error(
+        &f.client,
+        "script_run",
+        json!({"script": "log start\nexpect[100] never\n"}),
+    )
+    .await;
+    assert!(msg.contains("<script>:2: timed out after 100 ms"), "{msg}");
+    assert!(msg.contains("start"), "{msg}");
+
+    // Signals: DTR from the script, CTS from the device.
+    dev.set_inputs(InputLines {
+        cts: true,
+        ..InputLines::default()
+    });
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let h = ok(&f.client, "signal_history", json!({"seconds": 30})).await;
+    let changed: Vec<String> = h["samples"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|s| {
+            s["changed"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| c.as_str().unwrap().to_owned())
+        })
+        .collect();
+    assert!(
+        changed.contains(&"DTR".to_owned()) && changed.contains(&"CTS".to_owned()),
+        "{h}"
+    );
+    let csv = ok(&f.client, "signal_history", json!({"csv": true})).await;
+    assert!(
+        csv["csv"]
+            .as_str()
+            .unwrap()
+            .starts_with("Timestamp,DTR,RTS,CTS,DSR,DCD,RI,Changed Signals")
+    );
+
+    ok(&f.client, "port_flush", json!({})).await;
+    let msg = tool_error(&f.client, "port_auto_baud", json!({})).await;
+    assert!(msg.contains("serial connection"), "{msg}");
+    let done = ok(&f.client, "script_stop", json!({})).await;
+    assert_eq!(done["message"], "nothing was running");
+    let doc = f
+        .client
+        .read_resource(ReadResourceRequestParams::new("gtkterm://docs/script-language"))
+        .await
+        .unwrap();
+    assert!(serde_json::to_string(&doc.contents).unwrap().contains("if_match"));
+}

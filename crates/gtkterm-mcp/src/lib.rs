@@ -9,3 +9,7 @@ mod server;
 pub mod transport;
 
 pub use server::{GtkTermMcp, ServerOptions, WRITE_TOOLS, default_log_dir, default_transfer_dir};
+
+/// Reference of the automation script language (Markdown), also served as
+/// `gtkterm://docs/script-language`.
+pub const SCRIPT_LANGUAGE: &str = include_str!("script_language.md");

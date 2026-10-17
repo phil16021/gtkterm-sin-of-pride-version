@@ -7,6 +7,7 @@ use std::time::Duration;
 use gtkterm_core::decoding::{DecodedFrame, DecoderMode, FrameSource};
 use gtkterm_core::manager::SessionManager;
 use gtkterm_core::ports::{PortInfo, list_ports};
+use gtkterm_core::script::{Script, ScriptError, ScriptOptions};
 use gtkterm_core::session::{LogOp, Session, SessionError, SessionStatus};
 use gtkterm_core::sunshine::{ChartData, SunshineStats};
 use gtkterm_core::transfer::{TransferProtocol, TransferRequest, TransferState, TransferStatus};
@@ -33,11 +34,12 @@ use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
 use crate::params::{
-    BreakParams, ChartParams, ChartTypeParams, ClearChartParams, DecoderSetParams, ExpectParams,
-    FileReceiveParams, FileSendParams, GetFramesParams, GetSeriesParams, LogStartParams, MacroRunParams,
-    MacroSaveParams, ModbusFraming, ModbusRequestParams, OpenPortParams, PauseParams, PngParams,
-    PresetApplyParams, ProfileParams, ProfileSaveParams, ReadParams, ReadResult, SearchHit, SearchParams,
-    SendParams, SessionArg, SignalParams,
+    AutoBaudParams, BreakParams, ChartParams, ChartTypeParams, ClearChartParams, DecoderSetParams,
+    ExpectParams, FileReceiveParams, FileSendParams, GetFramesParams, GetSeriesParams, LogStartParams,
+    MacroRunParams, MacroSaveParams, ModbusFraming, ModbusRequestParams, OpenPortParams, PauseParams,
+    PngParams, PresetApplyParams, ProfileParams, ProfileSaveParams, ReadParams, ReadResult,
+    ScriptCheckParams, ScriptRunParams, SearchHit, SearchParams, SendParams, SessionArg, SignalHistoryParams,
+    SignalParams,
 };
 
 /// Read caps protecting the agent's context window and the app.
@@ -47,6 +49,10 @@ const MAX_EXPECT: Duration = Duration::from_secs(600);
 
 /// Tools that change device state or files; hidden in read-only mode.
 pub const WRITE_TOOLS: &[&str] = &[
+    "script_run",
+    "script_stop",
+    "port_flush",
+    "port_auto_baud",
     "file_send",
     "file_receive",
     "file_cancel",
@@ -81,6 +87,8 @@ pub struct ServerOptions {
     pub transfer_dir: PathBuf,
     /// Further directories `file_send` may read from (`--mcp-allow-dir`).
     pub allowed_dirs: Vec<PathBuf>,
+    /// Scripts may use `exec` (`--mcp-allow-exec`).
+    pub allow_exec: bool,
 }
 
 impl Default for ServerOptions {
@@ -90,6 +98,7 @@ impl Default for ServerOptions {
             log_dir: default_log_dir(),
             transfer_dir: default_transfer_dir(),
             allowed_dirs: Vec::new(),
+            allow_exec: false,
         }
     }
 }
@@ -508,6 +517,13 @@ impl GtkTermMcp {
         Ok(real)
     }
 
+    /// Directories file-using tools and scripts may touch.
+    fn file_dirs(&self) -> Vec<PathBuf> {
+        let mut d = vec![self.options.transfer_dir.clone()];
+        d.extend(self.options.allowed_dirs.iter().cloned());
+        d
+    }
+
     async fn run_transfer(
         &self,
         session: &Session,
@@ -739,7 +755,11 @@ impl GtkTermMcp {
     #[tool(annotations(title = "Send break"))]
     async fn send_break(&self, Parameters(p): Parameters<BreakParams>) -> Result<Json<Done>, String> {
         let session = self.session(p.session)?;
-        let ms = p.duration_ms.unwrap_or(250).clamp(1, 5_000);
+        let default = session
+            .connection()
+            .and_then(|c| c.serial().map(|s| u64::from(s.break_ms)))
+            .unwrap_or(250);
+        let ms = p.duration_ms.unwrap_or(default).clamp(1, 5_000);
         session.send_break(Duration::from_millis(ms)).await.map_err(err)?;
         Ok(Self::done(&session, format!("sent {ms} ms break")))
     }
@@ -1327,6 +1347,176 @@ impl GtkTermMcp {
         Ok(Self::done(&session, msg))
     }
 
+    /// Run an automation script (send/expect/delay/set_dtr/if_match/goto/…; read
+    /// gtkterm://docs/script-language) and wait for it. `log` lines arrive as progress
+    /// notifications. Failures report the line, the log so far and the received data.
+    #[tool(annotations(title = "Run script", open_world_hint = true))]
+    async fn script_run(
+        &self,
+        Parameters(p): Parameters<ScriptRunParams>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let session = self.session(p.session)?;
+        let allowed = self.file_dirs();
+        let script = match (&p.script, &p.path) {
+            (Some(text), None) => {
+                Script::parse_with("<script>", text, Some(&self.options.transfer_dir), Some(&allowed))
+            }
+            (None, Some(path)) => {
+                let path = self.readable_path(path)?;
+                Script::load(&path, Some(&allowed))
+            }
+            _ => return Err("give either `script` or `path`".into()),
+        }
+        .map_err(err)?;
+        let opts = ScriptOptions {
+            allow_exec: self.options.allow_exec,
+            allowed_dirs: Some(allowed),
+            vars: p.vars,
+        };
+        let token = ctx.meta.get_progress_token();
+        let peer = ctx.peer.clone();
+        let mut events = self.manager.subscribe();
+        let id = session.id();
+        let forward = tokio::spawn(async move {
+            let mut n = 0u32;
+            while let Ok(ev) = events.recv().await {
+                match ev {
+                    gtkterm_core::manager::ManagerEvent::ScriptLog { session, message } if session == id => {
+                        n += 1;
+                        if let Some(t) = &token {
+                            let _ = peer
+                                .notify_progress(
+                                    ProgressNotificationParam::new(t.clone(), f64::from(n))
+                                        .with_message(message),
+                                )
+                                .await;
+                        }
+                    }
+                    gtkterm_core::manager::ManagerEvent::ScriptFinished { session, .. } if session == id => {
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        });
+        let timeout = Duration::from_millis(p.timeout_ms.unwrap_or(600_000));
+        let run = self.manager.run_script(&session, &script, &opts);
+        let result = tokio::select! {
+            r = tokio::time::timeout(timeout, run) => r,
+            () = ctx.ct.cancelled() => {
+                self.manager.stop_macro(id);
+                return Err("cancelled".into());
+            }
+        };
+        let Ok(result) = result else {
+            self.manager.stop_macro(id);
+            let _ = forward.await;
+            return Err(format!(
+                "the script did not finish within {} ms",
+                timeout.as_millis()
+            ));
+        };
+        let _ = forward.await;
+        match result {
+            Ok(report) => Ok(Json(serde_json::to_value(report).map_err(err)?)),
+            Err(ScriptError::Failed { at, message, report }) => Err(format!(
+                "{at}: {message}\nlog: {:?}\nreceived (tail): {:?}",
+                report.log,
+                report
+                    .received
+                    .chars()
+                    .rev()
+                    .take(1000)
+                    .collect::<String>()
+                    .chars()
+                    .rev()
+                    .collect::<String>()
+            )),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    /// Check a script for syntax errors without running it.
+    #[tool(annotations(title = "Check script", read_only_hint = true))]
+    async fn script_check(
+        &self,
+        Parameters(p): Parameters<ScriptCheckParams>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let allowed = self.file_dirs();
+        let s = Script::parse_with(
+            "<script>",
+            &p.script,
+            Some(&self.options.transfer_dir),
+            Some(&allowed),
+        )
+        .map_err(err)?;
+        Ok(Json(serde_json::json!({
+            "statements": s.len(),
+            "uses_exec": s.uses_exec(),
+            "exec_allowed": self.options.allow_exec,
+        })))
+    }
+
+    /// Stop the script or macro running in a session.
+    #[tool(annotations(title = "Stop script", idempotent_hint = true))]
+    async fn script_stop(&self, Parameters(p): Parameters<SessionArg>) -> Result<Json<Done>, String> {
+        let session = self.session(p.session)?;
+        let msg = if self.manager.stop_macro(session.id()) {
+            "stopped"
+        } else {
+            "nothing was running"
+        };
+        Ok(Self::done(&session, msg))
+    }
+
+    /// Modem line history (DTR, RTS, CTS, DSR, DCD, RI) of the last seconds, polled every
+    /// 50 ms; pulses shorter than that are recovered from the driver's counters.
+    #[tool(annotations(title = "Signal history", read_only_hint = true))]
+    async fn signal_history(
+        &self,
+        Parameters(p): Parameters<SignalHistoryParams>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let session = self.session(p.session)?;
+        if p.csv {
+            return Ok(Json(serde_json::json!({ "csv": session.signals_csv() })));
+        }
+        let secs = p.seconds.unwrap_or(60).clamp(1, 300);
+        let since =
+            jiff::Timestamp::now() - jiff::SignedDuration::from_secs(i64::try_from(secs).unwrap_or(60));
+        let samples = session.signal_history(Some(since));
+        Ok(Json(
+            serde_json::json!({ "samples": samples, "count": samples.len() }),
+        ))
+    }
+
+    /// Discard data waiting in the serial driver's input and output buffers.
+    #[tool(annotations(title = "Flush port", idempotent_hint = true))]
+    async fn port_flush(&self, Parameters(p): Parameters<SessionArg>) -> Result<Json<Done>, String> {
+        let session = self.session(p.session)?;
+        session.flush().await.map_err(err)?;
+        Ok(Self::done(&session, "flushed"))
+    }
+
+    /// Experimental: find the baud rate of a device that is sending text by trying common
+    /// rates; the port is reopened at the best one.
+    #[tool(annotations(title = "Detect baud rate", open_world_hint = true))]
+    async fn port_auto_baud(
+        &self,
+        Parameters(p): Parameters<AutoBaudParams>,
+        ct: CancellationToken,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let session = self.session(p.session)?;
+        let candidates = p
+            .candidates
+            .unwrap_or_else(|| gtkterm_core::autobaud::CANDIDATES.to_vec());
+        let listen = Duration::from_millis(p.listen_ms.unwrap_or(400).clamp(50, 5_000));
+        let r = gtkterm_core::autobaud::auto_baud(&session, &candidates, listen, &ct)
+            .await
+            .map_err(err)?;
+        Ok(Json(serde_json::to_value(r).map_err(err)?))
+    }
+
     /// Pause or resume a Sunshine chart.
     #[tool(annotations(title = "Pause chart", idempotent_hint = true))]
     async fn sunshine_pause(&self, Parameters(p): Parameters<PauseParams>) -> Result<Json<Done>, String> {
@@ -1410,6 +1600,7 @@ impl GtkTermMcp {
 }
 
 const SUNSHINE_DOC: &str = include_str!("sunshine_protocol.md");
+const SCRIPT_DOC: &str = crate::SCRIPT_LANGUAGE;
 
 #[prompt_router]
 impl GtkTermMcp {
@@ -1536,6 +1727,12 @@ impl ServerHandler for GtkTermMcp {
                 "application/toml",
             ),
             resource(
+                "gtkterm://docs/script-language",
+                "script-language",
+                "Automation script language reference",
+                "text/markdown",
+            ),
+            resource(
                 "gtkterm://docs/sunshine-protocol",
                 "sunshine-protocol",
                 "Sunshine packet format",
@@ -1563,6 +1760,12 @@ impl ServerHandler for GtkTermMcp {
                 "text/plain",
             ));
             resources.push(resource(
+                &format!("gtkterm://session/{id}/signals"),
+                &format!("session-{id}-signals"),
+                "Modem line history of the last 300 s (CSV)",
+                "text/csv",
+            ));
+            resources.push(resource(
                 &format!("gtkterm://session/{id}/frames"),
                 &format!("session-{id}-frames"),
                 "Last 200 decoded protocol frames",
@@ -1587,6 +1790,8 @@ impl ServerHandler for GtkTermMcp {
             ResourceTemplate::new("gtkterm://session/{id}/status", "session-status")
                 .with_mime_type("application/json"),
             ResourceTemplate::new("gtkterm://session/{id}/rx", "session-rx").with_mime_type("text/plain"),
+            ResourceTemplate::new("gtkterm://session/{id}/signals", "session-signals")
+                .with_mime_type("text/csv"),
             ResourceTemplate::new("gtkterm://session/{id}/frames", "session-frames")
                 .with_mime_type("application/json"),
             ResourceTemplate::new("gtkterm://session/{id}/sunshine", "session-sunshine")
@@ -1609,6 +1814,7 @@ impl ServerHandler for GtkTermMcp {
         let text = |t: String| Ok(ReadResourceResult::new(vec![ResourceContents::text(t, uri)]).into());
         match uri {
             "gtkterm://docs/sunshine-protocol" => return text(SUNSHINE_DOC.to_owned()),
+            "gtkterm://docs/script-language" => return text(SCRIPT_DOC.to_owned()),
             "gtkterm://macros" => {
                 let all = self.manager.with_macros(|s| {
                     s.list()
@@ -1663,6 +1869,7 @@ impl ServerHandler for GtkTermMcp {
                 let r = session.read_rx(end.saturating_sub(64 * 1024), 64 * 1024);
                 text(String::from_utf8_lossy(&r.data).into_owned())
             }
+            None if what == "signals" => text(session.signals_csv()),
             None if what == "frames" => {
                 let frames: Vec<FrameOut> = session
                     .last_frames(200)

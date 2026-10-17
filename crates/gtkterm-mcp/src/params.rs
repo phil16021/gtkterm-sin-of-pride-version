@@ -667,3 +667,58 @@ pub(crate) struct FileReceiveParams {
     #[serde(default)]
     pub(crate) overwrite: bool,
 }
+
+/// `script_run` arguments.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub(crate) struct ScriptRunParams {
+    /// Session to use; default: the first session.
+    #[serde(default)]
+    pub(crate) session: Option<u32>,
+    /// Script text (see the resource gtkterm://docs/script-language). Give this or `path`.
+    #[serde(default)]
+    pub(crate) script: Option<String>,
+    /// Script file inside the transfer directory or an --mcp-allow-dir directory.
+    #[serde(default)]
+    pub(crate) path: Option<String>,
+    /// Initial variables, usable as ${name}.
+    #[serde(default)]
+    pub(crate) vars: std::collections::BTreeMap<String, String>,
+    /// Give up after this many ms (default 600000).
+    #[serde(default)]
+    pub(crate) timeout_ms: Option<u64>,
+}
+
+/// `script_check` arguments.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub(crate) struct ScriptCheckParams {
+    /// Script text to validate.
+    pub(crate) script: String,
+}
+
+/// `signal_history` arguments.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub(crate) struct SignalHistoryParams {
+    /// Session to use; default: the first session.
+    #[serde(default)]
+    pub(crate) session: Option<u32>,
+    /// Look back this many seconds (default 60, at most 300).
+    #[serde(default)]
+    pub(crate) seconds: Option<u64>,
+    /// Return CSV (Timestamp,DTR,RTS,CTS,DSR,DCD,RI,Changed Signals) instead of samples.
+    #[serde(default)]
+    pub(crate) csv: bool,
+}
+
+/// `port_auto_baud` arguments.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub(crate) struct AutoBaudParams {
+    /// Session to use; default: the first session.
+    #[serde(default)]
+    pub(crate) session: Option<u32>,
+    /// Rates to try (default: common rates from 2400 to 1000000).
+    #[serde(default)]
+    pub(crate) candidates: Option<Vec<u32>>,
+    /// Listen time per rate in ms (default 400).
+    #[serde(default)]
+    pub(crate) listen_ms: Option<u64>,
+}
