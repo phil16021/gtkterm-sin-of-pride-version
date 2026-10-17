@@ -4,10 +4,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use gtkterm_core::decoding::{DecodedFrame, DecoderMode, FrameSource};
 use gtkterm_core::manager::SessionManager;
 use gtkterm_core::ports::{PortInfo, list_ports};
 use gtkterm_core::session::{LogOp, Session, SessionError, SessionStatus};
 use gtkterm_core::sunshine::{ChartData, SunshineStats};
+use gtkterm_protocols::decode::{Check, Protocol, modbus};
 use gtkterm_protocols::downsample::lttb_indices;
 use gtkterm_protocols::logfmt::{LogFormat, session_file_name};
 use gtkterm_protocols::sunshine::ChartKind;
@@ -30,10 +32,10 @@ use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
 use crate::params::{
-    BreakParams, ChartParams, ChartTypeParams, ClearChartParams, ExpectParams, GetSeriesParams,
-    LogStartParams, MacroRunParams, MacroSaveParams, OpenPortParams, PauseParams, PngParams,
-    PresetApplyParams, ProfileParams, ProfileSaveParams, ReadParams, ReadResult, SearchHit, SearchParams,
-    SendParams, SessionArg, SignalParams,
+    BreakParams, ChartParams, ChartTypeParams, ClearChartParams, DecoderSetParams, ExpectParams,
+    GetFramesParams, GetSeriesParams, LogStartParams, MacroRunParams, MacroSaveParams, ModbusFraming,
+    ModbusRequestParams, OpenPortParams, PauseParams, PngParams, PresetApplyParams, ProfileParams,
+    ProfileSaveParams, ReadParams, ReadResult, SearchHit, SearchParams, SendParams, SessionArg, SignalParams,
 };
 
 /// Read caps protecting the agent's context window and the app.
@@ -43,6 +45,8 @@ const MAX_EXPECT: Duration = Duration::from_secs(600);
 
 /// Tools that change device state or files; hidden in read-only mode.
 pub const WRITE_TOOLS: &[&str] = &[
+    "decoder_set",
+    "modbus_request",
     "macro_run",
     "macro_save",
     "preset_apply",
@@ -277,6 +281,92 @@ fn kind_name(k: ChartKind) -> String {
     format!("{k:?}").to_lowercase()
 }
 
+/// A decoded frame as returned to agents.
+#[derive(Debug, Serialize, JsonSchema)]
+struct FrameOut {
+    /// Sequence number.
+    seq: u64,
+    /// Completion time (RFC 3339).
+    time: String,
+    /// rx, tx or lines (modem line change).
+    source: String,
+    /// Protocol id.
+    protocol: String,
+    /// One-line decoding.
+    summary: String,
+    /// none, ok or failed (with received/computed).
+    check: serde_json::Value,
+    /// Decoded fields.
+    fields: serde_json::Map<String, serde_json::Value>,
+    /// Frame bytes as hex.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bytes: Option<String>,
+}
+
+fn frame_out(f: &DecodedFrame, bytes: bool) -> FrameOut {
+    FrameOut {
+        seq: f.seq,
+        time: f.time.to_string(),
+        source: serde_json::to_value(f.source)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .unwrap_or_default(),
+        protocol: f.frame.protocol.id().to_owned(),
+        summary: f.frame.summary.clone(),
+        check: serde_json::to_value(&f.frame.check).unwrap_or_default(),
+        fields: f
+            .frame
+            .fields
+            .iter()
+            .map(|x| (x.name.clone(), serde_json::Value::String(x.value.clone())))
+            .collect(),
+        bytes: bytes.then(|| gtkterm_protocols::hex::to_hex(&f.frame.bytes)),
+    }
+}
+
+/// `decoder_get_frames` result.
+#[derive(Debug, Serialize, JsonSchema)]
+struct FramesResult {
+    /// Frames, oldest first.
+    frames: Vec<FrameOut>,
+    /// Pass as `since` to get only newer frames.
+    next_seq: u64,
+    /// Frames that were requested but already dropped from the ring.
+    dropped: u64,
+    /// Decoder state.
+    decoder: serde_json::Value,
+}
+
+/// `modbus_request` result.
+#[derive(Debug, Serialize, JsonSchema)]
+struct ModbusResult {
+    /// Framing used.
+    framing: ModbusFraming,
+    /// Bytes sent, as hex.
+    request: String,
+    /// Bytes of the response frame, as hex (absent for broadcasts).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_bytes: Option<String>,
+    /// Decoded response summary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    summary: Option<String>,
+    /// Parsed response: bits, registers, written or exception.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response: Option<serde_json::Value>,
+    /// Round trip in ms.
+    elapsed_ms: u64,
+    /// The session's decoder was switched to this framing.
+    decoder_changed: bool,
+}
+
+fn framing_protocol(f: ModbusFraming) -> Protocol {
+    match f {
+        ModbusFraming::Rtu => Protocol::ModbusRtu,
+        ModbusFraming::Ascii => Protocol::ModbusAscii,
+        ModbusFraming::Tcp => Protocol::ModbusTcp,
+    }
+}
+
 fn status_json(s: &SessionStatus) -> serde_json::Value {
     serde_json::to_value(s).unwrap_or_default()
 }
@@ -418,6 +508,7 @@ impl GtkTermMcp {
                     .with_config(|c| c.profile(&profile).cloned())
                     .map_err(err)?;
                 session.set_terminal(prof.terminal);
+                session.apply_decoder_config(prof.decoder);
                 prof.connection
             }
             (None, None) => return Err("give either `connection` or `profile`".into()),
@@ -882,6 +973,7 @@ impl GtkTermMcp {
         let profile = gtkterm_core::config::Profile {
             connection,
             terminal: session.terminal(),
+            decoder: session.decoder_config(),
         };
         profile.validate().map_err(err)?;
         self.manager
@@ -889,6 +981,152 @@ impl GtkTermMcp {
             .map_err(err)?;
         self.manager.save_config().map_err(err)?;
         Ok(Json(serde_json::json!({ "saved": p.name })))
+    }
+
+    /// Select the protocol decoder of a session. Transmitted data is decoded as requests and received
+    /// data as responses; read the frames with decoder_get_frames.
+    #[tool(annotations(title = "Set decoder", idempotent_hint = true))]
+    async fn decoder_set(
+        &self,
+        Parameters(p): Parameters<DecoderSetParams>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let session = self.session(p.session)?;
+        let mode: DecoderMode = p.mode.parse()?;
+        if p.clear {
+            session.clear_frames();
+        }
+        let status = session.set_decoder(mode, p.signals);
+        Ok(Json(serde_json::to_value(status).map_err(err)?))
+    }
+
+    /// Decoded protocol frames (Modbus, NMEA, AT, CAN, EtherCAT, ...) with checksum results.
+    /// Poll with `since` = the previous `next_seq` to get only new frames.
+    #[tool(annotations(title = "Get decoded frames", read_only_hint = true))]
+    async fn decoder_get_frames(
+        &self,
+        Parameters(p): Parameters<GetFramesParams>,
+        ct: CancellationToken,
+    ) -> Result<Json<FramesResult>, String> {
+        let session = self.session(p.session)?;
+        let max = p.max.unwrap_or(100).clamp(1, 1000);
+        let since = p
+            .since
+            .unwrap_or_else(|| session.decoder_status().next_seq.saturating_sub(max as u64));
+        let wait = Duration::from_millis(p.timeout_ms.unwrap_or(0)).min(MAX_WAIT);
+        if !wait.is_zero() && session.frames_since(since, 1).frames.is_empty() {
+            tokio::select! {
+                () = ct.cancelled() => return Err("cancelled".into()),
+                _ = session.expect_frame(since, wait, |_| true) => {}
+            }
+        }
+        let read = session.frames_since(since, max);
+        let bytes = p.include_bytes.unwrap_or(true);
+        Ok(Json(FramesResult {
+            frames: read.frames.iter().map(|f| frame_out(f, bytes)).collect(),
+            next_seq: read.next_seq,
+            dropped: read.dropped,
+            decoder: serde_json::to_value(session.decoder_status()).map_err(err)?,
+        }))
+    }
+
+    /// Send a Modbus request (RTU, ASCII or TCP framing built with CRC/LRC/MBAP) and wait for the
+    /// decoded response. Switches the session's decoder to the framing's protocol if needed.
+    #[tool(annotations(title = "Modbus request", open_world_hint = true))]
+    async fn modbus_request(
+        &self,
+        Parameters(p): Parameters<ModbusRequestParams>,
+        ct: CancellationToken,
+    ) -> Result<Json<ModbusResult>, String> {
+        let session = self.session(p.session)?;
+        if p.unit > 247 {
+            return Err(format!("unit {} is out of range 0-247", p.unit));
+        }
+        let status = session.decoder_status();
+        let framing = p.framing.unwrap_or(match status.protocol {
+            Some(Protocol::ModbusAscii) => ModbusFraming::Ascii,
+            Some(Protocol::ModbusTcp) => ModbusFraming::Tcp,
+            _ => ModbusFraming::Rtu,
+        });
+        let protocol = framing_protocol(framing);
+        let decoder_changed = status.protocol != Some(protocol);
+        if decoder_changed {
+            session.set_decoder(DecoderMode::Protocol(protocol), status.signals);
+        }
+        let request: modbus::Request = p.request.into();
+        let pdu = request.pdu()?;
+        let transaction = u16::try_from(session.decoder_status().next_seq & 0xFFFF).unwrap_or(0);
+        let bytes = match framing {
+            ModbusFraming::Rtu => modbus::rtu_frame(p.unit, &pdu),
+            ModbusFraming::Ascii => modbus::ascii_frame(p.unit, &pdu),
+            ModbusFraming::Tcp => modbus::tcp_frame(transaction, p.unit, &pdu),
+        };
+        let since = session.decoder_status().next_seq;
+        let start = std::time::Instant::now();
+        session.send(bytes.clone()).await.map_err(err)?;
+        let mut out = ModbusResult {
+            framing,
+            request: gtkterm_protocols::hex::to_hex(&bytes),
+            response_bytes: None,
+            summary: None,
+            response: None,
+            elapsed_ms: 0,
+            decoder_changed,
+        };
+        if p.unit == 0 {
+            return Ok(Json(out));
+        }
+        let timeout = Duration::from_millis(p.timeout_ms.unwrap_or(1000)).min(MAX_WAIT);
+        let matches = |f: &DecodedFrame| {
+            f.source == FrameSource::Rx
+                && f.frame.protocol == protocol
+                && (matches!(f.frame.check, Check::Failed { .. })
+                    || modbus::application_data(protocol, &f.frame.bytes).is_some_and(|(unit, pdu, tid)| {
+                        unit == p.unit
+                            && (framing != ModbusFraming::Tcp || tid == Some(transaction))
+                            && !matches!(modbus::parse_response(&request, &pdu), Ok(None))
+                    }))
+        };
+        let result = tokio::select! {
+            () = ct.cancelled() => return Err("cancelled".into()),
+            r = session.expect_frame(since, timeout, matches) => r,
+        };
+        let frame = match result {
+            Ok(f) => f,
+            Err(SessionError::Timeout(_)) => {
+                let seen: Vec<String> = session
+                    .frames_since(since, 20)
+                    .frames
+                    .iter()
+                    .filter(|f| f.source != FrameSource::Tx)
+                    .map(|f| f.frame.summary.clone())
+                    .collect();
+                return Err(format!(
+                    "no response from unit {} within {} ms{}",
+                    p.unit,
+                    timeout.as_millis(),
+                    if seen.is_empty() {
+                        String::new()
+                    } else {
+                        format!("; other frames received: {}", seen.join(" | "))
+                    }
+                ));
+            }
+            Err(e) => return Err(e.to_string()),
+        };
+        out.elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+        out.response_bytes = Some(gtkterm_protocols::hex::to_hex(&frame.frame.bytes));
+        out.summary = Some(frame.frame.summary.clone());
+        if let Check::Failed { received, computed } = &frame.frame.check {
+            return Err(format!(
+                "response failed its check (received {received}, computed {computed}): {}",
+                frame.frame.summary
+            ));
+        }
+        let (_, pdu, _) =
+            modbus::application_data(protocol, &frame.frame.bytes).ok_or("malformed response")?;
+        let response = modbus::parse_response(&request, &pdu)?.ok_or("unexpected response")?;
+        out.response = Some(serde_json::to_value(response).map_err(err)?);
+        Ok(Json(out))
     }
 
     /// Pause or resume a Sunshine chart.
@@ -1017,10 +1255,10 @@ impl GtkTermMcp {
         vec![PromptMessage::new_text(
             Role::User,
             format!(
-                "Scan a Modbus RTU bus{focus}. Open the port (usually 19200 8E1 or 9600 8N1). For unit IDs 1-10 send \
-                 'read holding registers' (function 0x03, address 0, count 2) using send with encoding hex; append \
-                 the CRC-16/MODBUS (poly 0xA001, init 0xFFFF, low byte first). Use read with timeout_ms 300 and \
-                 encoding hex after each request. List responding units, decoded register values and exceptions."
+                "Scan a Modbus RTU bus{focus}. Open the port (usually 19200 8E1 or 9600 8N1; preset_list has a Modbus \
+                 preset). For unit IDs 1-10 call modbus_request with function read_holding_registers, address 0, \
+                 count 2 and timeout_ms 300; it builds the CRC and decodes the reply. List responding units, register \
+                 values and exceptions. decoder_get_frames shows everything on the bus, including CRC failures."
             ),
         )]
     }
@@ -1127,6 +1365,12 @@ impl ServerHandler for GtkTermMcp {
                 "text/plain",
             ));
             resources.push(resource(
+                &format!("gtkterm://session/{id}/frames"),
+                &format!("session-{id}-frames"),
+                "Last 200 decoded protocol frames",
+                "application/json",
+            ));
+            resources.push(resource(
                 &format!("gtkterm://session/{id}/sunshine"),
                 &format!("session-{id}-sunshine"),
                 "Sunshine chart summaries",
@@ -1145,6 +1389,8 @@ impl ServerHandler for GtkTermMcp {
             ResourceTemplate::new("gtkterm://session/{id}/status", "session-status")
                 .with_mime_type("application/json"),
             ResourceTemplate::new("gtkterm://session/{id}/rx", "session-rx").with_mime_type("text/plain"),
+            ResourceTemplate::new("gtkterm://session/{id}/frames", "session-frames")
+                .with_mime_type("application/json"),
             ResourceTemplate::new("gtkterm://session/{id}/sunshine", "session-sunshine")
                 .with_mime_type("application/json"),
             ResourceTemplate::new(
@@ -1218,6 +1464,14 @@ impl ServerHandler for GtkTermMcp {
                 let end = session.rx_cursor();
                 let r = session.read_rx(end.saturating_sub(64 * 1024), 64 * 1024);
                 text(String::from_utf8_lossy(&r.data).into_owned())
+            }
+            None if what == "frames" => {
+                let frames: Vec<FrameOut> = session
+                    .last_frames(200)
+                    .iter()
+                    .map(|f| frame_out(f, true))
+                    .collect();
+                text(serde_json::to_string_pretty(&frames).unwrap_or_default())
             }
             None if what == "sunshine" => {
                 let charts: Vec<_> = session.with_sunshine(|s| s.charts().iter().map(summarize).collect());

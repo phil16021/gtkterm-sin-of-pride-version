@@ -5,6 +5,8 @@ expression: names
 ---
 - clear_buffer
 - close_port
+- decoder_get_frames
+- decoder_set
 - expect
 - get_signals
 - get_status
@@ -15,6 +17,7 @@ expression: names
 - macro_list
 - macro_run
 - macro_save
+- modbus_request
 - open_port
 - preset_apply
 - preset_list

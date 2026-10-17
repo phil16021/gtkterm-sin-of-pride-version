@@ -461,3 +461,148 @@ pub(crate) struct ProfileSaveParams {
     /// Profile name (created or replaced).
     pub(crate) name: String,
 }
+
+/// `decoder_set` arguments.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub(crate) struct DecoderSetParams {
+    /// Session to use; default: the first session.
+    #[serde(default)]
+    pub(crate) session: Option<u32>,
+    /// off, auto, raw, at, nmea, modbus_rtu, modbus_ascii, modbus_tcp, can (candump text), slcan,
+    /// ethercat or rs232 (modem line changes only).
+    pub(crate) mode: String,
+    /// Also record modem line changes (DTR/RTS/CTS/DSR/DCD/RI) as frames.
+    #[serde(default)]
+    pub(crate) signals: bool,
+    /// Drop the frames decoded so far.
+    #[serde(default)]
+    pub(crate) clear: bool,
+}
+
+/// `decoder_get_frames` arguments.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub(crate) struct GetFramesParams {
+    /// Session to use; default: the first session.
+    #[serde(default)]
+    pub(crate) session: Option<u32>,
+    /// First sequence number to return (use `next_seq` of the previous call); default: the newest `max` frames.
+    #[serde(default)]
+    pub(crate) since: Option<u64>,
+    /// Maximum number of frames (default 100, at most 1000).
+    #[serde(default)]
+    pub(crate) max: Option<usize>,
+    /// Wait up to this many ms for a frame when none is available (default 0, at most 60000).
+    #[serde(default)]
+    pub(crate) timeout_ms: Option<u64>,
+    /// Include each frame's bytes as hex (default true).
+    #[serde(default)]
+    pub(crate) include_bytes: Option<bool>,
+}
+
+/// Modbus framing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum ModbusFraming {
+    /// Binary RTU with CRC-16 (serial lines).
+    Rtu,
+    /// ASCII `:`…LRC CRLF (serial lines).
+    Ascii,
+    /// MBAP header (Modbus TCP; use with a TCP connection to port 502).
+    Tcp,
+}
+
+/// A Modbus request.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(tag = "function", rename_all = "snake_case")]
+pub(crate) enum ModbusRequestSpec {
+    /// 0x01: read coils.
+    ReadCoils {
+        /// First coil address (0-based).
+        address: u16,
+        /// Number of coils (1-2000).
+        count: u16,
+    },
+    /// 0x02: read discrete inputs.
+    ReadDiscreteInputs {
+        /// First input address (0-based).
+        address: u16,
+        /// Number of inputs (1-2000).
+        count: u16,
+    },
+    /// 0x03: read holding registers.
+    ReadHoldingRegisters {
+        /// First register address (0-based, so 40001 is 0).
+        address: u16,
+        /// Number of registers (1-125).
+        count: u16,
+    },
+    /// 0x04: read input registers.
+    ReadInputRegisters {
+        /// First register address (0-based, so 30001 is 0).
+        address: u16,
+        /// Number of registers (1-125).
+        count: u16,
+    },
+    /// 0x05: write a single coil.
+    WriteSingleCoil {
+        /// Coil address.
+        address: u16,
+        /// On or off.
+        value: bool,
+    },
+    /// 0x06: write a single register.
+    WriteSingleRegister {
+        /// Register address.
+        address: u16,
+        /// Value.
+        value: u16,
+    },
+    /// 0x0F: write multiple coils.
+    WriteMultipleCoils {
+        /// First coil address.
+        address: u16,
+        /// Values (1-1968).
+        values: Vec<bool>,
+    },
+    /// 0x10: write multiple registers.
+    WriteMultipleRegisters {
+        /// First register address.
+        address: u16,
+        /// Values (1-123).
+        values: Vec<u16>,
+    },
+}
+
+impl From<ModbusRequestSpec> for gtkterm_protocols::decode::modbus::Request {
+    fn from(s: ModbusRequestSpec) -> Self {
+        use ModbusRequestSpec as S;
+        match s {
+            S::ReadCoils { address, count } => Self::ReadCoils { address, count },
+            S::ReadDiscreteInputs { address, count } => Self::ReadDiscreteInputs { address, count },
+            S::ReadHoldingRegisters { address, count } => Self::ReadHoldingRegisters { address, count },
+            S::ReadInputRegisters { address, count } => Self::ReadInputRegisters { address, count },
+            S::WriteSingleCoil { address, value } => Self::WriteSingleCoil { address, value },
+            S::WriteSingleRegister { address, value } => Self::WriteSingleRegister { address, value },
+            S::WriteMultipleCoils { address, values } => Self::WriteMultipleCoils { address, values },
+            S::WriteMultipleRegisters { address, values } => Self::WriteMultipleRegisters { address, values },
+        }
+    }
+}
+
+/// `modbus_request` arguments.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub(crate) struct ModbusRequestParams {
+    /// Session to use; default: the first session.
+    #[serde(default)]
+    pub(crate) session: Option<u32>,
+    /// Unit (slave) ID 1-247; 0 broadcasts (no response is awaited).
+    pub(crate) unit: u8,
+    /// The request.
+    pub(crate) request: ModbusRequestSpec,
+    /// Framing; default: the session's Modbus decoder, else rtu.
+    #[serde(default)]
+    pub(crate) framing: Option<ModbusFraming>,
+    /// Response timeout in ms (default 1000, at most 60000).
+    #[serde(default)]
+    pub(crate) timeout_ms: Option<u64>,
+}

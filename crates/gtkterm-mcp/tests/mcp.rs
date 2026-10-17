@@ -510,3 +510,102 @@ async fn macros_presets_and_profiles() {
     assert_eq!(bench["connection"]["baudrate"], 19_200);
     assert_eq!(bench["connection"]["parity"], "even");
 }
+
+#[tokio::test]
+async fn decoders_and_modbus_requests() {
+    use gtkterm_protocols::decode::modbus;
+
+    let f = fixture(ServerOptions::default()).await;
+    let mut dev = with_device(&f).await;
+    let msg = tool_error(&f.client, "decoder_set", json!({"mode": "bogus"})).await;
+    assert!(msg.contains("modbus_rtu"), "{msg}");
+
+    // A fake Modbus slave: unit 7 answers reads of 2 holding registers; unit 9 raises an exception.
+    let slave = async {
+        let req = dev.recv().await.unwrap();
+        assert_eq!(&req[..], modbus::rtu_frame(7, &[0x03, 0x00, 0x10, 0x00, 0x02]));
+        dev.send(modbus::rtu_frame(7, &[0x03, 0x04, 0x00, 0x2A, 0x12, 0x34]))
+            .await
+            .unwrap();
+    };
+    let (resp, ()) = tokio::join!(
+        ok(
+            &f.client,
+            "modbus_request",
+            json!({"unit": 7, "request": {"function": "read_holding_registers", "address": 16, "count": 2}})
+        ),
+        slave
+    );
+    assert_eq!(
+        resp["response"],
+        json!({"kind": "registers", "values": [42, 0x1234]}),
+        "{resp}"
+    );
+    assert_eq!(resp["framing"], "rtu");
+    assert_eq!(resp["decoder_changed"], true);
+    assert_eq!(resp["request"], "07 03 00 10 00 02 C5 A8");
+
+    let slave = async {
+        dev.recv().await.unwrap();
+        dev.send(modbus::rtu_frame(9, &[0x86, 0x02])).await.unwrap();
+    };
+    let (resp, ()) = tokio::join!(
+        ok(
+            &f.client,
+            "modbus_request",
+            json!({"unit": 9, "request": {"function": "write_single_register", "address": 1, "value": 5}})
+        ),
+        slave
+    );
+    assert_eq!(resp["response"]["kind"], "exception");
+    assert_eq!(resp["response"]["name"], "Illegal Data Address");
+    assert_eq!(resp["decoder_changed"], false);
+
+    let msg = tool_error(
+        &f.client,
+        "modbus_request",
+        json!({"unit": 3, "timeout_ms": 100, "request": {"function": "read_coils", "address": 0, "count": 8}}),
+    )
+    .await;
+    assert!(msg.contains("no response from unit 3"), "{msg}");
+    dev.drain();
+
+    // All requests and responses are in the frame ring.
+    let frames = ok(&f.client, "decoder_get_frames", json!({"since": 0})).await;
+    let list = frames["frames"].as_array().unwrap();
+    let sources: Vec<_> = list.iter().map(|x| x["source"].as_str().unwrap()).collect();
+    assert_eq!(sources, ["tx", "rx", "tx", "rx", "tx"], "{frames}");
+    assert_eq!(list[1]["check"]["status"], "ok");
+    assert_eq!(list[1]["fields"]["slave"], "7");
+    assert_eq!(frames["decoder"]["protocol"], "modbus_rtu");
+    let next = frames["next_seq"].as_u64().unwrap();
+
+    // Switch to NMEA, wait for a frame that arrives later.
+    let st = ok(&f.client, "decoder_set", json!({"mode": "nmea", "clear": true})).await;
+    assert_eq!(st["frames"], 0);
+    let feeder = async {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        dev.send(&b"$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47\r\n"[..])
+            .await
+            .unwrap();
+    };
+    let (frames, ()) = tokio::join!(
+        ok(
+            &f.client,
+            "decoder_get_frames",
+            json!({"since": next, "timeout_ms": 5000, "include_bytes": false})
+        ),
+        feeder
+    );
+    let list = frames["frames"].as_array().unwrap();
+    assert_eq!(list.len(), 1, "{frames}");
+    assert!(list[0]["summary"].as_str().unwrap().starts_with("[NMEA] GPS GGA"));
+    assert!(list[0].get("bytes").is_none());
+
+    let res = f
+        .client
+        .read_resource(ReadResourceRequestParams::new("gtkterm://session/1/frames"))
+        .await
+        .unwrap();
+    assert!(serde_json::to_string(&res.contents).unwrap().contains("GPS GGA"));
+}
