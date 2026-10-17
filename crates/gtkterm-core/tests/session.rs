@@ -357,3 +357,90 @@ async fn reopening_the_same_device_never_finds_it_locked() {
     }
     s.close().await.unwrap();
 }
+
+#[tokio::test]
+async fn signal_monitor_records_changes_and_short_pulses() {
+    use gtkterm_core::port::loopback::InputLines;
+    let s = session();
+    let (port, dev) = loopback::pair_with_lines("loop");
+    s.attach(port).await.unwrap();
+    let mut ev = s.subscribe();
+    s.set_dtr(true).await.unwrap();
+    dev.set_inputs(InputLines {
+        cts: true,
+        ..InputLines::default()
+    });
+    wait_for(
+        &mut ev,
+        |e| matches!(e, SessionEvent::Signals(v) if v.iter().any(|x| x.changed.contains(&"CTS"))),
+    )
+    .await;
+    dev.pulse_ri();
+    wait_for(
+        &mut ev,
+        |e| matches!(e, SessionEvent::Signals(v) if v.iter().any(|x| x.pulse)),
+    )
+    .await;
+    let h = s.signal_history(None);
+    let changed: Vec<Vec<&str>> = h.iter().map(|x| x.changed.clone()).collect();
+    assert_eq!(
+        changed,
+        [vec![], vec!["DTR"], vec!["CTS"], vec!["RI"], vec!["RI"]],
+        "{h:?}"
+    );
+    assert!(h[3].lines.ri && !h[4].lines.ri);
+    let csv = s.signals_csv();
+    assert_eq!(csv.lines().count(), 6);
+    assert!(csv.lines().nth(3).unwrap().ends_with(",1,0,1,0,0,0,CTS"), "{csv}");
+    s.clear_signals();
+    assert!(s.signal_history(None).len() <= 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn auto_baud_finds_the_rate_the_device_talks_at() {
+    use gtkterm_core::autobaud::auto_baud;
+    use gtkterm_core::port::serial::read_termios;
+    let pty = std::sync::Arc::new(PtyPair::new().unwrap());
+    let s = session();
+    s.open(Connection::Serial(SerialConfig {
+        port: pty.path_str(),
+        baudrate: 9600,
+        ..SerialConfig::default()
+    }))
+    .await
+    .unwrap();
+    // The fake device "is" at 57600: readable text there, line noise at every other rate.
+    let p = std::sync::Arc::clone(&pty);
+    let stop = tokio_util::sync::CancellationToken::new();
+    let st = stop.clone();
+    let device = tokio::spawn(async move {
+        let mut n = 0u8;
+        while !st.is_cancelled() {
+            let speed = read_termios(p.slave_fd().unwrap()).unwrap().ospeed;
+            let data: Vec<u8> = if speed == 57_600 {
+                b"temp=21.5 hum=40\r\n".to_vec()
+            } else {
+                (0..18).map(|i: u8| 0x80 | n.wrapping_add(i * 7)).collect()
+            };
+            n = n.wrapping_add(1);
+            let _ = p.write(&data).await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    });
+    let r = auto_baud(
+        &s,
+        &[9600, 19_200, 57_600, 115_200],
+        Duration::from_millis(250),
+        &tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    stop.cancel();
+    device.await.unwrap();
+    assert_eq!(r.best, Some(57_600), "{:?}", r.scores);
+    assert_eq!(r.scores.len(), 3, "stops at a clear winner");
+    assert!(
+        s.status().description.contains("57600"),
+        "reopened at the detected rate"
+    );
+}

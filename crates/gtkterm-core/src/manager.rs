@@ -10,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::{Config, ConfigError, DEFAULT_PROFILE, TerminalConfig};
 use crate::macros::{MacroError, MacroReport, MacroStore, run_macro};
+use crate::script::{Location, Script, ScriptError, ScriptEvent, ScriptOptions, ScriptReport, run_script};
 use crate::session::{Session, SessionId};
 
 /// Session list changes.
@@ -33,6 +34,36 @@ pub enum ManagerEvent {
         /// Session.
         session: SessionId,
         /// Macro name.
+        name: String,
+        /// `None` on success, otherwise the error message.
+        error: Option<String>,
+    },
+    /// A script started in a session.
+    ScriptStarted {
+        /// Session.
+        session: SessionId,
+        /// Script name.
+        name: String,
+    },
+    /// A script reached a line (throttled to 20 per second).
+    ScriptLine {
+        /// Session.
+        session: SessionId,
+        /// Where.
+        at: Location,
+    },
+    /// A script's `log` output.
+    ScriptLog {
+        /// Session.
+        session: SessionId,
+        /// Message.
+        message: String,
+    },
+    /// A script finished.
+    ScriptFinished {
+        /// Session.
+        session: SessionId,
+        /// Script name.
         name: String,
         /// `None` on success, otherwise the error message.
         error: Option<String>,
@@ -106,7 +137,7 @@ impl SessionManager {
             .map(|(n, _)| n.clone())
     }
 
-    /// Cancel the macro running in `session`. Returns false if none runs.
+    /// Cancel the macro or script running in `session`. Returns false if none runs.
     pub fn stop_macro(&self, session: SessionId) -> bool {
         self.running
             .lock()
@@ -139,6 +170,49 @@ impl SessionManager {
         let _ = self.events.send(ManagerEvent::MacroFinished {
             session: id,
             name: m.name.clone(),
+            error: result.as_ref().err().map(ToString::to_string),
+        });
+        result
+    }
+
+    /// Run a script in `session` (one macro or script at a time per session) and wait for it.
+    pub async fn run_script(
+        &self,
+        session: &Session,
+        script: &Script,
+        opts: &ScriptOptions,
+    ) -> Result<ScriptReport, ScriptError> {
+        let id = session.id();
+        let token = CancellationToken::new();
+        {
+            let mut running = self.running.lock().expect("running poisoned");
+            if let Some((other, _)) = running.get(&id) {
+                return Err(ScriptError::Busy(other.clone()));
+            }
+            running.insert(id, (script.name().to_owned(), token.clone()));
+        }
+        let _ = self.events.send(ManagerEvent::ScriptStarted {
+            session: id,
+            name: script.name().to_owned(),
+        });
+        let events = self.events.clone();
+        let mut last_line: Option<std::time::Instant> = None;
+        let result = run_script(session, script, opts, &token, |ev| match ev {
+            ScriptEvent::Line(at) => {
+                if last_line.is_none_or(|t| t.elapsed() >= std::time::Duration::from_millis(50)) {
+                    last_line = Some(std::time::Instant::now());
+                    let _ = events.send(ManagerEvent::ScriptLine { session: id, at });
+                }
+            }
+            ScriptEvent::Log(message) => {
+                let _ = events.send(ManagerEvent::ScriptLog { session: id, message });
+            }
+        })
+        .await;
+        self.running.lock().expect("running poisoned").remove(&id);
+        let _ = self.events.send(ManagerEvent::ScriptFinished {
+            session: id,
+            name: script.name().to_owned(),
             error: result.as_ref().err().map(ToString::to_string),
         });
         result

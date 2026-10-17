@@ -28,6 +28,7 @@ use crate::decoding::{
 };
 use crate::logging::{LogStatus, LogWriter};
 use crate::port::{self, ModemLines, PortError, PortKind, PortParts, PortRx, PortWriter, SerialControl};
+use crate::signals::{SignalHistory, SignalSample};
 use crate::sunshine::{SunshineStore, SunshineUpdate};
 use crate::transfer::{ActiveTransfer, Step, TransferRequest, TransferState, TransferStatus};
 use gtkterm_protocols::logfmt::{LogFormat, LogMeta};
@@ -38,7 +39,7 @@ pub type SessionId = u32;
 /// How long the writer waits for the configured "wait char" before sending the next line.
 const WAIT_CHAR_TIMEOUT: Duration = Duration::from_secs(2);
 /// Modem line polling interval.
-const MODEM_POLL: Duration = Duration::from_millis(100);
+const MODEM_POLL: Duration = Duration::from_millis(50);
 /// Decoder poll interval while a gap-framed protocol (Modbus RTU) is active.
 const DECODE_POLL: Duration = Duration::from_millis(10);
 /// Capacity of the event broadcast; slow subscribers lag and resync from the stores.
@@ -87,6 +88,8 @@ pub struct SessionStatus {
     pub decoder: DecoderStatus,
     /// Running or last file transfer.
     pub transfer: Option<TransferStatus>,
+    /// Kernel line counters (serial ports whose driver has them).
+    pub counters: Option<crate::port::LineCounters>,
 }
 
 /// Something that happened in a session.
@@ -110,6 +113,8 @@ pub enum SessionEvent {
     Decoder(DecoderStatus),
     /// File transfer progress or result.
     Transfer(TransferStatus),
+    /// New signal monitor samples.
+    Signals(Vec<SignalSample>),
 }
 
 /// Session errors.
@@ -194,6 +199,7 @@ enum ControlOp {
     Dtr(bool),
     Rts(bool),
     Break(Duration),
+    Flush,
 }
 
 #[derive(Debug)]
@@ -205,6 +211,7 @@ struct Shared {
     connection: Mutex<Option<Connection>>,
     decoding: Mutex<Decoding>,
     transfer: Mutex<Option<TransferStatus>>,
+    signals: Mutex<SignalHistory>,
     tx_queue: AtomicUsize,
 }
 
@@ -259,6 +266,7 @@ impl Session {
                 log: None,
                 decoder: Decoding::default().status(),
                 transfer: None,
+                counters: None,
             }),
             chunks: Mutex::new(ChunkStore::default()),
             sunshine: Mutex::new(SunshineStore::new()),
@@ -266,6 +274,7 @@ impl Session {
             connection: Mutex::new(None),
             decoding: Mutex::new(Decoding::default()),
             transfer: Mutex::new(None),
+            signals: Mutex::default(),
             tx_queue: AtomicUsize::new(0),
         });
         let (cmd, cmd_rx) = mpsc::channel(64);
@@ -381,6 +390,20 @@ impl Session {
             .await?
     }
 
+    /// Send a break as long as the connection's `break_ms` (250 ms by default).
+    pub async fn send_default_break(&self) -> Result<(), SessionError> {
+        let ms = self
+            .connection()
+            .and_then(|c| c.serial().map(|s| s.break_ms))
+            .unwrap_or(250);
+        self.send_break(Duration::from_millis(ms.max(1).into())).await
+    }
+
+    /// Discard data waiting in the driver's input and output buffers (serial ports).
+    pub async fn flush(&self) -> Result<(), SessionError> {
+        self.request(|tx| Command::Control(ControlOp::Flush, tx)).await?
+    }
+
     /// Control the session log; returns the log status afterwards (`Stop` returns the final one).
     pub async fn log(&self, op: LogOp) -> Result<Option<LogStatus>, SessionError> {
         self.request(|tx| Command::Log(op, tx)).await?
@@ -446,6 +469,26 @@ impl Session {
     /// Cancel the running transfer; `false` if none was running.
     pub async fn cancel_transfer(&self) -> bool {
         self.request(Command::CancelTransfer).await.unwrap_or(false)
+    }
+
+    /// Signal monitor samples of the last 300 s (or since `since`, with the state before it).
+    pub fn signal_history(&self, since: Option<Timestamp>) -> Vec<SignalSample> {
+        lock(&self.shared.signals).since(since)
+    }
+
+    /// The signal history as CSV (`Timestamp,DTR,RTS,CTS,DSR,DCD,RI,Changed Signals`).
+    pub fn signals_csv(&self) -> String {
+        lock(&self.shared.signals).to_csv(&TimeZone::system())
+    }
+
+    /// Clear the signal history.
+    pub fn clear_signals(&self) {
+        lock(&self.shared.signals).clear();
+    }
+
+    /// Pause or resume the signal history.
+    pub fn pause_signals(&self, paused: bool) {
+        lock(&self.shared.signals).set_paused(paused);
     }
 
     /// The running or last transfer.
@@ -756,6 +799,7 @@ impl Actor {
                 tokio::time::sleep(d).await;
                 ctl.set_break(false)?;
             }
+            ControlOp::Flush => ctl.flush()?,
         }
         Ok(())
     }
@@ -821,6 +865,15 @@ impl Actor {
         if let Some(m) = modem {
             self.emit(SessionEvent::Modem(m));
             self.decode_modem(m);
+            let counters = self
+                .port
+                .as_ref()
+                .and_then(|p| p.control.as_ref())
+                .and_then(|c| c.counters().ok());
+            let samples = lock(&self.shared.signals).observe(Timestamp::now(), m, counters);
+            if !samples.is_empty() {
+                self.emit(SessionEvent::Signals(samples));
+            }
         }
     }
 
@@ -856,6 +909,7 @@ impl Actor {
             st.kind = None;
             st.opened_at = None;
             st.modem = None;
+            st.counters = None;
         }
         self.set_state(state);
     }
@@ -1087,6 +1141,12 @@ impl Actor {
         let Some(ctl) = port.control.as_ref() else { return };
         match ctl.modem_lines() {
             Ok(m) => {
+                let counters = ctl.counters().ok();
+                lock(&self.shared.status).counters = counters;
+                let samples = lock(&self.shared.signals).observe(Timestamp::now(), m, counters);
+                if !samples.is_empty() {
+                    self.emit(SessionEvent::Signals(samples));
+                }
                 let changed = {
                     let mut st = lock(&self.shared.status);
                     let changed = st.modem != Some(m);

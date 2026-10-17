@@ -108,6 +108,8 @@ pub(crate) struct SerialRs485 {
 
 pub(crate) const SER_RS485_ENABLED: u32 = 1 << 0;
 pub(crate) const SER_RS485_RTS_ON_SEND: u32 = 1 << 1;
+pub(crate) const SER_RS485_RTS_AFTER_SEND: u32 = 1 << 2;
+pub(crate) const SER_RS485_RX_DURING_TX: u32 = 1 << 4;
 
 /// `TIOCSRS485`: configure kernel RS485 direction control.
 pub(crate) fn tiocsrs485(fd: BorrowedFd<'_>, cfg: &SerialRs485) -> io::Result<()> {

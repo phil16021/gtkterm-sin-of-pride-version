@@ -72,3 +72,10 @@ path = "fuzz_targets/xmodem.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "script_parse"
+path = "fuzz_targets/script_parse.rs"
+test = false
+doc = false
+bench = false

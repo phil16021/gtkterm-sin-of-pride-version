@@ -191,6 +191,12 @@ pub struct SerialConfig {
     pub rs485_rts_time_after_tx: u32,
     /// Do not take an exclusive lock on the device.
     pub disable_port_lock: bool,
+    /// Length of a break condition, in ms.
+    pub break_ms: u32,
+    /// RS485: RTS is low while transmitting (some transceivers need the inverted level).
+    pub rs485_rts_active_low: bool,
+    /// RS485: keep receiving while transmitting (hear our own echo).
+    pub rs485_rx_during_tx: bool,
 }
 
 impl Default for SerialConfig {
@@ -205,6 +211,9 @@ impl Default for SerialConfig {
             rs485_rts_time_before_tx: 30,
             rs485_rts_time_after_tx: 30,
             disable_port_lock: false,
+            break_ms: 250,
+            rs485_rts_active_low: false,
+            rs485_rx_during_tx: false,
         }
     }
 }

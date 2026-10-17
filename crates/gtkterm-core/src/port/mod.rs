@@ -139,6 +139,14 @@ pub struct LineCounters {
     pub brk: u64,
     /// Buffer overruns.
     pub buf_overrun: u64,
+    /// CTS transitions.
+    pub cts: u64,
+    /// DSR transitions.
+    pub dsr: u64,
+    /// RI transitions.
+    pub ri: u64,
+    /// DCD transitions.
+    pub dcd: u64,
 }
 
 /// Serial-only controls. Methods are synchronous ioctls; blocking ones say so.
@@ -153,6 +161,8 @@ pub trait SerialControl: Send + Sync + fmt::Debug {
     fn set_break(&self, on: bool) -> Result<(), PortError>;
     /// Kernel line counters.
     fn counters(&self) -> Result<LineCounters, PortError>;
+    /// Discard data in the driver's input and output buffers.
+    fn flush(&self) -> Result<(), PortError>;
     /// Block until a modem input line changes (`TIOCMIWAIT`). Call from a blocking thread.
     fn wait_modem_change(&self) -> Result<(), PortError>;
 }

@@ -113,8 +113,18 @@ pub(crate) fn open(cfg: &SerialConfig) -> Result<OpenPort, PortError> {
     let _ = tcflush(&fd, FlushArg::TCIOFLUSH);
 
     let rs485_soft = if cfg.flow_control == FlowControl::Rs485 {
+        let polarity = if cfg.rs485_rts_active_low {
+            sys::SER_RS485_RTS_AFTER_SEND
+        } else {
+            sys::SER_RS485_RTS_ON_SEND
+        };
+        let echo = if cfg.rs485_rx_during_tx {
+            sys::SER_RS485_RX_DURING_TX
+        } else {
+            0
+        };
         let kernel = sys::SerialRs485 {
-            flags: sys::SER_RS485_ENABLED | sys::SER_RS485_RTS_ON_SEND,
+            flags: sys::SER_RS485_ENABLED | polarity | echo,
             delay_rts_before_send: cfg.rs485_rts_time_before_tx,
             delay_rts_after_send: cfg.rs485_rts_time_after_tx,
             padding: [0; 5],
@@ -126,11 +136,13 @@ pub(crate) fn open(cfg: &SerialConfig) -> Result<OpenPort, PortError> {
             }
             Err(e) => {
                 debug!(%path, error = %e, "kernel RS485 unavailable, using software RTS control");
-                let _ = sys::tiocm_set(fd.as_fd(), libc::TIOCM_RTS, false);
-                Some((
-                    Duration::from_millis(cfg.rs485_rts_time_before_tx.into()),
-                    Duration::from_millis(cfg.rs485_rts_time_after_tx.into()),
-                ))
+                // Idle level: released.
+                let _ = sys::tiocm_set(fd.as_fd(), libc::TIOCM_RTS, cfg.rs485_rts_active_low);
+                Some(SoftRs485 {
+                    before: Duration::from_millis(cfg.rs485_rts_time_before_tx.into()),
+                    after: Duration::from_millis(cfg.rs485_rts_time_after_tx.into()),
+                    active_low: cfg.rs485_rts_active_low,
+                })
             }
         }
     } else {
@@ -199,7 +211,7 @@ async fn read_loop(device: Arc<Device>, tx: mpsc::Sender<PortRx>, cancel: Cancel
 struct SerialWriter {
     device: Arc<Device>,
     /// Software RS485: (RTS lead time, RTS tail time) when the kernel cannot do it.
-    rs485_soft: Option<(Duration, Duration)>,
+    rs485_soft: Option<SoftRs485>,
 }
 
 impl SerialWriter {
@@ -235,11 +247,17 @@ impl SerialWriter {
 #[async_trait]
 impl PortWriter for SerialWriter {
     async fn write_all(&mut self, data: &[u8]) -> Result<(), PortError> {
-        let Some((before, after)) = self.rs485_soft else {
+        let Some(SoftRs485 {
+            before,
+            after,
+            active_low,
+        }) = self.rs485_soft
+        else {
             return self.write_raw(data).await;
         };
         let fd = self.device.fd.get_ref().as_fd();
-        sys::tiocm_set(fd, libc::TIOCM_RTS, true).map_err(|e| PortError::io("cannot assert RTS", e))?;
+        sys::tiocm_set(fd, libc::TIOCM_RTS, !active_low)
+            .map_err(|e| PortError::io("cannot assert RTS", e))?;
         tokio::time::sleep(before).await;
         let result = async {
             self.write_raw(data).await?;
@@ -248,9 +266,18 @@ impl PortWriter for SerialWriter {
         .await;
         tokio::time::sleep(after).await;
         let fd = self.device.fd.get_ref().as_fd();
-        sys::tiocm_set(fd, libc::TIOCM_RTS, false).map_err(|e| PortError::io("cannot release RTS", e))?;
+        sys::tiocm_set(fd, libc::TIOCM_RTS, active_low)
+            .map_err(|e| PortError::io("cannot release RTS", e))?;
         result
     }
+}
+
+/// RS485 direction control in software (drivers without `TIOCSRS485`).
+#[derive(Debug, Clone, Copy)]
+struct SoftRs485 {
+    before: Duration,
+    after: Duration,
+    active_low: bool,
 }
 
 #[derive(Debug)]
@@ -309,7 +336,16 @@ impl SerialControl for SerialCtl {
             parity: u(c.parity),
             brk: u(c.brk),
             buf_overrun: u(c.buf_overrun),
+            cts: u(c.cts),
+            dsr: u(c.dsr),
+            ri: u(c.rng),
+            dcd: u(c.dcd),
         })
+    }
+
+    fn flush(&self) -> Result<(), PortError> {
+        tcflush(self.device.fd.get_ref(), FlushArg::TCIOFLUSH)
+            .map_err(|e| PortError::io("flush failed", std::io::Error::from(e)))
     }
 
     fn wait_modem_change(&self) -> Result<(), PortError> {
