@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use jiff::Timestamp;
+use jiff::tz::TimeZone;
 use regex::bytes::Regex;
 use serde::Serialize;
 use thiserror::Error;
@@ -22,8 +23,10 @@ use tracing::{debug, info, warn};
 
 use crate::chunks::{Chunk, ChunkStore, Direction, RxRead};
 use crate::config::{Connection, TerminalConfig};
+use crate::logging::{LogStatus, LogWriter};
 use crate::port::{self, ModemLines, PortError, PortKind, PortParts, PortRx, PortWriter, SerialControl};
 use crate::sunshine::{SunshineStore, SunshineUpdate};
+use gtkterm_protocols::logfmt::{LogFormat, LogMeta};
 
 /// Session identifier, unique within a [`crate::manager::SessionManager`].
 pub type SessionId = u32;
@@ -72,6 +75,8 @@ pub struct SessionStatus {
     pub tx_queue: usize,
     /// Last known modem lines (serial ports that support them).
     pub modem: Option<ModemLines>,
+    /// Session log, if logging.
+    pub log: Option<LogStatus>,
 }
 
 /// Something that happened in a session.
@@ -109,6 +114,12 @@ pub enum SessionError {
     /// Writing failed; the port was closed.
     #[error("write failed: {0}")]
     Write(String),
+    /// Log file error.
+    #[error("log file: {0}")]
+    Log(#[from] std::io::Error),
+    /// No log is running.
+    #[error("not logging")]
+    NotLogging,
 }
 
 /// Successful [`Session::expect`].
@@ -130,6 +141,27 @@ enum Command {
     Close(oneshot::Sender<()>),
     Send(Bytes, Option<oneshot::Sender<Result<(), SessionError>>>),
     Control(ControlOp, oneshot::Sender<Result<(), SessionError>>),
+    Log(LogOp, oneshot::Sender<Result<Option<LogStatus>, SessionError>>),
+}
+
+/// Log control operations.
+#[derive(Debug, Clone)]
+pub enum LogOp {
+    /// Start logging to a file (replaces a running log).
+    Start {
+        /// Target file.
+        path: std::path::PathBuf,
+        /// Format.
+        format: LogFormat,
+        /// Append to an existing raw/text log instead of truncating.
+        append: bool,
+    },
+    /// Pause (`true`) or resume (`false`).
+    Pause(bool),
+    /// Truncate the file and continue.
+    Clear,
+    /// Finish the file.
+    Stop,
 }
 
 enum ControlOp {
@@ -195,6 +227,7 @@ impl Session {
                 tx_bytes: 0,
                 tx_queue: 0,
                 modem: None,
+                log: None,
             }),
             chunks: Mutex::new(ChunkStore::default()),
             sunshine: Mutex::new(SunshineStore::new()),
@@ -209,6 +242,7 @@ impl Session {
             events: events.clone(),
             pacing: pacing_rx,
             port: None,
+            log: None,
         };
         tokio::spawn(actor.run(cmd_rx));
         Self {
@@ -300,6 +334,11 @@ impl Session {
     pub async fn send_break(&self, duration: Duration) -> Result<(), SessionError> {
         self.request(|tx| Command::Control(ControlOp::Break(duration), tx))
             .await?
+    }
+
+    /// Control the session log; returns the log status afterwards (`Stop` returns the final one).
+    pub async fn log(&self, op: LogOp) -> Result<Option<LogStatus>, SessionError> {
+        self.request(|tx| Command::Log(op, tx)).await?
     }
 
     /// Run `f` with the chunk history.
@@ -399,6 +438,7 @@ struct Actor {
     events: broadcast::Sender<SessionEvent>,
     pacing: watch::Receiver<Pacing>,
     port: Option<ActivePort>,
+    log: Option<LogWriter>,
 }
 
 impl Actor {
@@ -414,6 +454,8 @@ impl Actor {
     async fn run(mut self, mut cmd_rx: mpsc::Receiver<Command>) {
         let mut modem_tick = tokio::time::interval(MODEM_POLL);
         modem_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut flush_tick = tokio::time::interval(Duration::from_millis(500));
+        flush_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             let poll_modem = self.port.as_ref().is_some_and(|p| p.modem_supported);
             tokio::select! {
@@ -425,10 +467,12 @@ impl Actor {
                     PortSignal::Rx(rx) => self.on_port_rx(rx).await,
                     PortSignal::Written(ev) => self.on_written(ev).await,
                 },
-                _ = modem_tick.tick(), if poll_modem => self.poll_modem(),
+                                _ = modem_tick.tick(), if poll_modem => self.poll_modem(),
+                _ = flush_tick.tick(), if self.log.is_some() => self.flush_log(),
             }
         }
         self.teardown(PortState::Closed).await;
+        let _ = self.log_op(LogOp::Stop);
         debug!("session actor stopped");
     }
 
@@ -462,6 +506,9 @@ impl Actor {
                     }
                 }
             },
+            Command::Log(op, reply) => {
+                let _ = reply.send(self.log_op(op));
+            }
             Command::Control(op, reply) => {
                 let result = self.control(op).await;
                 if result.is_ok() {
@@ -586,6 +633,7 @@ impl Actor {
                 let updates = lock(&self.shared.sunshine).feed(&data, ts);
                 let chunk = lock(&self.shared.chunks).push(Direction::Rx, data, ts);
                 lock(&self.shared.status).rx_bytes += chunk.data.len() as u64;
+                self.log_chunk(&chunk);
                 self.emit(SessionEvent::Data(chunk));
                 for u in updates {
                     self.emit(SessionEvent::Sunshine(u));
@@ -605,6 +653,7 @@ impl Actor {
             Some(WriterEvent::Written(data)) => {
                 let chunk = lock(&self.shared.chunks).push(Direction::Tx, data, Timestamp::now());
                 lock(&self.shared.status).tx_bytes += chunk.data.len() as u64;
+                self.log_chunk(&chunk);
                 self.emit(SessionEvent::Data(chunk));
             }
             Some(WriterEvent::Failed(e)) => {
@@ -612,6 +661,64 @@ impl Actor {
                 self.teardown(PortState::Error(e.to_string())).await;
             }
             None => {}
+        }
+    }
+
+    fn log_op(&mut self, op: LogOp) -> Result<Option<LogStatus>, SessionError> {
+        let result = match op {
+            LogOp::Start { path, format, append } => {
+                if let Some(old) = self.log.take() {
+                    let _ = old.finish();
+                }
+                let meta = {
+                    let st = lock(&self.shared.status);
+                    LogMeta {
+                        start_time: Timestamp::now()
+                            .to_zoned(TimeZone::system())
+                            .strftime("%Y-%m-%dT%H:%M:%S%:z")
+                            .to_string(),
+                        port: st.description.clone(),
+                        profile: st.name.clone(),
+                    }
+                };
+                let writer = LogWriter::create(&path, format, meta, append)?;
+                let status = writer.status().clone();
+                self.log = Some(writer);
+                Ok(Some(status))
+            }
+            LogOp::Pause(paused) => {
+                let w = self.log.as_mut().ok_or(SessionError::NotLogging)?;
+                w.set_paused(paused)?;
+                Ok(Some(w.status().clone()))
+            }
+            LogOp::Clear => {
+                let w = self.log.as_mut().ok_or(SessionError::NotLogging)?;
+                w.clear()?;
+                Ok(Some(w.status().clone()))
+            }
+            LogOp::Stop => {
+                let w = self.log.take().ok_or(SessionError::NotLogging)?;
+                Ok(Some(w.finish()?))
+            }
+        };
+        lock(&self.shared.status).log = self.log.as_ref().map(|w| w.status().clone());
+        result
+    }
+
+    fn log_chunk(&mut self, chunk: &Chunk) {
+        let Some(w) = self.log.as_mut() else { return };
+        if let Err(e) = w.write(chunk, &TimeZone::system()) {
+            warn!(error = %e, "log write failed, logging stopped");
+            self.log = None;
+            lock(&self.shared.status).log = None;
+            self.emit(SessionEvent::Info(format!("logging stopped: {e}")));
+        }
+    }
+
+    fn flush_log(&mut self) {
+        if let Some(w) = self.log.as_mut() {
+            let _ = w.flush();
+            lock(&self.shared.status).log = Some(w.status().clone());
         }
     }
 

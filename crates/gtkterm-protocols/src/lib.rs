@@ -8,6 +8,7 @@
 pub mod checksum;
 pub mod downsample;
 pub mod hex;
+pub mod logfmt;
 pub mod sunshine;
 pub mod transform;
 pub mod view;

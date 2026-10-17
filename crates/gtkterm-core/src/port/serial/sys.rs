@@ -122,6 +122,20 @@ pub(crate) fn flock_exclusive(fd: BorrowedFd<'_>) -> io::Result<()> {
     check(unsafe { libc::flock(fd.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) })
 }
 
+/// `TIOCGSERIAL`: UART type of a serial port (0 = `PORT_UNKNOWN`, i.e. no hardware behind it).
+pub(crate) fn uart_type(fd: BorrowedFd<'_>) -> io::Result<libc::c_int> {
+    // `struct serial_struct` is 72 bytes on 64-bit Linux and starts with `int type`; a larger,
+    // 8-byte aligned buffer leaves room for any architecture's layout.
+    let mut buf = [0u64; 16];
+    // SAFETY: fd is open; TIOCGSERIAL writes one serial_struct, which fits into `buf`.
+    check(unsafe { libc::ioctl(fd.as_raw_fd(), libc::TIOCGSERIAL, buf.as_mut_ptr()) })?;
+    // The first field is a native-endian c_int.
+    let bytes = buf[0].to_ne_bytes();
+    Ok(libc::c_int::from_ne_bytes([
+        bytes[0], bytes[1], bytes[2], bytes[3],
+    ]))
+}
+
 /// `tcdrain`: wait until all output has been transmitted. Blocks.
 pub(crate) fn tcdrain(fd: BorrowedFd<'_>) -> io::Result<()> {
     // SAFETY: fd is open; tcdrain has no memory arguments.

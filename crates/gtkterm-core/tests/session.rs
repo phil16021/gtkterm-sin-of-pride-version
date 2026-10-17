@@ -224,3 +224,51 @@ async fn non_serial_ports_reject_control_lines() {
     let err = s.send_break(Duration::from_millis(10)).await.unwrap_err();
     assert!(err.to_string().contains("no control lines"), "{err}");
 }
+
+#[tokio::test]
+async fn session_log_records_rx_and_tx() {
+    use gtkterm_core::session::LogOp;
+    use gtkterm_protocols::logfmt::LogFormat;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.csv");
+    let s = session();
+    let (port, mut dev) = loopback::pair("loop");
+    s.attach(port).await.unwrap();
+    let st = s
+        .log(LogOp::Start {
+            path: path.clone(),
+            format: LogFormat::Csv,
+            append: false,
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(st.path, path);
+    let mut ev = s.subscribe();
+    dev.send(&b"temp=21\r\n"[..]).await.unwrap();
+    wait_for(
+        &mut ev,
+        |e| matches!(e, SessionEvent::Data(c) if c.dir == Direction::Rx),
+    )
+    .await;
+    s.send(&b"read\r"[..]).await.unwrap();
+    let _ = dev.recv().await;
+    wait_for(
+        &mut ev,
+        |e| matches!(e, SessionEvent::Data(c) if c.dir == Direction::Tx),
+    )
+    .await;
+    let done = s.log(LogOp::Stop).await.unwrap().unwrap();
+    assert_eq!(done.bytes, 9 + 5);
+    let text = std::fs::read_to_string(&path).unwrap();
+    let lines: Vec<_> = text.lines().collect();
+    assert_eq!(lines[0], "Timestamp,Direction,Length,Data_Hex,Data_ASCII");
+    assert!(
+        lines[1].contains(",RX,9,\"74 65 6D 70 3D 32 31 0D 0A\",\"temp=21..\""),
+        "{}",
+        lines[1]
+    );
+    assert!(lines[2].contains(",TX,5,"), "{}", lines[2]);
+    assert!(matches!(s.log(LogOp::Stop).await, Err(SessionError::NotLogging)));
+    assert!(s.status().log.is_none());
+}
