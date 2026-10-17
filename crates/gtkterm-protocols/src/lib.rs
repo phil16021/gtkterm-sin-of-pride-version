@@ -4,3 +4,9 @@
 //! no global state. That keeps it unit-testable, fuzzable and usable from both the
 //! GUI and the headless MCP server.
 #![forbid(unsafe_code)]
+
+pub mod checksum;
+pub mod hex;
+pub mod sunshine;
+pub mod transform;
+pub mod view;
