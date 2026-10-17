@@ -1,0 +1,36 @@
+[package]
+name = "gtkterm-gui"
+description = "GTKTerm Sunshine: serial terminal with live data visualization and an MCP server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "gtkterm-sunshine"
+path = "src/main.rs"
+
+[dependencies]
+gtkterm-protocols.workspace = true
+gtkterm-core.workspace = true
+gtkterm-charts.workspace = true
+gtkterm-mcp.workspace = true
+gtk.workspace = true
+adw.workspace = true
+vte.workspace = true
+glib.workspace = true
+gio.workspace = true
+tokio.workspace = true
+async-channel.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+
+[build-dependencies]
+glib-build-tools.workspace = true

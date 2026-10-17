@@ -1,0 +1,38 @@
+[package]
+name = "gtkterm-core"
+description = "Async I/O core for GTKTerm Sunshine: ports, sessions, config, logging"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+gtkterm-protocols.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+nix.workspace = true
+libc.workspace = true
+udev.workspace = true
+bytes.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+regex.workspace = true
+jiff.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+directories.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+insta.workspace = true
+rstest.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

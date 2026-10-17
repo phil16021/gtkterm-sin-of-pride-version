@@ -1,0 +1,113 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/gtkterm-protocols",
+    "crates/gtkterm-core",
+    "crates/gtkterm-charts",
+    "crates/gtkterm-mcp",
+    "crates/gtkterm-gui",
+    "crates/gtkterm-testkit",
+    "xtask",
+]
+# Crates that build without the GTK/cairo development packages.
+default-members = [
+    "crates/gtkterm-protocols",
+    "crates/gtkterm-core",
+    "crates/gtkterm-mcp",
+    "crates/gtkterm-testkit",
+    "xtask",
+]
+
+[workspace.package]
+version = "2.0.0-alpha.1"
+edition = "2024"
+rust-version = "1.92"
+license = "GPL-3.0-or-later"
+repository = "http://192.168.1.100:8460/philipp/gtkterm-sin-of-pride-version"
+authors = ["Philipp"]
+
+[workspace.dependencies]
+gtkterm-protocols = { path = "crates/gtkterm-protocols" }
+gtkterm-core = { path = "crates/gtkterm-core" }
+gtkterm-charts = { path = "crates/gtkterm-charts" }
+gtkterm-mcp = { path = "crates/gtkterm-mcp" }
+gtkterm-testkit = { path = "crates/gtkterm-testkit" }
+
+# UI
+gtk = { package = "gtk4", version = "0.11", features = ["v4_22"] }
+adw = { package = "libadwaita", version = "0.9", features = ["v1_9"] }
+vte = { package = "vte4", version = "0.10", features = ["v0_84"] }
+sourceview = { package = "sourceview5", version = "0.11", features = ["v5_18"] }
+glib = { version = "0.22", features = ["v2_88"] }
+gio = { version = "0.22", features = ["v2_88"] }
+cairo-rs = { version = "0.22", features = ["png"] }
+glib-build-tools = "0.22"
+
+# Async / system
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "signal", "sync", "fs", "process"] }
+tokio-util = "0.7"
+futures = "0.3"
+async-trait = "0.1"
+async-channel = "2.5"
+nix = { version = "0.31", features = ["term", "ioctl", "fs", "signal", "poll"] }
+libc = "0.2"
+udev = "0.9"
+bytes = "1.12"
+
+# MCP
+rmcp = { version = "3.5", features = ["server", "macros", "schemars", "transport-io", "transport-streamable-http-server"] }
+axum = "0.8"
+schemars = "1.2"
+
+# Data
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1.1"
+regex = "1.13"
+base64 = "0.23"
+crc = "3.4"
+jiff = "0.2"
+
+# Plumbing
+clap = { version = "4.6", features = ["derive", "env", "wrap_help"] }
+clap_mangen = "0.3"
+clap_complete = "4.6"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+thiserror = "2"
+anyhow = "1"
+directories = "6"
+
+# Testing
+proptest = "1.12"
+insta = { version = "1.49", features = ["yaml"] }
+rstest = "0.27"
+tempfile = "3"
+assert_cmd = "2"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
+doc_markdown = "allow"
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"
+
+[profile.dev.package."*"]
+opt-level = 1
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

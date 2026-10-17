@@ -1,0 +1,24 @@
+[package]
+name = "gtkterm-protocols"
+description = "Sans-IO protocol logic for GTKTerm Sunshine: formatters, parsers, decoders, transfer state machines"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+crc.workspace = true
+jiff.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+insta.workspace = true
+rstest.workspace = true

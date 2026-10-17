@@ -38,3 +38,10 @@ fuzz-out/
 crash-*
 leak-*
 timeout-*
+
+# Rust
+/target
+**/*.rs.bk
+fuzz/target
+fuzz/corpus
+fuzz/artifacts

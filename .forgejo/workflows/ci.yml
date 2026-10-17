@@ -1,0 +1,49 @@
+# CI for the Rust rewrite. Runs on the local host-mode runner (label apps-ws).
+name: ci
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  check:
+    runs-on: apps-ws
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          "$HOME/.cargo/bin/cargo" --version
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: |
+          if command -v cargo-nextest >/dev/null; then
+            cargo nextest run --workspace --no-fail-fast
+          else
+            cargo test --workspace --no-fail-fast
+          fi
+      - name: GUI tests (Xvfb)
+        run: GSK_RENDERER=cairo xvfb-run -a cargo test -p gtkterm-gui
+      - name: Supply chain
+        run: |
+          cargo audit
+          if command -v cargo-deny >/dev/null; then cargo deny check; fi
+
+  fuzz-smoke:
+    runs-on: apps-ws
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fuzz each target for 60 s
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cd fuzz
+          for t in $(cargo +nightly fuzz list); do
+            cargo +nightly fuzz run "$t" -- -max_total_time=60
+          done
