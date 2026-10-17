@@ -65,3 +65,10 @@ path = "fuzz_targets/decoders.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "xmodem"
+path = "fuzz_targets/xmodem.rs"
+test = false
+doc = false
+bench = false

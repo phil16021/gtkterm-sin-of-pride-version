@@ -14,3 +14,4 @@ pub mod logfmt;
 pub mod sunshine;
 pub mod transform;
 pub mod view;
+pub mod xmodem;
