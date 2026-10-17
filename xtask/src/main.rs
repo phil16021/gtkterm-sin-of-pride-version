@@ -43,6 +43,10 @@ fn check() -> Result<()> {
     )?;
     run("cargo", &["test"])?;
     run("cargo", &["test", "-p", "gtkterm-gui", "--no-default-features"])?;
+    run(
+        "cargo",
+        &["test", "-p", "gtkterm-charts", "--no-default-features"],
+    )?;
     if have_gtk() {
         run(
             "cargo",

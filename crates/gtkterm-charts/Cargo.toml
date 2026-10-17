@@ -1,6 +1,6 @@
 [package]
 name = "gtkterm-charts"
-description = "Cairo chart models and renderers for GTKTerm Sunshine"
+description = "Chart models and cairo renderers for GTKTerm Sunshine"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,10 +11,15 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+default = ["render"]
+# Cairo rendering (needs the cairo development files). The scale/palette math works without it.
+render = ["dep:cairo-rs"]
+
 [dependencies]
 gtkterm-protocols.workspace = true
-cairo-rs.workspace = true
-thiserror.workspace = true
+gtkterm-core.workspace = true
+cairo-rs = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest.workspace = true

@@ -23,10 +23,12 @@ jobs:
         run: |
           cargo clippy --all-targets -- -D warnings
           cargo clippy -p gtkterm-gui --no-default-features --all-targets -- -D warnings
+          cargo clippy -p gtkterm-charts --no-default-features --all-targets -- -D warnings
       - name: Tests
         run: |
           cargo nextest run --no-fail-fast
           cargo nextest run -p gtkterm-gui --no-default-features --no-fail-fast
+          cargo nextest run -p gtkterm-charts --no-default-features --no-fail-fast
       - name: GUI crates (needs GTK dev packages on the runner)
         run: |
           if pkg-config --exists gtk4 libadwaita-1 vte-2.91-gtk4; then

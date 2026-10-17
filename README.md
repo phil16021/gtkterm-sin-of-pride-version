@@ -1,100 +1,76 @@
-# GTKTerm - Sin of Pride Version
+# GTKTerm Sunshine
 
-My custom terminal app with real-time chart visualizations!
+A Linux serial / TCP / UDP terminal with **live plotting of device data** ("Sunshine" packets)
+and a built-in **MCP server**, so AI agents such as Claude Code can drive your devices.
 
-![Screenshot](screenshot.png)
+This is a Rust rewrite of the GTKTerm "Sin of Pride" fork (the C version lives at tag
+`legacy-c-v1.99.1`). Status: the core, the headless terminal and the MCP server work; the GTK
+user interface is in progress — see [docs/ROADMAP.md](docs/ROADMAP.md).
 
-## What is this?
+## Sunshine packets
 
-So basically I took GTKTerm and added this visualization feature I call "Sunshine". You can send specially formatted data from your Arduino (or whatever microcontroller) and it'll show up as live charts. I made this for a class project but it actually turned out pretty useful for monitoring sensors and debugging embedded stuff.
+Print lines like these from your firmware and they are plotted, one chart per ID:
 
-## Cool Features
-
-- Normal serial terminal stuff (USB ports, TCP/UDP, different baud rates)
-- Hex and ASCII views
-- **Sunshine Visualizations** - the main thing I added:
-  - Line charts (for temperature over time and stuff like that)
-  - Bar charts (comparing multiple values)
-  - Scatter plots (finding correlations maybe?)
-  - Pie charts (percentages and distributions)
-- Some other things that were already in GTKTerm (macros, protocol decoders, logging)
-
-## How to Send Data (The Sunshine Format)
-
-Just send packets like this from your device:
-```
-{PacketID|SeriesName|R,G,B|value}
-```
-
-Real examples that actually work:
 ```
 {P0|Temperature|255,0,0|23.5}
-{P1|Roll|255,0,0|45.2|Pitch|0,255,0|12.3|Yaw|0,0,255|180.0}
+{imu|Roll|255,0,0|45.2|Pitch|0,255,0|12.3|Yaw|0,0,255|180.0}
+{B:levels|Red|10|Green|20}        chart prefixes: L: line (default), B: bar, P: pie, S: scatter
+{S:xy|path|1.0 2.5}               two values = an X/Y point
 ```
 
-The program automatically makes new charts when it sees a new packet ID. Pretty neat!
+Colours (`R,G,B`) are optional, decimals use `.`. Full spec: `gtkterm-sunshine --mcp-stdio`
+exposes it as the resource `gtkterm://docs/sunshine-protocol`, or read
+[crates/gtkterm-mcp/src/sunshine_protocol.md](crates/gtkterm-mcp/src/sunshine_protocol.md).
 
-You can put multiple data series in one packet if they're related (like the Roll/Pitch/Yaw example above).
+## Build
 
-## Building It
-
-You'll need these installed first:
-- GTK4 (version 4.6.0 or newer)
-- VTE (the terminal widget thing, version 0.69.92+)
-- GLib 2.0 (2.66+)
-- Meson (for building)
-
-To build:
 ```bash
-meson setup build
-ninja -C build
+# Headless terminal + MCP server (no GTK needed)
+cargo build --release -p gtkterm-gui --no-default-features
+# Full application (needs: libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev libgtksourceview-5-dev)
+cargo build --release -p gtkterm-gui
 ```
 
-Run it without installing:
+The binary is `target/release/gtkterm-sunshine`.
+
+## Use
+
 ```bash
-./build/src/gtkterm-sin-of-pride-version
+gtkterm-sunshine --headless -p /dev/ttyUSB0 -s 115200          # terminal on stdin/stdout
+gtkterm-sunshine --headless --hexdump --tcp 192.168.1.50:23     # hex dump of a TCP stream
+gtkterm-sunshine --headless --udp '9000->10.0.0.7:9001' --log-file run.csv
+gtkterm-sunshine -U bench -p /dev/ttyACM0 -s 921600 -S          # save a profile
+gtkterm-sunshine -L                                             # list profiles
 ```
 
-Or if you want to install it properly:
+The GTKTerm options keep their names (`--port/-p`, `--baudrate/-s`, `--bits/-b`, `--parity/-a`,
+`--stopbits/-t`, `--flow_control/-w`, `--term_echo/-e on|off`, `--show_config/-V`, ...); `-h`
+is help, so auto-LF moved from `-h` to `-j`. Settings live in
+`~/.config/gtkterm-sunshine/config.toml`; an old `~/.config/.gtktermrc` is imported once.
+
+## MCP (AI agents)
+
 ```bash
-sudo ninja -C build install
+claude mcp add gtkterm -- gtkterm-sunshine --mcp-stdio
 ```
 
-## How to Use
+Then ask e.g. *"open /dev/ttyUSB0 at 115200, wait for a Sunshine packet and summarise the
+Temperature series"*. Tools cover ports, send/read/expect, modem lines, Sunshine series and
+logging; `--mcp-read-only` hides everything that writes. See [docs/mcp.md](docs/mcp.md).
 
-1. Start the program
-2. Pick your serial port (dropdown at the top)
-3. Set the baud rate if needed (default is usually fine)
-4. Hit "Connect" or press F5
-5. To see charts: **Ctrl+Shift+V** shows/hides the visualization panel
-6. If the text looks weird with stair-stepping, enable "CR LF auto" from the menu
+## Development
 
-## Random Tips
+```bash
+cargo xtask check                          # fmt, clippy, all tests that do not need GTK
+cargo nextest run                          # core, protocols, MCP
+cargo nextest run -p gtkterm-gui --no-default-features   # binary end-to-end tests
+cargo run -p gtkterm-testkit --bin sunshine-gen -- /tmp/ttyB --rate 50   # test data
+cd fuzz && cargo +nightly fuzz run sunshine_scanner
+```
 
-- I added support for /dev/pts/* virtual ports so you can test without real hardware
-- Each chart has a "Renew" button that clears the data if you want to start fresh
-- The charts automatically scale to fit your data
-- Use different RGB values for each series so you can tell them apart
-
-## Disclaimer
-
-This is a student project I made while learning GTK4 and Cairo. It's based on the original GTKTerm (which is way more professional than my code lol). The Sunshine part is all mine though!
-
-If you find bugs... well, that's probably my fault not theirs.
+Debugging recipes: [docs/debugging.md](docs/debugging.md). Hardware checklist:
+[docs/testing/hardware.md](docs/testing/hardware.md).
 
 ## License
 
-**Original Code by:** Julien Schmitt
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program. If not, see <http://www.gnu.org/licenses/>.
+GPL-3.0-or-later, like GTKTerm.

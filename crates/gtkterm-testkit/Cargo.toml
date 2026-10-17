@@ -15,7 +15,6 @@ workspace = true
 gtkterm-protocols.workspace = true
 gtkterm-core.workspace = true
 tokio.workspace = true
-nix.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 
