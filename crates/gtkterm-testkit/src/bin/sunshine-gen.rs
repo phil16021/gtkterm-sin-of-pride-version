@@ -1,9 +1,12 @@
-//! Sunshine packet generator for manual testing, benchmarks and demos.
+//! Sunshine packet generator and fake devices for manual testing, benchmarks and demos.
 //!
 //! ```text
 //! socat -d -d pty,raw,echo=0,link=/tmp/ttyA pty,raw,echo=0,link=/tmp/ttyB &
 //! gtkterm-sunshine -p /tmp/ttyA &
 //! sunshine-gen /tmp/ttyB --rate 50 --ids env,B:levels,P:share,S:xy
+//! sunshine-gen /tmp/ttyB --device modbus-rtu --unit 1    # Modbus slave
+//! sunshine-gen /tmp/ttyB --device at                     # AT modem
+//! sunshine-gen /tmp/ttyB --device nmea --rate 1          # GPS
 //! ```
 //!
 //! Targets: a device path, `tcp://HOST:PORT` (connects), `tcp-listen://PORT` or `udp://HOST:PORT`.
@@ -15,7 +18,26 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 use gtkterm_core::config::{Connection, SerialConfig};
-use gtkterm_core::port;
+use gtkterm_core::port::{self, OpenPort, PortRx};
+use gtkterm_protocols::decode::Protocol;
+use gtkterm_testkit::devices::{AtModem, ModbusSlave, nmea_fix};
+
+/// What to emulate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum Device {
+    /// Sunshine chart packets.
+    Sunshine,
+    /// Modbus RTU slave (256 registers and coils).
+    ModbusRtu,
+    /// Modbus ASCII slave.
+    ModbusAscii,
+    /// Modbus TCP server side (use with tcp-listen://502).
+    ModbusTcp,
+    /// Hayes AT modem.
+    At,
+    /// NMEA GPS emitting GGA and RMC (--rate fixes per second).
+    Nmea,
+}
 
 #[derive(Debug, Parser)]
 #[command(about = "Generate Sunshine packets for GTKTerm Sunshine")]
@@ -43,6 +65,12 @@ struct Args {
     /// Also print plain log lines between packets, like real firmware.
     #[arg(long)]
     chatter: bool,
+    /// Device to emulate.
+    #[arg(long, value_enum, default_value_t = Device::Sunshine)]
+    device: Device,
+    /// Modbus unit ID.
+    #[arg(long, default_value_t = 1)]
+    unit: u8,
 }
 
 /// Tiny deterministic PRNG (xorshift) so runs are reproducible.
@@ -140,6 +168,34 @@ async fn main() -> Result<()> {
     let mut port = port::open(&connection(&args.target, args.baudrate)?)
         .await
         .context("cannot open target")?;
+    match args.device {
+        Device::Sunshine => {}
+        Device::Nmea => return gps(&args, port).await,
+        Device::At => {
+            let mut modem = AtModem::default();
+            eprintln!("AT modem on {}", port.description);
+            return respond(port, move |d, _| vec![modem.feed(d)]).await;
+        }
+        Device::ModbusRtu | Device::ModbusAscii | Device::ModbusTcp => {
+            let framing = match args.device {
+                Device::ModbusAscii => Protocol::ModbusAscii,
+                Device::ModbusTcp => Protocol::ModbusTcp,
+                _ => Protocol::ModbusRtu,
+            };
+            let mut slave = ModbusSlave::new(args.unit, framing);
+            eprintln!(
+                "Modbus slave (unit {}, {}) on {}; holding register n holds n*10",
+                args.unit,
+                framing.label(),
+                port.description
+            );
+            return respond(port, move |d, us| {
+                slave.poll(us);
+                slave.feed(d, us)
+            })
+            .await;
+        }
+    }
     eprintln!(
         "sending to {} at {} packets/s per ID",
         port.description, args.rate
@@ -187,6 +243,41 @@ async fn main() -> Result<()> {
         } else {
             port.writer.write_all(&bytes).await?;
         }
+    }
+    port.close().await;
+    Ok(())
+}
+
+/// Answer received data until the port closes.
+async fn respond(mut port: OpenPort, mut f: impl FnMut(&[u8], i64) -> Vec<Vec<u8>>) -> Result<()> {
+    let start = std::time::Instant::now();
+    while let Some(rx) = port.rx.recv().await {
+        match rx {
+            PortRx::Data(d) => {
+                let us = i64::try_from(start.elapsed().as_micros()).unwrap_or(i64::MAX);
+                for reply in f(&d, us) {
+                    if !reply.is_empty() {
+                        port.writer.write_all(&reply).await?;
+                    }
+                }
+            }
+            PortRx::Info(msg) => eprintln!("[{msg}]"),
+            PortRx::Closed(_) => break,
+        }
+    }
+    port.close().await;
+    Ok(())
+}
+
+async fn gps(args: &Args, mut port: OpenPort) -> Result<()> {
+    eprintln!("NMEA GPS on {} at {} fixes/s", port.description, args.rate);
+    let mut ticker = tokio::time::interval(Duration::from_secs_f64(1.0 / args.rate));
+    for t in 0.. {
+        if args.count != 0 && t >= args.count {
+            break;
+        }
+        ticker.tick().await;
+        port.writer.write_all(nmea_fix(t).as_bytes()).await?;
     }
     port.close().await;
     Ok(())
