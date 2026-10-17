@@ -14,12 +14,16 @@ workspace = true
 [features]
 default = ["render"]
 # Cairo rendering (needs the cairo development files). The scale/palette math works without it.
-render = ["dep:cairo-rs"]
+render = ["dep:cairo-rs", "dep:pango", "dep:pangocairo"]
 
 [dependencies]
 gtkterm-protocols.workspace = true
 gtkterm-core.workspace = true
 cairo-rs = { workspace = true, optional = true }
+pango = { workspace = true, optional = true }
+pangocairo = { workspace = true, optional = true }
+jiff.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+tempfile.workspace = true

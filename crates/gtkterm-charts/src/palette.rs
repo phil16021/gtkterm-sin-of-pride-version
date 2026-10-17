@@ -33,7 +33,6 @@ pub fn series_color(index: usize, packet: Option<Rgb>) -> Color {
 }
 
 /// HSV (h in 0..1, s, v in 0..1) to RGB.
-#[allow(clippy::many_single_char_names)]
 pub fn hsv_to_rgb(h: f64, s: f64, v: f64) -> Color {
     let h = (h.rem_euclid(1.0)) * 6.0;
     let i = h.floor();

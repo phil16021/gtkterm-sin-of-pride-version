@@ -42,6 +42,8 @@ sourceview = { package = "sourceview5", version = "0.11", features = ["v5_18"] }
 glib = { version = "0.22", features = ["v2_88"] }
 gio = { version = "0.22", features = ["v2_88"] }
 cairo-rs = { version = "0.22", features = ["png"] }
+pango = "0.22"
+pangocairo = "0.22"
 glib-build-tools = "0.22"
 
 # Async / system
@@ -104,6 +106,9 @@ cast_possible_wrap = "allow"
 doc_markdown = "allow"
 assert_is_empty = "allow"
 struct_excessive_bools = "allow"
+too_many_lines = "allow"
+many_single_char_names = "allow"
+format_collect = "allow"
 dbg_macro = "warn"
 todo = "warn"
 unwrap_used = "warn"
