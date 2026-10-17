@@ -216,6 +216,30 @@ impl OpenPort {
         }
     }
 
+    /// Split into independently owned parts (used by the session actor).
+    pub fn into_parts(mut self) -> PortParts {
+        let closer = PortCloser {
+            cancel: self.cancel.take(),
+            task: self.task.take(),
+        };
+        let Self {
+            kind,
+            description,
+            rx,
+            writer,
+            control,
+            ..
+        } = self;
+        PortParts {
+            kind,
+            description,
+            rx,
+            writer,
+            control,
+            closer,
+        }
+    }
+
     /// Send a break of the given duration (serial only).
     pub async fn send_break(&self, duration: Duration) -> Result<(), PortError> {
         let control = self
@@ -225,6 +249,40 @@ impl OpenPort {
         control.set_break(true)?;
         tokio::time::sleep(duration).await;
         control.set_break(false)
+    }
+}
+
+/// An [`OpenPort`] taken apart.
+#[derive(Debug)]
+pub struct PortParts {
+    /// Backend kind.
+    pub kind: PortKind,
+    /// Description.
+    pub description: String,
+    /// Received data and events.
+    pub rx: mpsc::Receiver<PortRx>,
+    /// Write half.
+    pub writer: Box<dyn PortWriter>,
+    /// Serial controls, if any.
+    pub control: Option<Arc<dyn SerialControl>>,
+    /// Closes the backend.
+    pub closer: PortCloser,
+}
+
+/// Cancels the backend of a port; dropping it does the same without waiting.
+#[derive(Debug)]
+pub struct PortCloser {
+    cancel: Option<DropGuard>,
+    task: Option<JoinHandle<()>>,
+}
+
+impl PortCloser {
+    /// Cancel and wait for the backend task. Drop every other part first.
+    pub async fn close(mut self) {
+        drop(self.cancel.take());
+        if let Some(task) = self.task.take() {
+            let _ = task.await;
+        }
     }
 }
 

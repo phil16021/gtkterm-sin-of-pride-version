@@ -1,0 +1,286 @@
+//! History of received and transmitted data.
+//!
+//! Chunks are kept in arrival order, capped by total bytes and by count. Every chunk carries a
+//! monotonic sequence number, and received bytes additionally a monotonic byte offset, so
+//! readers (terminal views, MCP `read`) can resume from a cursor and notice when data was
+//! evicted. Eviction never shifts indices that readers rely on (ROADMAP defect S1).
+
+use std::collections::VecDeque;
+
+use bytes::Bytes;
+use jiff::Timestamp;
+use serde::{Deserialize, Serialize};
+
+/// Direction of a chunk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Direction {
+    /// Received from the device.
+    Rx,
+    /// Sent to the device.
+    Tx,
+}
+
+/// One received or transmitted block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Chunk {
+    /// Sequence number, unique and increasing within a session.
+    pub seq: u64,
+    /// Offset of the first byte within the direction's byte stream.
+    pub offset: u64,
+    /// Arrival / transmission time.
+    pub ts: Timestamp,
+    /// Direction.
+    pub dir: Direction,
+    /// Payload.
+    pub data: Bytes,
+}
+
+/// Result of [`ChunkStore::read_rx`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RxRead {
+    /// Bytes read.
+    pub data: Vec<u8>,
+    /// Cursor to pass next time.
+    pub next_cursor: u64,
+    /// Bytes between the requested cursor and the oldest retained data that were evicted.
+    pub lost: u64,
+}
+
+/// Bounded chunk history.
+#[derive(Debug, Clone)]
+pub struct ChunkStore {
+    chunks: VecDeque<Chunk>,
+    bytes: usize,
+    max_bytes: usize,
+    max_chunks: usize,
+    next_seq: u64,
+    rx_total: u64,
+    tx_total: u64,
+}
+
+impl Default for ChunkStore {
+    fn default() -> Self {
+        Self::new(16 * 1024 * 1024, 200_000)
+    }
+}
+
+impl ChunkStore {
+    /// Store keeping at most `max_bytes` payload bytes and `max_chunks` chunks.
+    pub fn new(max_bytes: usize, max_chunks: usize) -> Self {
+        Self {
+            chunks: VecDeque::new(),
+            bytes: 0,
+            max_bytes: max_bytes.max(1),
+            max_chunks: max_chunks.max(1),
+            next_seq: 0,
+            rx_total: 0,
+            tx_total: 0,
+        }
+    }
+
+    /// Append a chunk and evict old ones as needed. Returns the stored chunk.
+    pub fn push(&mut self, dir: Direction, data: Bytes, ts: Timestamp) -> Chunk {
+        let offset = match dir {
+            Direction::Rx => &mut self.rx_total,
+            Direction::Tx => &mut self.tx_total,
+        };
+        let chunk = Chunk {
+            seq: self.next_seq,
+            offset: *offset,
+            ts,
+            dir,
+            data,
+        };
+        *offset += chunk.data.len() as u64;
+        self.next_seq += 1;
+        self.bytes += chunk.data.len();
+        self.chunks.push_back(chunk.clone());
+        while self.chunks.len() > 1 && (self.bytes > self.max_bytes || self.chunks.len() > self.max_chunks) {
+            if let Some(old) = self.chunks.pop_front() {
+                self.bytes -= old.data.len();
+            }
+        }
+        chunk
+    }
+
+    /// Number of retained chunks.
+    pub fn len(&self) -> usize {
+        self.chunks.len()
+    }
+
+    /// True if nothing is retained.
+    pub fn is_empty(&self) -> bool {
+        self.chunks.is_empty()
+    }
+
+    /// Retained payload bytes.
+    pub fn bytes(&self) -> usize {
+        self.bytes
+    }
+
+    /// Total bytes ever received.
+    pub fn rx_total(&self) -> u64 {
+        self.rx_total
+    }
+
+    /// Total bytes ever transmitted.
+    pub fn tx_total(&self) -> u64 {
+        self.tx_total
+    }
+
+    /// Sequence number the next chunk will get.
+    pub fn next_seq(&self) -> u64 {
+        self.next_seq
+    }
+
+    /// Retained chunks in order.
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &Chunk> + ExactSizeIterator {
+        self.chunks.iter()
+    }
+
+    /// Chunks with `seq >= from`. If some were evicted, iteration starts at the oldest retained.
+    pub fn since(&self, from: u64) -> impl Iterator<Item = &Chunk> {
+        let start = self
+            .chunks
+            .front()
+            .map_or(0, |c| from.saturating_sub(c.seq) as usize);
+        self.chunks.iter().skip(start)
+    }
+
+    /// Read up to `max` received bytes starting at byte `cursor` of the RX stream.
+    pub fn read_rx(&self, cursor: u64, max: usize) -> RxRead {
+        let mut data = Vec::new();
+        let mut pos = cursor.min(self.rx_total);
+        let oldest = self
+            .chunks
+            .iter()
+            .find(|c| c.dir == Direction::Rx)
+            .map_or(self.rx_total, |c| c.offset);
+        let lost = oldest.saturating_sub(pos);
+        pos = pos.max(oldest);
+        for c in self.chunks.iter().filter(|c| c.dir == Direction::Rx) {
+            let end = c.offset + c.data.len() as u64;
+            if end <= pos {
+                continue;
+            }
+            if data.len() >= max {
+                break;
+            }
+            let skip = (pos - c.offset) as usize;
+            let take = (c.data.len() - skip).min(max - data.len());
+            data.extend_from_slice(&c.data[skip..skip + take]);
+            pos += take as u64;
+        }
+        RxRead {
+            data,
+            next_cursor: pos,
+            lost,
+        }
+    }
+
+    /// Drop all retained data; counters and sequence numbers keep increasing.
+    pub fn clear(&mut self) {
+        self.chunks.clear();
+        self.bytes = 0;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use proptest::prelude::*;
+
+    use super::*;
+
+    fn ts() -> Timestamp {
+        Timestamp::UNIX_EPOCH
+    }
+
+    #[test]
+    fn eviction_by_count_keeps_sequence_monotonic() {
+        // C defect S1: after 10k chunks the C store stopped advancing.
+        let mut s = ChunkStore::new(usize::MAX, 10_000);
+        for i in 0..20_000u32 {
+            s.push(Direction::Rx, Bytes::from(i.to_le_bytes().to_vec()), ts());
+        }
+        assert_eq!(s.len(), 10_000);
+        assert_eq!(s.next_seq(), 20_000);
+        assert_eq!(s.iter().next().unwrap().seq, 10_000);
+        assert_eq!(s.since(19_998).count(), 2);
+        assert_eq!(
+            s.since(0).count(),
+            10_000,
+            "evicted range starts at oldest retained"
+        );
+    }
+
+    #[test]
+    fn eviction_by_bytes() {
+        let mut s = ChunkStore::new(10, 100);
+        for _ in 0..5 {
+            s.push(Direction::Rx, Bytes::from_static(b"abcd"), ts());
+        }
+        assert!(s.bytes() <= 10);
+        assert_eq!(s.len(), 2);
+        // A single oversized chunk is still kept.
+        s.push(Direction::Rx, Bytes::from(vec![0; 100]), ts());
+        assert_eq!(s.len(), 1);
+    }
+
+    #[test]
+    fn read_rx_cursor_skips_tx_and_reports_loss() {
+        let mut s = ChunkStore::new(8, 100);
+        s.push(Direction::Rx, Bytes::from_static(b"hello"), ts());
+        s.push(Direction::Tx, Bytes::from_static(b"AT"), ts());
+        let r = s.read_rx(0, 100);
+        assert_eq!((r.data.as_slice(), r.next_cursor, r.lost), (&b"hello"[..], 5, 0));
+        let r = s.read_rx(2, 2);
+        assert_eq!((r.data.as_slice(), r.next_cursor), (&b"ll"[..], 4));
+        s.push(Direction::Rx, Bytes::from_static(b"world!"), ts()); // evicts "hello"
+        let r = s.read_rx(1, 100);
+        assert_eq!(
+            (r.data.as_slice(), r.next_cursor, r.lost),
+            (&b"world!"[..], 11, 4)
+        );
+        assert_eq!(s.read_rx(11, 100).data, b"");
+        assert_eq!(
+            s.read_rx(999, 100).next_cursor,
+            11,
+            "cursor beyond end is clamped"
+        );
+    }
+
+    proptest! {
+        #[test]
+        fn reading_in_pieces_equals_concatenation(
+            chunks in proptest::collection::vec(proptest::collection::vec(any::<u8>(), 0..50), 0..40),
+            step in 1usize..64,
+        ) {
+            let mut s = ChunkStore::new(usize::MAX, usize::MAX);
+            let mut all = Vec::new();
+            for c in &chunks {
+                s.push(Direction::Rx, Bytes::from(c.clone()), ts());
+                all.extend_from_slice(c);
+            }
+            let mut got = Vec::new();
+            let mut cursor = 0;
+            loop {
+                let r = s.read_rx(cursor, step);
+                if r.data.is_empty() { break; }
+                got.extend(r.data);
+                cursor = r.next_cursor;
+            }
+            prop_assert_eq!(got, all);
+        }
+
+        #[test]
+        fn caps_hold(sizes in proptest::collection::vec(1usize..300, 1..200), max_bytes in 1usize..2000, max_chunks in 1usize..50) {
+            let mut s = ChunkStore::new(max_bytes, max_chunks);
+            for n in sizes {
+                s.push(Direction::Rx, Bytes::from(vec![0; n]), ts());
+                prop_assert!(s.len() <= max_chunks);
+                prop_assert!(s.len() == 1 || s.bytes() <= max_bytes);
+            }
+        }
+    }
+}
