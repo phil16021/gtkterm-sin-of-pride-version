@@ -4,9 +4,10 @@ A Linux serial / TCP / UDP terminal with **live plotting of device data** ("Suns
 and a built-in **MCP server**, so AI agents such as Claude Code can drive your devices.
 
 This is a Rust rewrite of the GTKTerm "Sin of Pride" fork (the C version lives at tag
-`legacy-c-v1.99.1`). Status **2.0.0-alpha.4**: GTK 4 / libadwaita application, headless
-terminal, MCP server, macros, presets, protocol decoders and file transfers work (milestones
-R0–R7). Scripting and the signal monitor follow — see [docs/ROADMAP.md](docs/ROADMAP.md).
+`legacy-c-v1.99.1`). Status **2.0.0-alpha.5**: GTK 4 / libadwaita application, headless
+terminal, MCP server, macros, presets, protocol decoders, file transfers, automation scripts,
+port control and the signal monitor work (milestones R0–R8); R9 is the release — see
+[docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Sunshine packets
 
@@ -82,6 +83,38 @@ prompt). While a transfer runs it owns the port: typed input is refused and prot
 stay out of the terminal; the status bar shows progress and a cancel button. Received files
 are never overwritten (`name (1).ext`), and names from the device cannot leave the folder.
 
+## Automation scripts
+
+Menu → *Scripts…* (Ctrl+Shift+J) opens an editor for `.script` files: run (Ctrl+Return), stop,
+watch the running line and the `log` output. Scripts written for the C GTKTerm run unchanged
+(`data/examples/*.script`); new are labels, `goto`, `if … goto`, `if_match … goto`, `timeout`,
+`set`, `include`, `send_hex`, `send_file`/`receive_file`, `exit` and `fail`:
+
+```
+send AT+CSQ\r
+expect \+CSQ: (\d+),(\d+)
+if ${MATCH_1} == 99 goto no_signal
+log signal ${MATCH_1}
+exit
+no_signal:
+fail no signal
+```
+
+`exec` runs a program without a shell (arguments are split before `${…}` is expanded, so
+received data cannot inject anything) and only when allowed (Preferences → Automation,
+`--allow-exec`). Full reference: [crates/gtkterm-mcp/src/script_language.md](crates/gtkterm-mcp/src/script_language.md)
+or the editor's help button. Headless, for test benches and CI:
+`gtkterm-sunshine --headless -p /dev/ttyUSB0 --script flash.script` exits with the script's result.
+
+## Signals and port control
+
+*Signal Monitor* (Ctrl+Shift+M) draws DTR, RTS, CTS, DSR, DCD and RI over the last 10–300 s;
+lines are polled every 50 ms and pulses shorter than that are recovered from the driver's
+transition counters. Export as CSV (`Timestamp,DTR,RTS,CTS,DSR,DCD,RI,Changed Signals`).
+Preferences → Connection has the break length, RS485 RTS polarity and "receive while sending";
+the menu has *Flush Buffers* and *Detect Baud Rate* (experimental: tries common rates and picks
+the one where the device's output reads as text without framing errors).
+
 ## Use
 
 ```bash
@@ -111,7 +144,8 @@ Then ask e.g. *"open /dev/ttyUSB0 at 115200, wait for a Sunshine packet and summ
 Temperature series"*. Tools cover ports, send/read/expect, modem lines, Sunshine series and
 logging, decoded frames, Modbus requests (`modbus_request` builds the frame with its CRC
 and returns the parsed registers) and file transfers with progress (`file_send`,
-`file_receive`, limited to `~/.local/share/gtkterm-sunshine/transfers` plus `--mcp-allow-dir`);
+`file_receive`, limited to `~/.local/share/gtkterm-sunshine/transfers` plus `--mcp-allow-dir`),
+scripts (`script_run`, `exec` only with `--mcp-allow-exec`), the signal history and auto-baud;
 `--mcp-read-only` hides everything that writes. See [docs/mcp.md](docs/mcp.md).
 
 ## Development

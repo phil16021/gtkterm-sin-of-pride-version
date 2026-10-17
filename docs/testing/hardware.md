@@ -19,3 +19,7 @@ lines or RS485 direction control. Run this list on real hardware before a releas
 | 12 | RTS↔CTS jumper, *Record Modem Line Changes* | toggling RTS (F8) produces RS232 frames with `Changed: RTS,CTS` | ☐ |
 | 13 | Board with an XMODEM/YMODEM bootloader (e.g. U-Boot `loady`, STM32 IAP) at 115200 | firmware image uploads, bootloader reports the right size/CRC; cancel mid-transfer leaves the bootloader responsive | ☐ |
 | 14 | Linux target with lrzsz over a USB-UART, 9600 and 921600 baud | ZMODEM `sz`/`rz` both ways, 10 MB file, `cmp` clean; unplugging mid-transfer ends with an error, not a hang | ☐ |
+| 15 | Device printing text at an unknown rate (e.g. 38400) | *Detect Baud Rate* picks it within a few seconds; at a wrong start rate the framing-error counter rises | ☐ |
+| 16 | Function generator or a button on CTS/RI, 1–20 ms pulses | Signal Monitor shows a pulse marker for each (counters), CSV lists `(pulse)` rows | ☐ |
+| 17 | RS485 transceiver with active-low enable | *RS485 RTS active low* makes the device answer; logic analyser confirms the level only during frames | ☐ |
+| 18 | `data/examples/example_modem.script` against a real modem, `--headless --script` | exit code 0, log lines on stderr; a missing answer exits 1 naming the line | ☐ |

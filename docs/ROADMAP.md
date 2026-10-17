@@ -1,12 +1,15 @@
 # GTKTerm Sunshine — Rust Rewrite: Implementation, Test & Debugging Plan
 
-> **Status 2026-10-18:** R0–R7 done (2.0.0-alpha.4): protocols, core I/O, sessions, Sunshine
-> store and charts, logging, MCP server (36 tools), CLI/headless/MCP modes, GTK 4 / libadwaita
+> **Status 2026-10-18:** R0–R8 done (2.0.0-alpha.5): protocols, core I/O, sessions, Sunshine
+> store and charts, logging, MCP server (42 tools), CLI/headless/MCP modes, GTK 4 / libadwaita
 > GUI, packaging; R5 macros, presets, profile UX; R6 decoders (AT, NMEA, Modbus RTU/ASCII/TCP,
 > candump, SLCAN, EtherCAT, RS232 lines, auto-detect), frames pane, `decoder_*`/`modbus_request`
 > tools, fake devices in `sunshine-gen`; R7 XMODEM/1K/YMODEM/YMODEM-G (sans-IO, lrzsz interop
 > tests for X1–X4), ZMODEM via lrzsz, transfer dialogs and progress, `file_*` MCP tools with
-> progress notifications. Next: R8 (scripting, port control, signal monitor), R9 (release). Deviation: the GUI is built from
+> progress notifications; R8 script runner (C syntax + labels/if/if_match/include/send_file,
+> shell-free opt-in exec), script editor, signal monitor with pulse recovery and CSV, flush,
+> break length, RS485 polarity/echo, experimental auto-baud, `script_*`/`signal_history`/`port_*`
+> tools, `--script`. Next: R9 (release). Deviation: the GUI is built from
 > plain gtk4-rs widgets in Rust instead of composite templates.
 
 ## Context

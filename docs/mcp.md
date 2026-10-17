@@ -46,10 +46,20 @@ The HTTP endpoint binds to `127.0.0.1` by default, requires the bearer token (`-
 | `file_send` | upload files with `xmodem`, `xmodem_1k`, `ymodem`, `ymodem_g` or `zmodem` (lrzsz); reports progress notifications, cancelling the call aborts the transfer |
 | `file_receive` | download into the transfer directory (optional `subdir`; XMODEM takes a `name`) |
 | `file_cancel` | cancel a running transfer, including one started in the window |
+| `script_run` | run an automation script (`script` text or a `path` in the transfer directory) with initial `vars`; `log` lines arrive as progress notifications; failures name the line and include the log and received data |
+| `script_check`, `script_stop` | validate a script without running it; stop the running script or macro |
+| `signal_history` | modem line samples of the last `seconds` (≤ 300), or CSV |
+| `port_flush`, `port_auto_baud` | discard driver buffers; try baud rates and reopen at the one where the device's output is readable |
 
 Write tools are hidden in read-only mode: open/close, send, expect, break, signals, clearing,
 chart changes, logging, macro_run/macro_save, preset_apply, profile_save, decoder_set,
-modbus_request and the file tools.
+modbus_request, the file tools, script_run/script_stop, port_flush and port_auto_baud.
+
+**Scripts.** Read `gtkterm://docs/script-language` (or call `script_check`) before writing one.
+`exec` is refused unless the server runs with `--mcp-allow-exec` (in the window: Preferences →
+MCP → *Agents may use exec in scripts*); even then programs are started without a shell.
+`include`, `send_file` and `receive_file` paths must stay inside the transfer directory or an
+`--mcp-allow-dir` directory.
 
 **File transfers.** The device must be ready first (its receiver started, or about to send).
 `file_send` and `file_receive` return when the transfer is over, with the files, byte count,
@@ -75,6 +85,7 @@ position at send time, so `read`/`expect` from there see exactly the reply. Keep
 ## Resources and prompts
 
 Resources: `gtkterm://ports`, `gtkterm://profiles`, `gtkterm://macros`, `gtkterm://docs/sunshine-protocol`,
+`gtkterm://docs/script-language`, `gtkterm://session/{id}/signals` (CSV),
 `gtkterm://session/{id}/status`, `.../rx` (last 64 KiB), `.../frames` (last 200 decoded frames), `.../sunshine`,
 `.../sunshine/{packet_id}` (CSV).
 
