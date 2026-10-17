@@ -169,6 +169,9 @@ impl TerminalView {
         let popover = gtk::PopoverMenu::from_model(Some(&menu));
         popover.set_parent(&self.term);
         popover.set_has_arrow(false);
+        // A popover parented to a widget must be unparented before the widget is finalized.
+        let p = popover.clone();
+        self.term.connect_destroy(move |_| p.unparent());
         let click = gtk::GestureClick::builder().button(3).build();
         click.connect_pressed(move |_, _, x, y| {
             popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));

@@ -1532,6 +1532,31 @@ mod tests {
 
         win.window.close();
         pump_until(Duration::from_millis(200), || false);
+        // Tear everything down: finalizing widgets must not warn (e.g. popovers still parented).
+        let window = win.window.clone();
+        let term = win.term.term.downgrade();
+        let term_box = win.term.widget.downgrade();
+        let paned = win.paned.downgrade();
+        let wweak = win.window.downgrade();
+        let tv = Rc::downgrade(&win.term);
+        let rc = Rc::downgrade(&win);
+        drop(win);
+        window.destroy();
+        drop(window);
+        pump_until(Duration::from_millis(300), || false);
+        // No reference cycles: the whole window, including the terminal, must be finalized.
+        assert!(
+            rc.upgrade().is_none() && tv.upgrade().is_none(),
+            "Win/TerminalView leaked"
+        );
+        for (name, alive) in [
+            ("window", wweak.upgrade().is_some()),
+            ("paned", paned.upgrade().is_some()),
+            ("terminal box", term_box.upgrade().is_some()),
+            ("terminal", term.upgrade().is_some()),
+        ] {
+            assert!(!alive, "{name} was not finalized (reference cycle)");
+        }
         assert_eq!(
             UNEXPECTED_LOGS.load(Ordering::SeqCst),
             0,

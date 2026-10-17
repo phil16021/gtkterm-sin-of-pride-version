@@ -292,8 +292,11 @@ impl ChartView {
                 me.area.queue_draw();
             }
         });
-        let w = Rc::downgrade(&me);
+        // The toast overlay contains this tab, so closures inside the tab may only hold it weakly;
+        // a strong reference would keep the whole window content alive after closing.
+        let toast = toast.downgrade();
         let t = toast.clone();
+        let w = Rc::downgrade(&me);
         csv.connect_clicked(move |b| {
             let Some(me) = w.upgrade() else { return };
             let Some(text) = me
@@ -302,7 +305,9 @@ impl ChartView {
             else {
                 return;
             };
-            save_dialog(b, &format!("{}.csv", me.id), text.into_bytes(), t.clone());
+            if let Some(t) = t.upgrade() {
+                save_dialog(b, &format!("{}.csv", me.id), text.into_bytes(), t);
+            }
         });
         let w = Rc::downgrade(&me);
         png.connect_clicked(move |b| {
@@ -312,8 +317,9 @@ impl ChartView {
             };
             let width = me.area.width().max(640);
             let height = me.area.height().max(400);
+            let Some(toast) = toast.upgrade() else { return };
             match render_png(&chart, &me.view.borrow(), &style_for(&me.area), width, height) {
-                Ok(bytes) => save_dialog(b, &format!("{}.png", me.id), bytes, toast.clone()),
+                Ok(bytes) => save_dialog(b, &format!("{}.png", me.id), bytes, toast),
                 Err(e) => toast.add_toast(adw::Toast::new(&format!("PNG export failed: {e}"))),
             }
         });
@@ -370,7 +376,7 @@ pub struct VizPanel {
     tab_view: adw::TabView,
     tabs: RefCell<HashMap<String, (adw::TabPage, Rc<ChartView>)>>,
     session: Session,
-    toast: adw::ToastOverlay,
+    toast: glib::WeakRef<adw::ToastOverlay>,
     footer: gtk::Label,
 }
 
@@ -413,7 +419,7 @@ impl VizPanel {
             tab_view,
             tabs: RefCell::default(),
             session: session.clone(),
-            toast: toast.clone(),
+            toast: toast.downgrade(),
             footer,
         });
         let w = Rc::downgrade(&me);
@@ -453,7 +459,8 @@ impl VizPanel {
         }
         // Note: libadwaita 1.9 logs "AdwGizmo (tabboxchild) reported min width -6" while the
         // tab-open animation starts; it is cosmetic and disappears with animations disabled.
-        let view = ChartView::new(&self.session, id, self.toast.clone());
+        let Some(toast) = self.toast.upgrade() else { return };
+        let view = ChartView::new(&self.session, id, toast);
         let page = self.tab_view.append(&view.widget);
         page.set_title(id);
         page.set_tooltip(&format!("Packet ID {id}"));
