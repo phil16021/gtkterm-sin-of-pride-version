@@ -1,13 +1,15 @@
 //! Owner of all sessions, shared by the GUI and the MCP server.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 
 use crate::config::{Config, ConfigError, DEFAULT_PROFILE, TerminalConfig};
+use crate::macros::{MacroError, MacroReport, MacroStore, run_macro};
 use crate::session::{Session, SessionId};
 
 /// Session list changes.
@@ -17,6 +19,24 @@ pub enum ManagerEvent {
     Added(SessionId),
     /// A session was removed.
     Removed(SessionId),
+    /// The macro store changed.
+    MacrosChanged,
+    /// A macro started in a session.
+    MacroStarted {
+        /// Session.
+        session: SessionId,
+        /// Macro name.
+        name: String,
+    },
+    /// A macro finished.
+    MacroFinished {
+        /// Session.
+        session: SessionId,
+        /// Macro name.
+        name: String,
+        /// `None` on success, otherwise the error message.
+        error: Option<String>,
+    },
 }
 
 /// Registry of sessions plus the shared configuration.
@@ -27,6 +47,9 @@ pub struct SessionManager {
     events: broadcast::Sender<ManagerEvent>,
     config: Mutex<Config>,
     config_path: Option<PathBuf>,
+    macros: Mutex<MacroStore>,
+    macros_path: Mutex<Option<PathBuf>>,
+    running: Mutex<HashMap<SessionId, (String, CancellationToken)>>,
 }
 
 impl SessionManager {
@@ -39,7 +62,86 @@ impl SessionManager {
             events: broadcast::channel(64).0,
             config: Mutex::new(config),
             config_path,
+            macros: Mutex::default(),
+            macros_path: Mutex::default(),
+            running: Mutex::default(),
         })
+    }
+
+    /// Use `store`, persisted at `path` (`None`: memory only).
+    pub fn set_macros(&self, store: MacroStore, path: Option<PathBuf>) {
+        *self.macros.lock().expect("macros poisoned") = store;
+        *self.macros_path.lock().expect("macros poisoned") = path;
+        let _ = self.events.send(ManagerEvent::MacrosChanged);
+    }
+
+    /// Run `f` with the macro store.
+    pub fn with_macros<R>(&self, f: impl FnOnce(&MacroStore) -> R) -> R {
+        f(&self.macros.lock().expect("macros poisoned"))
+    }
+
+    /// Change the macro store and persist it; notifies subscribers.
+    pub fn update_macros<R>(
+        &self,
+        f: impl FnOnce(&mut MacroStore) -> Result<R, MacroError>,
+    ) -> Result<R, MacroError> {
+        let (result, snapshot) = {
+            let mut store = self.macros.lock().expect("macros poisoned");
+            let r = f(&mut store)?;
+            (r, store.clone())
+        };
+        if let Some(path) = self.macros_path.lock().expect("macros poisoned").clone() {
+            snapshot.save(&path)?;
+        }
+        let _ = self.events.send(ManagerEvent::MacrosChanged);
+        Ok(result)
+    }
+
+    /// Name of the macro running in `session`, if any.
+    pub fn running_macro(&self, session: SessionId) -> Option<String> {
+        self.running
+            .lock()
+            .expect("running poisoned")
+            .get(&session)
+            .map(|(n, _)| n.clone())
+    }
+
+    /// Cancel the macro running in `session`. Returns false if none runs.
+    pub fn stop_macro(&self, session: SessionId) -> bool {
+        self.running
+            .lock()
+            .expect("running poisoned")
+            .get(&session)
+            .map(|(_, t)| t.cancel())
+            .is_some()
+    }
+
+    /// Run the macro `name` in `session` (one at a time per session) and wait for the result.
+    pub async fn run_macro(&self, session: &Session, name: &str) -> Result<MacroReport, MacroError> {
+        let m = self
+            .with_macros(|s| s.get(name).cloned())
+            .ok_or_else(|| MacroError::NotFound(name.to_owned()))?;
+        let id = session.id();
+        let token = CancellationToken::new();
+        {
+            let mut running = self.running.lock().expect("running poisoned");
+            if let Some((other, _)) = running.get(&id) {
+                return Err(MacroError::Busy(other.clone()));
+            }
+            running.insert(id, (m.name.clone(), token.clone()));
+        }
+        let _ = self.events.send(ManagerEvent::MacroStarted {
+            session: id,
+            name: m.name.clone(),
+        });
+        let result = run_macro(session, &m, &token).await;
+        self.running.lock().expect("running poisoned").remove(&id);
+        let _ = self.events.send(ManagerEvent::MacroFinished {
+            session: id,
+            name: m.name.clone(),
+            error: result.as_ref().err().map(ToString::to_string),
+        });
+        result
     }
 
     /// Subscribe to session list changes.

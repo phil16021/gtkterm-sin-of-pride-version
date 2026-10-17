@@ -577,12 +577,16 @@ impl Profile {
 pub struct Config {
     /// Profiles by name; `default` always exists.
     pub profiles: BTreeMap<String, Profile>,
+    /// User serial presets (built-ins are in [`crate::presets::builtin_presets`]).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub presets: BTreeMap<String, crate::presets::SerialPreset>,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             profiles: BTreeMap::from([(DEFAULT_PROFILE.to_owned(), Profile::default())]),
+            presets: BTreeMap::new(),
         }
     }
 }
@@ -737,6 +741,7 @@ fn parse_bool(v: &str) -> Option<bool> {
 pub fn import_legacy_keyfile(text: &str) -> (Config, Vec<String>) {
     let mut config = Config {
         profiles: BTreeMap::new(),
+        presets: BTreeMap::new(),
     };
     let mut warnings = Vec::new();
     let mut current: Option<String> = None;

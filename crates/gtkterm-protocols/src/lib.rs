@@ -7,6 +7,7 @@
 
 pub mod checksum;
 pub mod downsample;
+pub mod escape;
 pub mod hex;
 pub mod logfmt;
 pub mod sunshine;
