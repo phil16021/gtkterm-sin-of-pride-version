@@ -17,3 +17,5 @@ lines or RS485 direction control. Run this list on real hardware before a releas
 | 10 | RS485 adapter + real Modbus RTU slave, 19200 8E1 | `modbus_request` reads registers; frames pane shows TX/RX with CRC ✓; unplugging the slave gives timeouts, no false frames | ☐ |
 | 11 | GPS module on a UART | *Auto-detect* picks NMEA within a second; positions match the module's datasheet format | ☐ |
 | 12 | RTS↔CTS jumper, *Record Modem Line Changes* | toggling RTS (F8) produces RS232 frames with `Changed: RTS,CTS` | ☐ |
+| 13 | Board with an XMODEM/YMODEM bootloader (e.g. U-Boot `loady`, STM32 IAP) at 115200 | firmware image uploads, bootloader reports the right size/CRC; cancel mid-transfer leaves the bootloader responsive | ☐ |
+| 14 | Linux target with lrzsz over a USB-UART, 9600 and 921600 baud | ZMODEM `sz`/`rz` both ways, 10 MB file, `cmp` clean; unplugging mid-transfer ends with an error, not a hang | ☐ |

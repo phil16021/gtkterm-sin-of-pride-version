@@ -43,10 +43,19 @@ The HTTP endpoint binds to `127.0.0.1` by default, requires the bearer token (`-
 | `decoder_set` | protocol decoder: `off`, `auto`, `raw`, `at`, `nmea`, `modbus_rtu`, `modbus_ascii`, `modbus_tcp`, `can`, `slcan`, `ethercat`, `rs232`; `signals` adds modem line changes |
 | `decoder_get_frames` | decoded frames since a sequence number (`next_seq`), with source (rx/tx/lines), summary, fields, checksum result and bytes; can wait `timeout_ms` |
 | `modbus_request` | build a Modbus request (RTU/ASCII/TCP framing incl. CRC/LRC/MBAP), send it, wait for the matching response and return registers, bits, the write echo or the exception |
+| `file_send` | upload files with `xmodem`, `xmodem_1k`, `ymodem`, `ymodem_g` or `zmodem` (lrzsz); reports progress notifications, cancelling the call aborts the transfer |
+| `file_receive` | download into the transfer directory (optional `subdir`; XMODEM takes a `name`) |
+| `file_cancel` | cancel a running transfer, including one started in the window |
 
 Write tools are hidden in read-only mode: open/close, send, expect, break, signals, clearing,
-chart changes, logging, macro_run/macro_save, preset_apply, profile_save, decoder_set and
-modbus_request.
+chart changes, logging, macro_run/macro_save, preset_apply, profile_save, decoder_set,
+modbus_request and the file tools.
+
+**File transfers.** The device must be ready first (its receiver started, or about to send).
+`file_send` and `file_receive` return when the transfer is over, with the files, byte count,
+duration and retries; a failed transfer is a tool error with the reason. Clients that send a
+`progressToken` get `notifications/progress` with bytes so far (and the total when sending).
+`get_status` shows the running or last transfer under `transfer`.
 
 **Frames.** Decoded frames get increasing sequence numbers; the last 10 000 are kept. Poll
 `decoder_get_frames` with `since` = the previous `next_seq`; `dropped` counts frames that were
@@ -77,3 +86,7 @@ Prompts: `debug-serial-device`, `analyze-sunshine-data`, `modbus-scan`, `at-mode
 Agents writing to real hardware can have physical effects. Use `--mcp-read-only` when an agent
 should only observe. Log files can only be created inside the log directory
 (`~/.local/share/gtkterm-sunshine/logs`); file names with path components are rejected.
+`file_send` reads only files inside the transfer directory
+(`~/.local/share/gtkterm-sunshine/transfers`) or a directory given with `--mcp-allow-dir DIR`
+(repeatable), checked after resolving symlinks; `file_receive` writes only below the transfer
+directory, and file names sent by the device are reduced to plain names.

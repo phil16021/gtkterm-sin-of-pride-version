@@ -4,9 +4,9 @@ A Linux serial / TCP / UDP terminal with **live plotting of device data** ("Suns
 and a built-in **MCP server**, so AI agents such as Claude Code can drive your devices.
 
 This is a Rust rewrite of the GTKTerm "Sin of Pride" fork (the C version lives at tag
-`legacy-c-v1.99.1`). Status **2.0.0-alpha.3**: GTK 4 / libadwaita application, headless
-terminal, MCP server, macros, presets and protocol decoders work (milestones R0–R6).
-XMODEM/YMODEM, scripting and the signal monitor follow — see [docs/ROADMAP.md](docs/ROADMAP.md).
+`legacy-c-v1.99.1`). Status **2.0.0-alpha.4**: GTK 4 / libadwaita application, headless
+terminal, MCP server, macros, presets, protocol decoders and file transfers work (milestones
+R0–R7). Scripting and the signal monitor follow — see [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Sunshine packets
 
@@ -72,6 +72,16 @@ failures marked. *Record Modem Line Changes* adds a frame whenever DTR/RTS/CTS/D
 change (the *RS232 signals* decoder records only those). Frames are reassembled across reads,
 Modbus RTU frames by CRC and the 3.5-character gap. The decoder is saved with the profile.
 
+## File transfers
+
+Menu → *Send File…* (Ctrl+Shift+R) and *Receive File…* (Ctrl+Shift+E): XMODEM (CRC, falls
+back to the checksum), XMODEM-1K, YMODEM batches (names, sizes and times kept) and YMODEM-G,
+built in; ZMODEM through lrzsz (`sz`/`rz`, package `lrzsz`). *Raw* sends a file's bytes as they
+are. Start the receiver on the device first (`rx`, `rb`, `rz`, or a bootloader's upload
+prompt). While a transfer runs it owns the port: typed input is refused and protocol bytes
+stay out of the terminal; the status bar shows progress and a cancel button. Received files
+are never overwritten (`name (1).ext`), and names from the device cannot leave the folder.
+
 ## Use
 
 ```bash
@@ -99,9 +109,10 @@ Or share the open window with an agent: menu → *MCP Server for AI Agents*; the
 
 Then ask e.g. *"open /dev/ttyUSB0 at 115200, wait for a Sunshine packet and summarise the
 Temperature series"*. Tools cover ports, send/read/expect, modem lines, Sunshine series and
-logging, decoded frames and Modbus requests (`modbus_request` builds the frame with its CRC
-and returns the parsed registers); `--mcp-read-only` hides everything that writes. See
-[docs/mcp.md](docs/mcp.md).
+logging, decoded frames, Modbus requests (`modbus_request` builds the frame with its CRC
+and returns the parsed registers) and file transfers with progress (`file_send`,
+`file_receive`, limited to `~/.local/share/gtkterm-sunshine/transfers` plus `--mcp-allow-dir`);
+`--mcp-read-only` hides everything that writes. See [docs/mcp.md](docs/mcp.md).
 
 ## Development
 
