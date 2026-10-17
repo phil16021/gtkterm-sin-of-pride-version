@@ -5,7 +5,8 @@ build
 .claude
 
 # Generated documentation
-doc
+doc/html
+doc/latex
 
 # IDE and editor files
 .vscode
@@ -28,3 +29,12 @@ compile_commands.json
 # OS files
 .DS_Store
 Thumbs.db
+
+# Profiling / fuzzing output
+gmon.out
+*.gcda
+*.gcno
+fuzz-out/
+crash-*
+leak-*
+timeout-*
