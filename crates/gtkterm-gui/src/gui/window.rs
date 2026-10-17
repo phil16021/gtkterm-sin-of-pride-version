@@ -10,6 +10,7 @@ use std::time::Duration;
 use adw::prelude::*;
 use gtk::glib;
 use gtkterm_core::config::{Connection, Profile, STANDARD_BAUD_RATES};
+use gtkterm_core::decoding::{DecoderMode, DecoderStatus};
 use gtkterm_core::manager::SessionManager;
 use gtkterm_core::ports::{PortWatcher, list_ports, watch_ports};
 use gtkterm_core::session::{LogOp, PortState, Session, SessionEvent};
@@ -19,6 +20,7 @@ use gtkterm_protocols::logfmt::{LogFormat, session_file_name};
 use gtkterm_protocols::view::{HEX_WIDTHS, ViewMode};
 
 use super::charts::{VizPanel, save_dialog};
+use super::frames::FramesView;
 use super::rt::{events, forward, rt, spawn, spawn_io};
 use super::shortcuts::SHORTCUTS;
 use super::state::{McpSettings, UiState};
@@ -35,6 +37,8 @@ pub struct Win {
     term: Rc<TerminalView>,
     panel: Rc<VizPanel>,
     paned: gtk::Paned,
+    frames: Rc<FramesView>,
+    term_paned: gtk::Paned,
     status: StatusBar,
     port_drop: gtk::DropDown,
     port_paths: RefCell<Vec<String>>,
@@ -159,9 +163,24 @@ impl Win {
         let term = TerminalView::new(&session, &profile.terminal);
         let toast = adw::ToastOverlay::new();
         let panel = VizPanel::new(&session, &toast);
+        let frames = FramesView::new(&session);
+        let term_paned = gtk::Paned::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .start_child(&term.widget)
+            .end_child(&frames.widget)
+            .wide_handle(true)
+            .build();
+        term_paned.set_resize_start_child(true);
+        term_paned.set_resize_end_child(false);
+        term_paned.set_shrink_start_child(false);
+        term_paned.set_shrink_end_child(false);
+        frames.widget.set_visible(state.frames_visible);
+        if let Some(p) = state.frames_position {
+            term_paned.set_position(p);
+        }
         let paned = gtk::Paned::builder()
             .orientation(gtk::Orientation::Horizontal)
-            .start_child(&term.widget)
+            .start_child(&term_paned)
             .end_child(&panel.widget)
             .wide_handle(true)
             .build();
@@ -207,6 +226,8 @@ impl Win {
             term,
             panel,
             paned,
+            frames,
+            term_paned,
             status,
             port_drop,
             port_paths: RefCell::default(),
@@ -465,6 +486,7 @@ impl Win {
         if let Err(e) = (Profile {
             connection: conn.clone(),
             terminal: self.term.config(),
+            ..Profile::default()
         })
         .validate()
         {
@@ -549,6 +571,8 @@ impl Win {
                 self.panel.on_update(u);
             }
             SessionEvent::Cleared => self.panel.sync(),
+            SessionEvent::Frames(f) => self.frames.append(f),
+            SessionEvent::Decoder(st) => self.on_decoder_status(st),
         }
     }
 
@@ -783,6 +807,30 @@ impl Win {
         }
     }
 
+    fn set_frames_visible(&self, visible: bool) {
+        self.frames.widget.set_visible(visible);
+        if visible {
+            let h = self.term_paned.height();
+            if h > 0 && (self.term_paned.position() < 80 || self.term_paned.position() > h - 120) {
+                self.term_paned.set_position((f64::from(h) * 0.6) as i32);
+            }
+        }
+        self.state.borrow_mut().frames_visible = visible;
+        if let Some(a) = self.window.lookup_action("frames") {
+            a.change_state(&visible.to_variant());
+        }
+    }
+
+    fn on_decoder_status(&self, st: &DecoderStatus) {
+        self.frames.set_status(st);
+        if let Some(a) = self.window.lookup_action("decoder") {
+            a.change_state(&st.mode.to_string().to_variant());
+        }
+        if let Some(a) = self.window.lookup_action("decoder-signals") {
+            a.change_state(&st.signals.to_variant());
+        }
+    }
+
     // ----- status bar -----
 
     fn wire_status(self: &Rc<Self>) {
@@ -1004,6 +1052,49 @@ impl Win {
             w.set_panel_visible(on);
         });
         self.window.add_action(&action);
+
+        let visible = self.state.borrow().frames_visible;
+        let action = gio::SimpleAction::new_stateful("frames", None, &visible.to_variant());
+        let w = Rc::downgrade(self);
+        action.connect_activate(move |a, _| {
+            let Some(w) = w.upgrade() else { return };
+            let on = !a.state().and_then(|v| v.get::<bool>()).unwrap_or(false);
+            w.set_frames_visible(on);
+        });
+        self.window.add_action(&action);
+
+        let st = self.session.decoder_status();
+        let action = gio::SimpleAction::new_stateful(
+            "decoder",
+            Some(glib::VariantTy::STRING),
+            &st.mode.to_string().to_variant(),
+        );
+        let w = Rc::downgrade(self);
+        action.connect_activate(move |_, param| {
+            let (Some(w), Some(p)) = (w.upgrade(), param.and_then(glib::Variant::get::<String>)) else {
+                return;
+            };
+            match p.parse::<DecoderMode>() {
+                Ok(mode) => {
+                    let signals = w.session.decoder_status().signals;
+                    w.session.set_decoder(mode, signals);
+                    if !mode.is_off() {
+                        w.set_frames_visible(true);
+                    }
+                }
+                Err(e) => w.toast(&e),
+            }
+        });
+        self.window.add_action(&action);
+        let action = gio::SimpleAction::new_stateful("decoder-signals", None, &st.signals.to_variant());
+        let w = Rc::downgrade(self);
+        action.connect_activate(move |a, _| {
+            let Some(w) = w.upgrade() else { return };
+            let on = !a.state().and_then(|v| v.get::<bool>()).unwrap_or(false);
+            w.session.set_decoder(w.session.decoder_status().mode, on);
+        });
+        self.window.add_action(&action);
+        add("clear-frames", Box::new(|w| w.session.clear_frames()));
 
         let enabled = self.state.borrow().mcp.enabled;
         let action = gio::SimpleAction::new_stateful("mcp", None, &enabled.to_variant());
@@ -1245,6 +1336,7 @@ impl Win {
         let profile = Profile {
             connection: self.profile.borrow().connection.clone(),
             terminal: self.term.config(),
+            decoder: self.session.decoder_config(),
         };
         let mcp = self.state.borrow().mcp.clone();
         let name = self.profile_name.borrow().clone();
@@ -1315,6 +1407,7 @@ impl Win {
         let p = Profile {
             connection: self.profile.borrow().connection.clone(),
             terminal: self.term.config(),
+            decoder: self.session.decoder_config(),
         };
         let result = self
             .manager
@@ -1334,6 +1427,7 @@ impl Win {
         name.clone_into(&mut self.profile_name.borrow_mut());
         self.term.apply_config(&p.terminal);
         self.session.set_terminal(p.terminal.clone());
+        self.session.apply_decoder_config(p.decoder);
         let reconnect = self.is_open();
         *self.profile.borrow_mut() = p;
         self.refresh_header();
@@ -1487,6 +1581,10 @@ impl Win {
             }
             st.pane_position = Some(self.paned.position());
             st.panel_visible = self.panel.widget.is_visible();
+            st.frames_visible = self.frames.widget.is_visible();
+            if st.frames_visible {
+                st.frames_position = Some(self.term_paned.position());
+            }
             st.save();
         }
         self.stop_mcp();
@@ -1576,6 +1674,19 @@ fn main_menu() -> gio::Menu {
     view.append(Some("Clear Screen"), Some("win.clear-screen"));
     view.append(Some("Remove All Charts"), Some("win.clear-charts"));
     menu.append_section(None, &view);
+
+    let decode = gio::Menu::new();
+    decode.append(Some("Decoded Frames"), Some("win.frames"));
+    let decoders = gio::Menu::new();
+    for m in DecoderMode::all() {
+        let item = gio::MenuItem::new(Some(m.label()), None);
+        item.set_action_and_target_value(Some("win.decoder"), Some(&m.to_string().to_variant()));
+        decoders.append_item(&item);
+    }
+    decode.append_submenu(Some("Decoder"), &decoders);
+    decode.append(Some("Record Modem Line Changes"), Some("win.decoder-signals"));
+    decode.append(Some("Clear Frames"), Some("win.clear-frames"));
+    menu.append_section(None, &decode);
 
     let app = gio::Menu::new();
     app.append(Some("Import Presets…"), Some("win.import-presets"));
@@ -1899,6 +2010,40 @@ mod tests {
         snapshot(&win.window, "macro-editor");
         gio::prelude::ActionGroupExt::activate_action(&win.window, "macro-bar", None);
         pump_until(Duration::from_millis(50), || false);
+
+        // Decoders: choosing one shows the frames pane; requests (TX) and responses (RX) are listed.
+        {
+            use gtkterm_protocols::decode::modbus;
+            gio::prelude::ActionGroupExt::activate_action(
+                &win.window,
+                "decoder",
+                Some(&"modbus_rtu".to_variant()),
+            );
+            assert!(win.frames.widget.is_visible());
+            win.session
+                .send_nowait(modbus::rtu_frame(1, &[0x03, 0x00, 0x00, 0x00, 0x01]))
+                .unwrap();
+            rt().block_on(dev.send(modbus::rtu_frame(1, &[0x03, 0x02, 0x00, 0x2A])))
+                .unwrap();
+            assert!(pump_until(Duration::from_secs(2), || win.frames.len() == 2));
+            let summaries = win.frames.summaries();
+            assert!(
+                summaries.iter().any(|s| s.contains("[1 register] 0x002A")),
+                "{summaries:?}"
+            );
+            rt().block_on(dev.send(vec![0x01, 0x03])).unwrap();
+            assert!(pump_until(Duration::from_secs(2), || win.frames.len() == 3));
+            pump_until(Duration::from_millis(200), || false);
+            snapshot(&win.frames.widget, "frames");
+            gio::prelude::ActionGroupExt::activate_action(&win.window, "decoder-signals", None);
+            assert!(win.session.decoder_status().signals);
+            gio::prelude::ActionGroupExt::activate_action(&win.window, "clear-frames", None);
+            assert!(pump_until(Duration::from_secs(1), || win.frames.len() == 0));
+            gio::prelude::ActionGroupExt::activate_action(&win.window, "decoder", Some(&"off".to_variant()));
+            gio::prelude::ActionGroupExt::activate_action(&win.window, "frames", None);
+            assert!(!win.frames.widget.is_visible());
+            rt().block_on(async { while !dev.drain().is_empty() {} });
+        }
 
         // Echo off by default, toggled on above: the TX chunk is displayed (no assertion on VTE
         // contents, but the path must not warn).

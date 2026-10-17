@@ -9,6 +9,7 @@
 )]
 
 mod charts;
+mod frames;
 mod macros;
 mod prefs;
 mod rt;
@@ -37,6 +38,7 @@ pub fn run(cli: Cli, resolved: Resolved) -> ExitCode {
     let manager = SessionManager::new(resolved.config.clone(), Some(resolved.config_path.clone()));
     manager.set_macros(resolved.macros.0.clone(), Some(resolved.macros.1.clone()));
     let session = manager.create(&resolved.profile_name, resolved.profile.terminal.clone());
+    session.apply_decoder_config(resolved.profile.decoder);
 
     let app = adw::Application::builder()
         .application_id(APP_ID)

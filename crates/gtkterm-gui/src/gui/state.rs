@@ -50,6 +50,10 @@ pub struct UiState {
     pub mcp: McpSettings,
     /// Show the macro button bar.
     pub macro_bar: bool,
+    /// Decoded frames pane shown.
+    pub frames_visible: bool,
+    /// Divider position between terminal and frames pane.
+    pub frames_position: Option<i32>,
 }
 
 impl Default for UiState {
@@ -63,6 +67,8 @@ impl Default for UiState {
             hex_history: Vec::new(),
             mcp: McpSettings::default(),
             macro_bar: false,
+            frames_visible: false,
+            frames_position: None,
         }
     }
 }

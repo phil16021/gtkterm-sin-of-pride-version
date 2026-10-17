@@ -48,6 +48,7 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str)] = &[
         "win.visualization",
         "<Control><Shift>g",
     ),
+    ("View", "Decoded frames", "win.frames", "<Control><Shift>d"),
     ("View", "Keyboard shortcuts", "win.shortcuts", "<Control>question"),
     ("Application", "About", "win.about", "F1"),
     ("Application", "Quit", "app.quit", "<Control><Shift>q"),
