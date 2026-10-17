@@ -606,3 +606,64 @@ pub(crate) struct ModbusRequestParams {
     #[serde(default)]
     pub(crate) timeout_ms: Option<u64>,
 }
+
+/// File transfer protocol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum TransferProtocolArg {
+    /// 128-byte blocks, CRC or checksum (one file).
+    Xmodem,
+    /// 1024-byte blocks (one file).
+    Xmodem1k,
+    /// Batch with names and sizes.
+    Ymodem,
+    /// YMODEM streaming, error-free links only.
+    YmodemG,
+    /// ZMODEM via lrzsz (sz/rz must be installed).
+    Zmodem,
+}
+
+impl From<TransferProtocolArg> for gtkterm_core::transfer::TransferProtocol {
+    fn from(p: TransferProtocolArg) -> Self {
+        match p {
+            TransferProtocolArg::Xmodem => Self::Xmodem,
+            TransferProtocolArg::Xmodem1k => Self::Xmodem1k,
+            TransferProtocolArg::Ymodem => Self::Ymodem,
+            TransferProtocolArg::YmodemG => Self::YmodemG,
+            TransferProtocolArg::Zmodem => Self::Zmodem,
+        }
+    }
+}
+
+/// `file_send` arguments.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub(crate) struct FileSendParams {
+    /// Session to use; default: the first session.
+    #[serde(default)]
+    pub(crate) session: Option<u32>,
+    /// Protocol. The device must already be waiting to receive (e.g. after `rx`/`rb`/`rz` or a
+    /// bootloader's "send file now" prompt).
+    pub(crate) protocol: TransferProtocolArg,
+    /// Files to send: absolute paths inside the transfer directory or a directory allowed with
+    /// --mcp-allow-dir, or names relative to the transfer directory. XMODEM takes exactly one.
+    pub(crate) paths: Vec<String>,
+}
+
+/// `file_receive` arguments.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub(crate) struct FileReceiveParams {
+    /// Session to use; default: the first session.
+    #[serde(default)]
+    pub(crate) session: Option<u32>,
+    /// Protocol. Start the transfer on the device right after (or just before) this call.
+    pub(crate) protocol: TransferProtocolArg,
+    /// Subdirectory of the transfer directory to save into (created if missing).
+    #[serde(default)]
+    pub(crate) subdir: Option<String>,
+    /// File name for XMODEM, which carries none (default: xmodem-<time>.bin).
+    #[serde(default)]
+    pub(crate) name: Option<String>,
+    /// Replace existing files instead of saving as "name (1).ext".
+    #[serde(default)]
+    pub(crate) overwrite: bool,
+}

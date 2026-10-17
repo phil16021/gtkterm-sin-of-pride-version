@@ -18,11 +18,21 @@ use rmcp::{ClientHandler, RoleClient, ServiceExt};
 use serde_json::{Value, json};
 
 #[derive(Debug, Clone, Default)]
-struct Client;
+struct Client {
+    progress: Arc<std::sync::Mutex<Vec<rmcp::model::ProgressNotificationParam>>>,
+}
 
 impl ClientHandler for Client {
     fn get_info(&self) -> ClientConfig {
         ClientConfig::default()
+    }
+
+    async fn on_progress(
+        &self,
+        params: rmcp::model::ProgressNotificationParam,
+        _context: rmcp::service::NotificationContext<RoleClient>,
+    ) {
+        self.progress.lock().unwrap().push(params);
     }
 }
 
@@ -43,7 +53,10 @@ async fn fixture(options: ServerOptions) -> Fixture {
             let _ = running.waiting().await;
         }
     });
-    let client = Client.serve(client_io).await.expect("client handshake");
+    let client = Client::default()
+        .serve(client_io)
+        .await
+        .expect("client handshake");
     Fixture {
         client,
         manager,
@@ -409,7 +422,7 @@ async fn http_endpoint_requires_token_and_checks_origin() {
         )
         .auth_header("s3cret"),
     );
-    let client = Client
+    let client = Client::default()
         .serve(transport)
         .await
         .expect("authenticated client connects");
@@ -485,6 +498,7 @@ async fn macros_presets_and_profiles() {
     // Presets.
     let presets = ok(&f.client, "preset_list", json!({})).await;
     assert_eq!(presets["presets"].as_array().unwrap().len(), 10);
+    // Reopening the same device right away (C defect class: lock released late).
     let applied = ok(&f.client, "preset_apply", json!({"name": "modbus rtu"})).await;
     assert!(
         applied["status"]["description"]
@@ -608,4 +622,139 @@ async fn decoders_and_modbus_requests() {
         .await
         .unwrap();
     assert!(serde_json::to_string(&res.contents).unwrap().contains("GPS GGA"));
+}
+
+/// Run an XMODEM/YMODEM machine as the device on the far end of a loopback port.
+async fn device_transfer(
+    dev: &mut DeviceEnd,
+    mut m: impl gtkterm_protocols::xmodem::Transfer,
+) -> Vec<gtkterm_protocols::xmodem::Event> {
+    let t0 = std::time::Instant::now();
+    let now = || u64::try_from(t0.elapsed().as_millis()).unwrap();
+    let mut events = Vec::new();
+    let mut out = m.start(now());
+    loop {
+        events.append(&mut out.events);
+        if !out.bytes.is_empty() {
+            dev.send(std::mem::take(&mut out.bytes)).await.unwrap();
+            out = m.drained(now());
+            continue;
+        }
+        if m.is_done() {
+            return events;
+        }
+        let wait = m
+            .deadline()
+            .map_or(200, |d| d.saturating_sub(now()).clamp(1, 200));
+        out = match tokio::time::timeout(Duration::from_millis(wait), dev.recv()).await {
+            Ok(Some(b)) => m.input(&b, now()),
+            Ok(None) => return events,
+            Err(_) => m.tick(now()),
+        };
+    }
+}
+
+#[tokio::test]
+async fn file_transfers_with_progress_and_sandbox() {
+    use gtkterm_protocols::xmodem::{Event, FileData, Receiver, Sender, Timing, Variant};
+
+    let transfers = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let f = fixture(ServerOptions {
+        transfer_dir: transfers.path().to_owned(),
+        ..ServerOptions::default()
+    })
+    .await;
+    let mut dev = with_device(&f).await;
+    let data: Vec<u8> = (0..5000u32).map(|i| (i * 13) as u8).collect();
+    std::fs::write(transfers.path().join("fw.bin"), &data).unwrap();
+    std::fs::write(outside.path().join("secret.txt"), b"no").unwrap();
+
+    // Sandbox: files outside the transfer directory, also via a symlink, are refused.
+    let path = outside.path().join("secret.txt");
+    let msg = tool_error(
+        &f.client,
+        "file_send",
+        json!({"protocol": "xmodem", "paths": [path]}),
+    )
+    .await;
+    assert!(msg.contains("outside the transfer directory"), "{msg}");
+    std::os::unix::fs::symlink(&path, transfers.path().join("link.txt")).unwrap();
+    let msg = tool_error(
+        &f.client,
+        "file_send",
+        json!({"protocol": "xmodem", "paths": ["link.txt"]}),
+    )
+    .await;
+    assert!(msg.contains("outside"), "{msg}");
+    let msg = tool_error(
+        &f.client,
+        "file_receive",
+        json!({"protocol": "ymodem", "subdir": "../x"}),
+    )
+    .await;
+    assert!(msg.contains("without `..`"), "{msg}");
+
+    // Upload with YMODEM; the device runs a native receiver. Progress arrives as notifications.
+    let mut params = CallToolRequestParams::new("file_send").with_arguments(
+        json!({"protocol": "ymodem", "paths": ["fw.bin"]})
+            .as_object()
+            .cloned()
+            .unwrap(),
+    );
+    params.meta = Some(rmcp::model::RequestMetaObject::with_progress_token(
+        rmcp::model::ProgressToken(rmcp::model::NumberOrString::String("up".into())),
+    ));
+    let device = device_transfer(&mut dev, Receiver::new(Variant::Ymodem, Timing::default(), "x"));
+    let (result, events) = tokio::join!(f.client.call_tool(params), device);
+    let result = result.unwrap();
+    assert_ne!(result.is_error, Some(true), "{:?}", result.content);
+    let sc = result.structured_content.unwrap();
+    assert_eq!(sc["bytes"], 5000, "{sc}");
+    assert_eq!(sc["files"][0]["name"], "fw.bin");
+    let got = events.iter().find_map(|e| match e {
+        Event::FileReceived(f) => Some(f.clone()),
+        _ => None,
+    });
+    assert_eq!(
+        got.map(|f| (f.name, f.data)),
+        Some(("fw.bin".to_owned(), data.clone()))
+    );
+    let progress = f.client.service().progress.lock().unwrap().clone();
+    assert!(!progress.is_empty(), "progress notifications");
+    assert!(progress.iter().all(|p| p.total == Some(5000.0)));
+    let last = progress.last().unwrap().message.clone().unwrap_or_default();
+    assert!(last.contains("upload finished"), "{last}");
+    assert_eq!(progress.last().unwrap().progress, 5000.0);
+
+    // Download with XMODEM into a subdirectory; the device sends.
+    let sender = Sender::new(
+        Variant::Xmodem,
+        vec![FileData {
+            name: String::new(),
+            data: b"log line\n".to_vec(),
+            mtime: None,
+        }],
+        Timing::default(),
+    )
+    .unwrap();
+    let (r, _) = tokio::join!(
+        ok(
+            &f.client,
+            "file_receive",
+            json!({"protocol": "xmodem", "subdir": "logs", "name": "dev.log"})
+        ),
+        device_transfer(&mut dev, sender)
+    );
+    let saved = r["files"][0]["path"].as_str().unwrap().to_owned();
+    assert_eq!(
+        std::path::Path::new(&saved),
+        transfers.path().join("logs/dev.log")
+    );
+    assert_eq!(std::fs::read(&saved).unwrap(), b"log line\n");
+
+    // Nothing to cancel; status shows the last transfer.
+    let done = ok(&f.client, "file_cancel", json!({})).await;
+    assert_eq!(done["message"], "no transfer was running");
+    assert_eq!(done["status"]["transfer"]["state"], "finished");
 }

@@ -8,4 +8,4 @@ mod params;
 mod server;
 pub mod transport;
 
-pub use server::{GtkTermMcp, ServerOptions, WRITE_TOOLS, default_log_dir};
+pub use server::{GtkTermMcp, ServerOptions, WRITE_TOOLS, default_log_dir, default_transfer_dir};

@@ -1,6 +1,6 @@
 ---
 source: crates/gtkterm-mcp/tests/mcp.rs
-assertion_line: 89
+assertion_line: 99
 expression: names
 ---
 - clear_buffer
@@ -8,6 +8,9 @@ expression: names
 - decoder_get_frames
 - decoder_set
 - expect
+- file_cancel
+- file_receive
+- file_send
 - get_signals
 - get_status
 - list_ports

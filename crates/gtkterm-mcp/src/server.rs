@@ -9,6 +9,7 @@ use gtkterm_core::manager::SessionManager;
 use gtkterm_core::ports::{PortInfo, list_ports};
 use gtkterm_core::session::{LogOp, Session, SessionError, SessionStatus};
 use gtkterm_core::sunshine::{ChartData, SunshineStats};
+use gtkterm_core::transfer::{TransferProtocol, TransferRequest, TransferState, TransferStatus};
 use gtkterm_protocols::decode::{Check, Protocol, modbus};
 use gtkterm_protocols::downsample::lttb_indices;
 use gtkterm_protocols::logfmt::{LogFormat, session_file_name};
@@ -18,9 +19,9 @@ use rmcp::handler::server::router::prompt::PromptRouter;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::model::{
-    Implementation, ListResourceTemplatesResult, ListResourcesResult, PaginatedRequestParams, PromptMessage,
-    ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource, ResourceContents,
-    ResourceTemplate, Role, ServerCapabilities, ServerConfig,
+    Implementation, ListResourceTemplatesResult, ListResourcesResult, PaginatedRequestParams,
+    ProgressNotificationParam, PromptMessage, ReadResourceRequestParams, ReadResourceResponse,
+    ReadResourceResult, Resource, ResourceContents, ResourceTemplate, Role, ServerCapabilities, ServerConfig,
 };
 use rmcp::service::RequestContext;
 use rmcp::{
@@ -33,9 +34,10 @@ use tokio_util::sync::CancellationToken;
 
 use crate::params::{
     BreakParams, ChartParams, ChartTypeParams, ClearChartParams, DecoderSetParams, ExpectParams,
-    GetFramesParams, GetSeriesParams, LogStartParams, MacroRunParams, MacroSaveParams, ModbusFraming,
-    ModbusRequestParams, OpenPortParams, PauseParams, PngParams, PresetApplyParams, ProfileParams,
-    ProfileSaveParams, ReadParams, ReadResult, SearchHit, SearchParams, SendParams, SessionArg, SignalParams,
+    FileReceiveParams, FileSendParams, GetFramesParams, GetSeriesParams, LogStartParams, MacroRunParams,
+    MacroSaveParams, ModbusFraming, ModbusRequestParams, OpenPortParams, PauseParams, PngParams,
+    PresetApplyParams, ProfileParams, ProfileSaveParams, ReadParams, ReadResult, SearchHit, SearchParams,
+    SendParams, SessionArg, SignalParams,
 };
 
 /// Read caps protecting the agent's context window and the app.
@@ -45,6 +47,9 @@ const MAX_EXPECT: Duration = Duration::from_secs(600);
 
 /// Tools that change device state or files; hidden in read-only mode.
 pub const WRITE_TOOLS: &[&str] = &[
+    "file_send",
+    "file_receive",
+    "file_cancel",
     "decoder_set",
     "modbus_request",
     "macro_run",
@@ -72,6 +77,10 @@ pub struct ServerOptions {
     pub read_only: bool,
     /// Directory session logs are written to.
     pub log_dir: PathBuf,
+    /// Received files are saved here; relative names for `file_send` resolve here.
+    pub transfer_dir: PathBuf,
+    /// Further directories `file_send` may read from (`--mcp-allow-dir`).
+    pub allowed_dirs: Vec<PathBuf>,
 }
 
 impl Default for ServerOptions {
@@ -79,6 +88,8 @@ impl Default for ServerOptions {
         Self {
             read_only: false,
             log_dir: default_log_dir(),
+            transfer_dir: default_transfer_dir(),
+            allowed_dirs: Vec::new(),
         }
     }
 }
@@ -89,6 +100,31 @@ pub fn default_log_dir() -> PathBuf {
         .map_or_else(|| PathBuf::from("."), |d| d.data_dir().to_owned())
         .join("gtkterm-sunshine")
         .join("logs")
+}
+
+/// Default transfer directory: `$XDG_DATA_HOME/gtkterm-sunshine/transfers`.
+pub fn default_transfer_dir() -> PathBuf {
+    default_log_dir().with_file_name("transfers")
+}
+
+/// `file_send` / `file_receive` result.
+#[derive(Debug, Serialize, JsonSchema)]
+struct TransferResult {
+    /// One-line summary.
+    summary: String,
+    /// Protocol.
+    protocol: String,
+    /// Files sent or received, with local paths for received files.
+    files: Vec<serde_json::Value>,
+    /// Bytes transferred.
+    bytes: u64,
+    /// Duration in ms.
+    elapsed_ms: u64,
+    /// Repeated blocks and timeouts.
+    retries: u32,
+    /// Note about the end of the transfer, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
 }
 
 /// GTKTerm MCP server. Cheap to clone; all clones share the session manager.
@@ -444,6 +480,86 @@ impl GtkTermMcp {
             let ids = session.with_sunshine(|s| s.charts().iter().map(|c| c.id.clone()).collect::<Vec<_>>());
             format!("no chart {id:?}; available: {ids:?}")
         })
+    }
+
+    /// A file `file_send` may read: inside the transfer directory or an allowed directory, after
+    /// resolving symlinks.
+    fn readable_path(&self, p: &str) -> Result<PathBuf, String> {
+        let path = Path::new(p);
+        let path = if path.is_absolute() {
+            path.to_owned()
+        } else {
+            self.options.transfer_dir.join(path)
+        };
+        let real = path
+            .canonicalize()
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        let allowed = std::iter::once(&self.options.transfer_dir)
+            .chain(&self.options.allowed_dirs)
+            .filter_map(|d| d.canonicalize().ok())
+            .any(|d| real.starts_with(&d));
+        if !allowed {
+            return Err(format!(
+                "{} is outside the transfer directory {} (allow more with --mcp-allow-dir)",
+                real.display(),
+                self.options.transfer_dir.display()
+            ));
+        }
+        Ok(real)
+    }
+
+    async fn run_transfer(
+        &self,
+        session: &Session,
+        req: TransferRequest,
+        total: Option<u64>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<Json<TransferResult>, String> {
+        let token = ctx.meta.get_progress_token();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<TransferStatus>();
+        let peer = ctx.peer.clone();
+        let forward = tokio::spawn(async move {
+            while let Some(st) = rx.recv().await {
+                if let Some(t) = &token {
+                    let mut p = ProgressNotificationParam::new(t.clone(), st.total_bytes as f64)
+                        .with_message(st.summary());
+                    if let Some(total) = total {
+                        p = p.with_total(total as f64);
+                    }
+                    let _ = peer.notify_progress(p).await;
+                }
+            }
+        });
+        let fut = Box::pin(session.transfer(req, move |st| {
+            let _ = tx.send(st.clone());
+        }));
+        let mut fut = fut;
+        let st = tokio::select! {
+            r = &mut fut => r,
+            () = ctx.ct.cancelled() => {
+                session.cancel_transfer().await;
+                (&mut fut).await
+            }
+        };
+        drop(fut);
+        let _ = forward.await;
+        let st = st.map_err(err)?;
+        if st.state != TransferState::Finished {
+            return Err(st.summary());
+        }
+        Ok(Json(TransferResult {
+            summary: st.summary(),
+            protocol: st.protocol.id().to_owned(),
+            files: st
+                .files
+                .iter()
+                .map(|f| serde_json::to_value(f).unwrap_or_default())
+                .collect(),
+            bytes: st.total_bytes,
+            elapsed_ms: st.elapsed_ms,
+            retries: st.retries,
+            message: st.message,
+        }))
     }
 
     fn log_path(
@@ -1127,6 +1243,88 @@ impl GtkTermMcp {
         let response = modbus::parse_response(&request, &pdu)?.ok_or("unexpected response")?;
         out.response = Some(serde_json::to_value(response).map_err(err)?);
         Ok(Json(out))
+    }
+
+    /// Upload files to the device with XMODEM, XMODEM-1K, YMODEM, YMODEM-G or ZMODEM. Start the
+    /// receiver on the device first. Sends progress notifications; cancelling the call aborts.
+    #[tool(annotations(title = "Send file", open_world_hint = true))]
+    async fn file_send(
+        &self,
+        Parameters(p): Parameters<FileSendParams>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<Json<TransferResult>, String> {
+        let session = self.session(p.session)?;
+        let protocol: TransferProtocol = p.protocol.into();
+        if !protocol.available() {
+            return Err("ZMODEM needs lrzsz (sz and rz) installed".into());
+        }
+        let files = p
+            .paths
+            .iter()
+            .map(|f| self.readable_path(f))
+            .collect::<Result<Vec<_>, _>>()?;
+        let total = files
+            .iter()
+            .filter_map(|f| std::fs::metadata(f).ok())
+            .map(|m| m.len())
+            .sum();
+        self.run_transfer(
+            &session,
+            TransferRequest::Send { protocol, files },
+            Some(total),
+            ctx,
+        )
+        .await
+    }
+
+    /// Download files from the device into the transfer directory (YMODEM/ZMODEM keep the
+    /// device's file names, XMODEM uses `name`). Sends progress notifications.
+    #[tool(annotations(title = "Receive file", open_world_hint = true))]
+    async fn file_receive(
+        &self,
+        Parameters(p): Parameters<FileReceiveParams>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<Json<TransferResult>, String> {
+        let session = self.session(p.session)?;
+        let protocol: TransferProtocol = p.protocol.into();
+        if !protocol.available() {
+            return Err("ZMODEM needs lrzsz (sz and rz) installed".into());
+        }
+        let mut dir = self.options.transfer_dir.clone();
+        if let Some(sub) = &p.subdir {
+            let rel = Path::new(sub);
+            if rel
+                .components()
+                .any(|c| !matches!(c, std::path::Component::Normal(_)))
+            {
+                return Err(format!("{sub:?} must be a relative path without `..`"));
+            }
+            dir = dir.join(rel);
+        }
+        if let Some(n) = &p.name
+            && (n.contains(['/', '\\']) || n.starts_with('.') || n.is_empty())
+        {
+            return Err(format!("{n:?} must be a plain file name"));
+        }
+        let req = TransferRequest::Receive {
+            protocol,
+            dir,
+            name: p.name,
+            overwrite: p.overwrite,
+        };
+        self.run_transfer(&session, req, None, ctx).await
+    }
+
+    /// Cancel the running file transfer of a session (also one started in the window).
+    #[tool(annotations(title = "Cancel transfer", idempotent_hint = true))]
+    async fn file_cancel(&self, Parameters(p): Parameters<SessionArg>) -> Result<Json<Done>, String> {
+        let session = self.session(p.session)?;
+        let msg = if session.cancel_transfer().await {
+            "transfer cancelled"
+        } else {
+            "no transfer was running"
+        };
+        Ok(Self::done(&session, msg))
     }
 
     /// Pause or resume a Sunshine chart.
