@@ -9,6 +9,7 @@
 )]
 
 mod charts;
+mod macros;
 mod prefs;
 mod rt;
 mod shortcuts;

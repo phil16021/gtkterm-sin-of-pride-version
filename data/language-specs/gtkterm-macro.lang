@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  GTKTerm Sunshine macro steps:
+    send: ATZ\r      send[250]: text      wait: 500 ms      expect[2000]: OK\r\n
+-->
+<language id="gtkterm-macro" name="GTKTerm Macro" version="2.0" _section="Serial Protocols">
+  <metadata>
+    <property name="line-comment-start">#</property>
+  </metadata>
+  <styles>
+    <style id="comment" name="Comment" map-to="def:comment"/>
+    <style id="keyword" name="Command" map-to="def:keyword"/>
+    <style id="number" name="Number" map-to="def:decimal"/>
+    <style id="escape" name="Escape" map-to="def:special-char"/>
+    <style id="pattern" name="Pattern" map-to="def:string"/>
+  </styles>
+  <definitions>
+    <context id="comment" style-ref="comment" end-at-line-end="true">
+      <start>^\s*#</start>
+    </context>
+    <context id="escape" style-ref="escape">
+      <match>\\(x[0-9A-Fa-f]{2}|[rnt0e\\])</match>
+    </context>
+    <context id="head">
+      <match>^\s*(send|wait|expect)(\[\s*([0-9]+)\s*\])?\s*:</match>
+      <include>
+        <context sub-pattern="1" style-ref="keyword"/>
+        <context sub-pattern="3" style-ref="number"/>
+      </include>
+    </context>
+    <context id="duration" style-ref="number">
+      <match>\b[0-9]+(\.[0-9]+)?\s*(ms|s)\b</match>
+    </context>
+    <context id="gtkterm-macro">
+      <include>
+        <context ref="comment"/>
+        <context ref="head"/>
+        <context ref="escape"/>
+        <context ref="duration"/>
+      </include>
+    </context>
+  </definitions>
+</language>

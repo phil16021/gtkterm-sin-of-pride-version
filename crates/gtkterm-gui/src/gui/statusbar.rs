@@ -20,6 +20,7 @@ pub struct StatusBar {
     leds: [gtk::Label; 4],
     log: gtk::Label,
     mcp: gtk::Label,
+    activity: gtk::Label,
 }
 
 fn human(bytes: u64) -> String {
@@ -73,11 +74,16 @@ impl StatusBar {
         });
         let log = gtk::Label::new(None);
         let mcp = gtk::Label::new(None);
+        let activity = gtk::Label::builder()
+            .ellipsize(pango::EllipsizeMode::End)
+            .max_width_chars(30)
+            .build();
         widget.append(&profile);
         widget.append(&endpoint);
         widget.append(&state);
         widget.append(&counters);
         widget.append(&spacer);
+        widget.append(&activity);
         widget.append(&log);
         widget.append(&mcp);
         widget.append(&dtr);
@@ -96,6 +102,7 @@ impl StatusBar {
             leds,
             log,
             mcp,
+            activity,
         }
     }
 
@@ -165,6 +172,18 @@ impl StatusBar {
                 l.remove_css_class("on");
             }
         }
+    }
+
+    /// Show macro activity: recording, a running macro, or nothing.
+    pub fn set_activity(&self, recording: bool, running: Option<&str>) {
+        let text = match (recording, running) {
+            (true, _) => "● REC".to_owned(),
+            (false, Some(name)) => format!("▶ {name}"),
+            (false, None) => String::new(),
+        };
+        self.activity.set_text(&text);
+        self.activity
+            .set_tooltip_text(running.map(|n| format!("Macro {n} is running")).as_deref());
     }
 
     /// Show the embedded MCP endpoint state.

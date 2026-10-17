@@ -27,6 +27,8 @@ pub struct TerminalView {
     search_regex: gtk::CheckButton,
     search_hex: gtk::CheckButton,
     config: RefCell<TerminalConfig>,
+    /// Called with every chunk of keyboard/paste input (macro recording).
+    pub on_input: RefCell<Option<Box<dyn Fn(&[u8])>>>,
     formatter: RefCell<ViewFormatter>,
     transform: RefCell<Transform>,
 }
@@ -115,14 +117,21 @@ impl TerminalView {
             search_regex,
             search_hex,
             config: RefCell::new(config.clone()),
+            on_input: RefCell::new(None),
             formatter: RefCell::new(ViewFormatter::default()),
             transform: RefCell::new(transform_for(config)),
         });
         view.apply_config(config);
 
         let s = session.clone();
+        let v = Rc::downgrade(&view);
         view.term.connect_commit(move |_, text, _| {
             let _ = s.send_nowait(text.as_bytes().to_vec());
+            if let Some(v) = v.upgrade()
+                && let Some(hook) = v.on_input.borrow().as_ref()
+            {
+                hook(text.as_bytes());
+            }
         });
 
         let v = Rc::downgrade(&view);

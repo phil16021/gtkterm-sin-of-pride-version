@@ -75,3 +75,24 @@ pub fn forward<T: Send + 'static>(mut rx: tokio::sync::mpsc::Receiver<T>) -> asy
     });
     out
 }
+
+/// Forward a broadcast receiver to the GTK main thread (lagged messages are skipped).
+pub fn forward_broadcast<T: Clone + Send + 'static>(
+    mut rx: tokio::sync::broadcast::Receiver<T>,
+) -> async_channel::Receiver<T> {
+    let (tx, out) = async_channel::unbounded();
+    rt().spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(v) => {
+                    if tx.send(v).await.is_err() {
+                        break;
+                    }
+                }
+                Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => break,
+            }
+        }
+    });
+    out
+}

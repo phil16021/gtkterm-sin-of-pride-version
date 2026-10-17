@@ -51,6 +51,11 @@ pub struct Win {
     mcp_url: RefCell<Option<String>>,
     updating: Cell<bool>,
     watcher: RefCell<Option<PortWatcher>>,
+    macro_bar: gtk::FlowBox,
+    shortcut_ctl: RefCell<Option<gtk::ShortcutController>>,
+    recorder: RefCell<Option<super::macros::Recorder>>,
+    running_macro: RefCell<Option<String>>,
+    macro_editor: RefCell<Option<Rc<super::macros::MacroEditor>>>,
 }
 
 /// Startup options passed from the command line.
@@ -126,6 +131,12 @@ impl Win {
             .tooltip_text("Main menu")
             .build();
         header.pack_end(&menu_button);
+        let macro_button = gtk::MenuButton::builder()
+            .icon_name("input-keyboard-symbolic")
+            .tooltip_text("Macros")
+            .build();
+        macro_button.set_create_popup_func(|b| b.set_menu_model(Some(&macro_menu())));
+        header.pack_end(&macro_button);
         let viz_button = gtk::ToggleButton::builder()
             .icon_name("utilities-system-monitor-symbolic")
             .tooltip_text("Visualization panel (Ctrl+Shift+G)")
@@ -176,7 +187,17 @@ impl Win {
         let toolbar_view = adw::ToolbarView::new();
         toolbar_view.add_top_bar(&header);
         toolbar_view.set_content(Some(&toast));
-        toolbar_view.add_bottom_bar(&status.widget);
+        let macro_bar = gtk::FlowBox::builder()
+            .selection_mode(gtk::SelectionMode::None)
+            .max_children_per_line(12)
+            .margin_start(6)
+            .margin_end(6)
+            .build();
+        macro_bar.set_visible(state.macro_bar);
+        let bottom = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        bottom.append(&macro_bar);
+        bottom.append(&status.widget);
+        toolbar_view.add_bottom_bar(&bottom);
         window.set_content(Some(&toolbar_view));
 
         let win = Rc::new(Self {
@@ -202,8 +223,15 @@ impl Win {
             mcp_url: RefCell::default(),
             updating: Cell::new(false),
             watcher: RefCell::default(),
+            macro_bar,
+            shortcut_ctl: RefCell::default(),
+            recorder: RefCell::default(),
+            running_macro: RefCell::default(),
+            macro_editor: RefCell::default(),
         });
         win.install_actions(app);
+        win.rebuild_macros();
+        win.pump_manager_events();
         win.wire_header(&refresh);
         win.wire_status();
         win.refresh_header();
@@ -418,8 +446,12 @@ impl Win {
             _ => self.banner.set_revealed(false),
         }
         let title = match state {
-            PortState::Open => format!("GTKTerm Sunshine — {}", self.session.status().description),
-            _ => "GTKTerm Sunshine".to_owned(),
+            PortState::Open => format!(
+                "GTKTerm Sunshine — [{}] {}",
+                self.profile_name.borrow(),
+                self.session.status().description
+            ),
+            _ => format!("GTKTerm Sunshine — [{}]", self.profile_name.borrow()),
         };
         self.window.set_title(Some(&title));
     }
@@ -535,6 +567,207 @@ impl Win {
         });
     }
 
+    // ----- macros -----
+
+    fn rebuild_macros(self: &Rc<Self>) {
+        let macros: Vec<(String, Option<String>)> = self.manager.with_macros(|s| {
+            s.list()
+                .iter()
+                .map(|m| (m.name.clone(), m.shortcut.clone()))
+                .collect()
+        });
+        MACRO_NAMES.with(|n| n.borrow_mut().clone_from(&macros));
+
+        // Shortcuts: capture phase, so function keys reach us before VTE turns them into escape codes.
+        if let Some(old) = self.shortcut_ctl.borrow_mut().take() {
+            self.window.remove_controller(&old);
+        }
+        let ctl = gtk::ShortcutController::new();
+        ctl.set_propagation_phase(gtk::PropagationPhase::Capture);
+        for (name, shortcut) in &macros {
+            let Some(accel) = shortcut else { continue };
+            let Ok(accel) = super::macros::validate_shortcut(accel) else {
+                continue;
+            };
+            let Some(trigger) = gtk::ShortcutTrigger::parse_string(&accel) else {
+                continue;
+            };
+            let w = Rc::downgrade(self);
+            let name = name.clone();
+            let action = gtk::CallbackAction::new(move |_, _| {
+                if let Some(w) = w.upgrade() {
+                    w.play_macro(&name);
+                }
+                glib::Propagation::Stop
+            });
+            ctl.add_shortcut(gtk::Shortcut::new(Some(trigger), Some(action)));
+        }
+        self.window.add_controller(ctl.clone());
+        *self.shortcut_ctl.borrow_mut() = Some(ctl);
+
+        // Macro bar.
+        while let Some(child) = self.macro_bar.first_child() {
+            self.macro_bar.remove(&child);
+        }
+        for (name, shortcut) in &macros {
+            let label = match shortcut {
+                Some(s) => format!("{name}  ·  {}", super::macros::shortcut_label(s)),
+                None => name.clone(),
+            };
+            let b = gtk::Button::builder()
+                .label(&label)
+                .action_name("win.play-macro")
+                .action_target(&name.to_variant())
+                .build();
+            b.add_css_class("flat");
+            self.macro_bar.append(&b);
+        }
+        let edit = gtk::Button::builder()
+            .icon_name("document-edit-symbolic")
+            .tooltip_text("Edit macros")
+            .action_name("win.edit-macros")
+            .build();
+        edit.add_css_class("flat");
+        self.macro_bar.append(&edit);
+    }
+
+    fn play_macro(self: &Rc<Self>, name: &str) {
+        let (mgr, session, name) = (Arc::clone(&self.manager), self.session.clone(), name.to_owned());
+        let w = Rc::downgrade(self);
+        spawn(
+            async move { mgr.run_macro(&session, &name).await.map(|r| (name, r)) },
+            move |r| {
+                let Some(w) = w.upgrade() else { return };
+                match r {
+                    Ok((name, report)) => w.toast(&format!(
+                        "Macro {name} finished ({} steps, {} ms)",
+                        report.steps.len(),
+                        report.duration_ms
+                    )),
+                    Err(gtkterm_core::macros::MacroError::Cancelled) => w.toast("Macro stopped"),
+                    Err(e) => w.toast(&format!("Macro: {e}")),
+                }
+            },
+        );
+    }
+
+    fn set_recording(self: &Rc<Self>, on: bool) {
+        if on {
+            *self.recorder.borrow_mut() = Some(super::macros::Recorder::default());
+            let w = Rc::downgrade(self);
+            *self.term.on_input.borrow_mut() = Some(Box::new(move |data| {
+                if let Some(w) = w.upgrade()
+                    && let Some(r) = w.recorder.borrow_mut().as_mut()
+                {
+                    r.push(data);
+                }
+            }));
+        } else {
+            self.term.on_input.borrow_mut().take();
+            if let Some(rec) = self.recorder.borrow_mut().take() {
+                let commands = rec.finish();
+                if commands.is_empty() {
+                    self.toast("Nothing was recorded");
+                } else {
+                    let name = self.manager.with_macros(|s| s.fresh_name("Recorded"));
+                    let m = gtkterm_core::macros::Macro {
+                        name: name.clone(),
+                        shortcut: None,
+                        commands,
+                    };
+                    match self.manager.update_macros(|s| s.upsert(None, m)) {
+                        Ok(()) => self.open_macro_editor(Some(name)),
+                        Err(e) => self.toast(&e.to_string()),
+                    }
+                }
+            }
+        }
+        if let Some(a) = self.window.lookup_action("record-macro") {
+            a.change_state(&on.to_variant());
+        }
+        self.status
+            .set_activity(on, self.running_macro.borrow().as_deref());
+    }
+
+    fn record_sent(&self, data: &[u8]) {
+        if let Some(r) = self.recorder.borrow_mut().as_mut() {
+            r.push(data);
+        }
+    }
+
+    fn open_macro_editor(self: &Rc<Self>, select: Option<String>) {
+        let w = Rc::downgrade(self);
+        let w2 = Rc::downgrade(self);
+        let editor = super::macros::MacroEditor::present(
+            &self.window,
+            Arc::clone(&self.manager),
+            select,
+            move |name| {
+                if let Some(w) = w.upgrade() {
+                    w.play_macro(name);
+                }
+            },
+            move || {
+                if let Some(w) = w2.upgrade() {
+                    w.manager.stop_macro(w.session.id());
+                }
+            },
+        );
+        *self.macro_editor.borrow_mut() = Some(editor);
+    }
+
+    fn pump_manager_events(self: &Rc<Self>) {
+        let rx = super::rt::forward_broadcast(self.manager.subscribe());
+        let w = Rc::downgrade(self);
+        let me = self.session.id();
+        glib::spawn_future_local(async move {
+            while let Ok(ev) = rx.recv().await {
+                let Some(w) = w.upgrade() else { break };
+                match ev {
+                    gtkterm_core::manager::ManagerEvent::MacrosChanged => w.rebuild_macros(),
+                    gtkterm_core::manager::ManagerEvent::MacroStarted { session, name } if session == me => {
+                        *w.running_macro.borrow_mut() = Some(name);
+                        w.status
+                            .set_activity(w.recorder.borrow().is_some(), w.running_macro.borrow().as_deref());
+                    }
+                    gtkterm_core::manager::ManagerEvent::MacroFinished { session, .. } if session == me => {
+                        w.running_macro.borrow_mut().take();
+                        w.status.set_activity(w.recorder.borrow().is_some(), None);
+                    }
+                    _ => {}
+                }
+            }
+        });
+    }
+
+    fn import_presets(self: &Rc<Self>) {
+        let dialog = gtk::FileDialog::builder()
+            .title("Import presets (GTKTerm JSON)")
+            .modal(true)
+            .build();
+        let w = Rc::downgrade(self);
+        dialog.open(Some(&self.window), gio::Cancellable::NONE, move |res| {
+            let (Some(w), Ok(file)) = (w.upgrade(), res) else {
+                return;
+            };
+            let Some(path) = file.path() else { return };
+            let result = std::fs::read_to_string(&path)
+                .map_err(|e| e.to_string())
+                .and_then(|t| gtkterm_core::presets::import_c_presets(&t).map_err(|e| e.to_string()));
+            match result {
+                Ok(list) => {
+                    let n = list.len();
+                    w.manager.with_config_mut(|c| c.presets.extend(list));
+                    match w.manager.save_config() {
+                        Ok(()) => w.toast(&format!("Imported {n} preset(s)")),
+                        Err(e) => w.toast(&e.to_string()),
+                    }
+                }
+                Err(e) => w.toast(&format!("Cannot import presets: {e}")),
+            }
+        });
+    }
+
     fn set_panel_visible(&self, visible: bool) {
         self.panel.widget.set_visible(visible);
         if visible {
@@ -586,7 +819,13 @@ impl Win {
                 .manager
                 .with_config(|c| c.profiles.keys().cloned().collect::<Vec<_>>())
             {
-                let item = gio::MenuItem::new(Some(&name), None);
+                let current = *w.profile_name.borrow() == name;
+                let label = if current {
+                    format!("{name}  (current)")
+                } else {
+                    name.clone()
+                };
+                let item = gio::MenuItem::new(Some(&label), None);
                 item.set_action_and_target_value(Some("win.load-profile"), Some(&name.to_variant()));
                 load.append_item(&item);
             }
@@ -778,6 +1017,44 @@ impl Win {
         });
         self.window.add_action(&action);
 
+        add("edit-macros", Box::new(|w| w.open_macro_editor(None)));
+        add(
+            "stop-macro",
+            Box::new(|w| {
+                if !w.manager.stop_macro(w.session.id()) {
+                    w.toast("No macro is running");
+                }
+            }),
+        );
+        add("import-presets", Box::new(Self::import_presets));
+        let action = gio::SimpleAction::new("play-macro", Some(glib::VariantTy::STRING));
+        let w = Rc::downgrade(self);
+        action.connect_activate(move |_, param| {
+            if let (Some(w), Some(name)) = (w.upgrade(), param.and_then(glib::Variant::get::<String>)) {
+                w.play_macro(&name);
+            }
+        });
+        self.window.add_action(&action);
+        let action = gio::SimpleAction::new_stateful("record-macro", None, &false.to_variant());
+        let w = Rc::downgrade(self);
+        action.connect_activate(move |a, _| {
+            let Some(w) = w.upgrade() else { return };
+            let on = !a.state().and_then(|v| v.get::<bool>()).unwrap_or(false);
+            w.set_recording(on);
+        });
+        self.window.add_action(&action);
+        let visible = self.state.borrow().macro_bar;
+        let action = gio::SimpleAction::new_stateful("macro-bar", None, &visible.to_variant());
+        let w = Rc::downgrade(self);
+        action.connect_activate(move |a, _| {
+            let Some(w) = w.upgrade() else { return };
+            let on = !a.state().and_then(|v| v.get::<bool>()).unwrap_or(false);
+            a.set_state(&on.to_variant());
+            w.macro_bar.set_visible(on);
+            w.state.borrow_mut().macro_bar = on;
+        });
+        self.window.add_action(&action);
+
         let action = gio::SimpleAction::new("load-profile", Some(glib::VariantTy::STRING));
         let w = Rc::downgrade(self);
         action.connect_activate(move |_, param| {
@@ -904,6 +1181,7 @@ impl Win {
             match gtkterm_protocols::hex::parse_hex(&text) {
                 Ok(bytes) if !bytes.is_empty() => {
                     w.state.borrow_mut().remember_hex(text.trim());
+                    w.record_sent(&bytes);
                     let n = bytes.len();
                     let s = w.session.clone();
                     let ww = Rc::downgrade(&w);
@@ -971,12 +1249,30 @@ impl Win {
         let mcp = self.state.borrow().mcp.clone();
         let name = self.profile_name.borrow().clone();
         let w = Rc::downgrade(self);
+        let presets: Vec<(String, gtkterm_core::presets::SerialPreset)> = self.manager.with_config(|c| {
+            gtkterm_core::presets::all_presets(&c.presets)
+                .into_iter()
+                .map(|(n, p, _)| (n, p))
+                .collect()
+        });
+        let wp = Rc::downgrade(self);
+        let save_preset = move |name: String, preset: gtkterm_core::presets::SerialPreset| {
+            let Some(w) = wp.upgrade() else { return };
+            w.manager
+                .with_config_mut(|c| c.presets.insert(name.clone(), preset));
+            match w.manager.save_config() {
+                Ok(()) => w.toast(&format!("Preset {name} saved")),
+                Err(e) => w.toast(&e.to_string()),
+            }
+        };
         prefs::show(
             &self.window,
             &name,
             &profile,
             &mcp,
             self.mcp_url.borrow().clone(),
+            presets,
+            save_preset,
             move |p, m| {
                 if let Some(w) = w.upgrade() {
                     w.apply_settings(p, m);
@@ -1282,12 +1578,42 @@ fn main_menu() -> gio::Menu {
     menu.append_section(None, &view);
 
     let app = gio::Menu::new();
+    app.append(Some("Import Presets…"), Some("win.import-presets"));
     app.append(Some("MCP Server for AI Agents"), Some("win.mcp"));
     app.append(Some("Keyboard Shortcuts"), Some("win.shortcuts"));
     app.append(Some("About GTKTerm Sunshine"), Some("win.about"));
     app.append(Some("Quit"), Some("app.quit"));
     menu.append_section(None, &app);
     menu
+}
+
+fn macro_menu() -> gio::Menu {
+    let menu = gio::Menu::new();
+    let list = gio::Menu::new();
+    // Built when the menu opens; the names come from the snapshot `rebuild_macros` keeps.
+    MACRO_NAMES.with(|names| {
+        for (name, shortcut) in names.borrow().iter() {
+            let label = match shortcut {
+                Some(s) => format!("{name}  ·  {}", super::macros::shortcut_label(s)),
+                None => name.clone(),
+            };
+            let item = gio::MenuItem::new(Some(&label), None);
+            item.set_action_and_target_value(Some("win.play-macro"), Some(&name.to_variant()));
+            list.append_item(&item);
+        }
+    });
+    menu.append_section(Some("Play"), &list);
+    let ops = gio::Menu::new();
+    ops.append(Some("Record"), Some("win.record-macro"));
+    ops.append(Some("Stop Running Macro"), Some("win.stop-macro"));
+    ops.append(Some("Edit Macros…"), Some("win.edit-macros"));
+    ops.append(Some("Show Macro Bar"), Some("win.macro-bar"));
+    menu.append_section(None, &ops);
+    menu
+}
+
+thread_local! {
+    static MACRO_NAMES: RefCell<Vec<(String, Option<String>)>> = const { RefCell::new(Vec::new()) };
 }
 
 fn shortcuts_dialog() -> adw::ShortcutsDialog {
@@ -1524,6 +1850,55 @@ mod tests {
         // Charts were removed by clear-charts; new data brings them back.
         rt().block_on(dev.send(&b"{env|T|1}\n"[..])).unwrap();
         assert!(pump_until(Duration::from_secs(2), || win.panel.len() == 1));
+
+        // Macros: a stored macro with a shortcut is bound and plays via its action.
+        win.manager
+            .update_macros(|s| {
+                s.upsert(
+                    None,
+                    gtkterm_core::macros::Macro {
+                        name: "hello".into(),
+                        shortcut: Some("F9".into()),
+                        commands: gtkterm_core::macros::parse_text("send: hi\\r\n").unwrap(),
+                    },
+                )
+            })
+            .unwrap();
+        assert!(pump_until(Duration::from_secs(2), || win
+            .shortcut_ctl
+            .borrow()
+            .as_ref()
+            .is_some_and(|c| c.upcast_ref::<gio::ListModel>().n_items() == 1)));
+        assert_eq!(
+            win.macro_bar.observe_children().n_items(),
+            2,
+            "one macro button plus edit"
+        );
+        rt().block_on(async { while !dev.drain().is_empty() {} });
+        gio::prelude::ActionGroupExt::activate_action(&win.window, "play-macro", Some(&"hello".to_variant()));
+        let got = rt().block_on(async { tokio::time::timeout(Duration::from_secs(2), dev.recv()).await });
+        assert_eq!(got.ok().flatten().as_deref(), Some(&b"hi\r"[..]));
+
+        // Recording: typed input becomes a macro, the editor opens on it.
+        gio::prelude::ActionGroupExt::activate_action(&win.window, "record-macro", None);
+        win.term.term.feed_child(b"AT\r");
+        pump_until(Duration::from_millis(100), || false);
+        gio::prelude::ActionGroupExt::activate_action(&win.window, "record-macro", None);
+        let recorded = win
+            .manager
+            .with_macros(|s| s.get("Recorded").cloned())
+            .expect("recorded macro");
+        assert_eq!(
+            recorded.commands,
+            vec![gtkterm_core::macros::MacroCommand::Send {
+                data: "AT\\r".into(),
+                delay_ms: 0
+            }]
+        );
+        pump_until(Duration::from_millis(300), || false);
+        snapshot(&win.window, "macro-editor");
+        gio::prelude::ActionGroupExt::activate_action(&win.window, "macro-bar", None);
+        pump_until(Duration::from_millis(50), || false);
 
         // Echo off by default, toggled on above: the TX chunk is displayed (no assertion on VTE
         // contents, but the path must not warn).

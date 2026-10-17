@@ -36,9 +36,13 @@ The HTTP endpoint binds to `127.0.0.1` by default, requires the bearer token (`-
 | `sunshine_export_png` | the chart as a PNG image (as the user sees it; GUI builds) |
 | `sunshine_set_chart_type`, `sunshine_pause`, `sunshine_clear`, `sunshine_export_csv` | chart control |
 | `log_start`, `log_stop`, `log_status` | session logs (raw/text/csv/json/xml) inside the log directory |
+| `macro_list`, `macro_save` | macros in the editor syntax (`send:`, `send[ms]:`, `wait:`, `expect[ms]:`) |
+| `macro_run` | run a macro and wait for its report (expect steps fail with the text received so far) |
+| `preset_list`, `preset_apply` | serial presets; applying reopens the serial port with new line settings |
+| `profile_list`, `profile_get`, `profile_save` | saved profiles; `profile_save` stores the session's current settings |
 
 Write tools are hidden in read-only mode: open/close, send, expect, break, signals, clearing,
-chart changes and logging.
+chart changes, logging, macro_run/macro_save, preset_apply and profile_save.
 
 **Cursors.** Every received byte has a position in the session's RX stream. `send` returns the
 position at send time, so `read`/`expect` from there see exactly the reply. Keep passing
@@ -46,7 +50,7 @@ position at send time, so `read`/`expect` from there see exactly the reply. Keep
 
 ## Resources and prompts
 
-Resources: `gtkterm://ports`, `gtkterm://profiles`, `gtkterm://docs/sunshine-protocol`,
+Resources: `gtkterm://ports`, `gtkterm://profiles`, `gtkterm://macros`, `gtkterm://docs/sunshine-protocol`,
 `gtkterm://session/{id}/status`, `.../rx` (last 64 KiB), `.../sunshine`,
 `.../sunshine/{packet_id}` (CSV).
 

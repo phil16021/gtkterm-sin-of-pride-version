@@ -51,3 +51,10 @@ path = "fuzz_targets/chunk_store.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "macro_text"
+path = "fuzz_targets/macro_text.rs"
+test = false
+doc = false
+bench = false

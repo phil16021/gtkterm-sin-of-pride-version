@@ -400,6 +400,21 @@ fn parse_duration_ms(s: &str, line: usize) -> Result<u64, MacroError> {
     Ok((v * scale).round() as u64)
 }
 
+/// Raw control characters (other than tab) in send text are ambiguous in a line-based format (a
+/// trailing CR vanishes as part of CRLF), so they become escape sequences.
+fn escape_raw_controls(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        if c.is_control() && c != '\t' {
+            let mut buf = [0u8; 4];
+            out.push_str(&escape::encode(c.encode_utf8(&mut buf).as_bytes()));
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// Parse editor text into commands.
 ///
 /// ```text
@@ -427,12 +442,13 @@ pub fn parse_text(text: &str) -> Result<Vec<MacroCommand>, MacroError> {
         let (kw, bracket) = parse_bracket(head, line)?;
         let cmd = match kw.to_ascii_lowercase().as_str() {
             "send" => {
-                escape::decode(value).map_err(|e| MacroError::Syntax {
+                let data = escape_raw_controls(value);
+                escape::decode(&data).map_err(|e| MacroError::Syntax {
                     line,
                     message: e.to_string(),
                 })?;
                 MacroCommand::Send {
-                    data: value.to_owned(),
+                    data,
                     delay_ms: bracket.unwrap_or(0),
                 }
             }
@@ -952,6 +968,28 @@ mod tests {
                 other => panic!("{text:?}: {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn raw_control_characters_become_escapes() {
+        // Found by fuzzing: a raw CR at the end of a send line was lost after format + parse.
+        let text = "send: At\u{1e}\0K,ct[1999]:1.5 s\u{6}se\r";
+        let parsed = parse_text(text).unwrap();
+        assert_eq!(
+            parsed,
+            vec![MacroCommand::Send {
+                data: "At\\x1E\\x00K,ct[1999]:1.5 s\\x06se\\r".into(),
+                delay_ms: 0
+            }]
+        );
+        assert_eq!(parse_text(&format_text(&parsed)).unwrap(), parsed);
+        assert_eq!(
+            parse_text("send: a\tb").unwrap(),
+            vec![MacroCommand::Send {
+                data: "a\tb".into(),
+                delay_ms: 0
+            }]
+        );
     }
 
     #[test]

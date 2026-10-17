@@ -18,7 +18,7 @@ path = "src/main.rs"
 [features]
 default = ["gui"]
 # The GTK user interface. Without it the binary still offers --headless and the MCP server.
-gui = ["dep:gtk", "dep:adw", "dep:vte", "dep:glib", "dep:gio", "dep:gtkterm-charts", "dep:async-channel", "dep:glib-build-tools", "dep:pango", "gtkterm-mcp/png"]
+gui = ["dep:gtk", "dep:adw", "dep:vte", "dep:glib", "dep:gio", "dep:gtkterm-charts", "dep:async-channel", "dep:glib-build-tools", "dep:pango", "dep:sourceview", "gtkterm-mcp/png"]
 
 [dependencies]
 gtkterm-protocols.workspace = true
@@ -28,6 +28,7 @@ gtkterm-charts = { workspace = true, optional = true }
 gtk = { workspace = true, optional = true }
 adw = { workspace = true, optional = true }
 vte = { workspace = true, optional = true }
+sourceview = { workspace = true, optional = true }
 glib = { workspace = true, optional = true }
 gio = { workspace = true, optional = true }
 async-channel = { workspace = true, optional = true }

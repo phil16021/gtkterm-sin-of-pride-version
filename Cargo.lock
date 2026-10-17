@@ -1021,7 +1021,7 @@ dependencies = [
 
 [[package]]
 name = "gtkterm-charts"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "cairo-rs",
  "gtkterm-core",
@@ -1035,7 +1035,7 @@ dependencies = [
 
 [[package]]
 name = "gtkterm-core"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1062,7 +1062,7 @@ dependencies = [
 
 [[package]]
 name = "gtkterm-gui"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1087,6 +1087,7 @@ dependencies = [
  "rmcp",
  "serde",
  "serde_json",
+ "sourceview5",
  "tempfile",
  "tokio",
  "toml",
@@ -1097,7 +1098,7 @@ dependencies = [
 
 [[package]]
 name = "gtkterm-mcp"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "axum",
  "base64",
@@ -1122,7 +1123,7 @@ dependencies = [
 
 [[package]]
 name = "gtkterm-protocols"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "crc",
  "insta",
@@ -1136,7 +1137,7 @@ dependencies = [
 
 [[package]]
 name = "gtkterm-testkit"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -2309,6 +2310,41 @@ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "sourceview5"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5b64e13e9ae8d8e35529a2d32d80c7ecd60ffb348c1188b5b790676f5d5b50c"
+dependencies = [
+ "futures-channel",
+ "futures-core",
+ "gdk-pixbuf",
+ "gdk4",
+ "gio",
+ "glib",
+ "gtk4",
+ "libc",
+ "pango",
+ "sourceview5-sys",
+]
+
+[[package]]
+name = "sourceview5-sys"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23a6d23d5b5a052b39ad92ff8ab0730cff284378d7f97012368317a5e622452e"
+dependencies = [
+ "gdk-pixbuf-sys",
+ "gdk4-sys",
+ "gio-sys",
+ "glib-sys",
+ "gobject-sys",
+ "gtk4-sys",
+ "libc",
+ "pango-sys",
+ "system-deps 7.0.8",
 ]
 
 [[package]]

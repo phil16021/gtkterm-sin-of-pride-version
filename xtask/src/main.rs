@@ -172,6 +172,19 @@ fn install(args: &[String]) -> Result<()> {
         std::fs::write(&file, out.stdout)?;
         install_file(&file, &base.join(rel), 0o644)?;
     }
+    for lang in [
+        "gtkterm-macro.lang",
+        "at-commands.lang",
+        "hexdump.lang",
+        "modbus-ascii.lang",
+        "nmea.lang",
+    ] {
+        install_file(
+            &data.join("language-specs").join(lang),
+            &base.join(format!("share/gtkterm-sunshine/language-specs/{lang}")),
+            0o644,
+        )?;
+    }
     for example in ["example_embedded.script", "example_modem.script"] {
         install_file(
             &data.join("examples").join(example),

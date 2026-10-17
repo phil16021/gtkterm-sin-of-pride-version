@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtkterm_core::config::{Connection, FlowControl, Parity, Profile, Rgba, SerialConfig, TerminalConfig};
+use gtkterm_core::presets::SerialPreset;
 use gtkterm_protocols::transform::TimestampFormat;
 use gtkterm_protocols::view::{HEX_WIDTHS, ViewMode};
 
@@ -108,12 +109,15 @@ fn show_wait_char(c: Option<u8>) -> String {
 }
 
 /// Show the dialog; `apply` gets the edited profile and MCP settings when it is closed.
+#[allow(clippy::too_many_arguments)]
 pub fn show(
     parent: &impl IsA<gtk::Widget>,
     profile_name: &str,
     profile: &Profile,
     mcp: &McpSettings,
     mcp_url: Option<String>,
+    presets: Vec<(String, SerialPreset)>,
+    save_preset: impl Fn(String, SerialPreset) + 'static,
     apply: impl Fn(Profile, McpSettings) + 'static,
 ) {
     let dialog = adw::PreferencesDialog::builder()
@@ -185,9 +189,87 @@ pub fn show(
         "Allow other programs to open it at the same time",
         serial.disable_port_lock,
     );
+    // Presets fill the line settings; the device and RS485 timings stay.
+    let mut preset_names: Vec<String> = vec!["Choose…".into()];
+    preset_names.extend(presets.iter().map(|(n, p)| format!("{n}  ({})", p.summary())));
+    let preset_refs: Vec<&str> = preset_names.iter().map(String::as_str).collect();
+    let preset_row = combo("Apply preset", &preset_refs, 0);
+    {
+        let (baud, bits, parity, stop, flow) = (
+            baud.clone(),
+            bits.clone(),
+            parity.clone(),
+            stop.clone(),
+            flow.clone(),
+        );
+        let presets = presets.clone();
+        preset_row.connect_selected_notify(move |r| {
+            let Some((_, p)) = (r.selected() as usize)
+                .checked_sub(1)
+                .and_then(|i| presets.get(i))
+            else {
+                return;
+            };
+            baud.set_value(f64::from(p.baudrate));
+            bits.set_selected(u32::from(p.bits.clamp(5, 8) - 5));
+            parity.set_selected(PARITIES.iter().position(|x| *x == p.parity).unwrap_or(0) as u32);
+            stop.set_selected(u32::from(p.stopbits == 2));
+            flow.set_selected(FLOWS.iter().position(|x| *x == p.flow_control).unwrap_or(0) as u32);
+        });
+    }
+    let save_preset_button = gtk::Button::builder()
+        .label("Save as preset…")
+        .valign(gtk::Align::Center)
+        .build();
+    let save_preset_row = adw::ActionRow::builder().title("Current line settings").build();
+    save_preset_row.add_suffix(&save_preset_button);
+    {
+        let (baud, bits, parity, stop, flow) = (
+            baud.clone(),
+            bits.clone(),
+            parity.clone(),
+            stop.clone(),
+            flow.clone(),
+        );
+        let save_preset = Rc::new(save_preset);
+        save_preset_button.connect_clicked(move |b| {
+            let preset = SerialPreset {
+                description: String::new(),
+                baudrate: baud.value() as u32,
+                bits: 5 + bits.selected() as u8,
+                parity: PARITIES[(parity.selected() as usize).min(4)],
+                stopbits: 1 + stop.selected() as u8,
+                flow_control: FLOWS[(flow.selected() as usize).min(3)],
+            };
+            let name_entry = gtk::Entry::builder()
+                .placeholder_text("Preset name")
+                .activates_default(true)
+                .build();
+            let ask = adw::AlertDialog::builder()
+                .heading("Save preset")
+                .body(preset.summary())
+                .extra_child(&name_entry)
+                .default_response("save")
+                .close_response("cancel")
+                .build();
+            ask.add_responses(&[("cancel", "Cancel"), ("save", "Save")]);
+            ask.set_response_appearance("save", adw::ResponseAppearance::Suggested);
+            let save_preset = Rc::clone(&save_preset);
+            ask.connect_response(None, move |_, resp| {
+                let name = name_entry.text().trim().to_owned();
+                if resp == "save" && !name.is_empty() {
+                    save_preset(name, preset.clone());
+                }
+            });
+            ask.present(Some(b));
+        });
+    }
+
     let serial_group = group(
         "Serial port",
         &[
+            preset_row.upcast_ref(),
+            save_preset_row.upcast_ref(),
             port.upcast_ref(),
             baud.upcast_ref(),
             bits.upcast_ref(),

@@ -48,6 +48,8 @@ pub struct UiState {
     pub hex_history: Vec<String>,
     /// Embedded MCP server.
     pub mcp: McpSettings,
+    /// Show the macro button bar.
+    pub macro_bar: bool,
 }
 
 impl Default for UiState {
@@ -60,6 +62,7 @@ impl Default for UiState {
             panel_visible: false,
             hex_history: Vec::new(),
             mcp: McpSettings::default(),
+            macro_bar: false,
         }
     }
 }

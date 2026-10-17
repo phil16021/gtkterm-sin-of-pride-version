@@ -4,9 +4,9 @@ A Linux serial / TCP / UDP terminal with **live plotting of device data** ("Suns
 and a built-in **MCP server**, so AI agents such as Claude Code can drive your devices.
 
 This is a Rust rewrite of the GTKTerm "Sin of Pride" fork (the C version lives at tag
-`legacy-c-v1.99.1`). Status **2.0.0-alpha.1**: GTK 4 / libadwaita application, headless
-terminal and MCP server work (milestones R0–R4). Macros, protocol decoders, XMODEM/YMODEM,
-scripting and the signal monitor follow — see [docs/ROADMAP.md](docs/ROADMAP.md).
+`legacy-c-v1.99.1`). Status **2.0.0-alpha.2**: GTK 4 / libadwaita application, headless
+terminal, MCP server, macros and presets work (milestones R0–R5). Protocol decoders,
+XMODEM/YMODEM, scripting and the signal monitor follow — see [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Sunshine packets
 
@@ -42,6 +42,25 @@ cargo build --release -p gtkterm-gui --no-default-features
   length, CSV/PNG export.
 - Status bar: profiles, endpoint, RX/TX counters, DTR/RTS toggles, CTS/DSR/DCD/RI, log and MCP state.
 - Shortcuts use Ctrl+Shift or F-keys (Ctrl+letter goes to the device); press Ctrl+? for the list.
+
+## Macros and presets
+
+Macros (keyboard icon in the header bar) are step lists, edited as text:
+
+```
+send: ATZ\r                 # escapes: \r \n \t \0 \e \\ \xHH
+expect[2000]: OK\r\n        # wait up to 2 s for a regular expression
+wait: 500 ms
+send[250]: AT+CSQ\r         # pause 250 ms, then send
+```
+
+Give a macro a shortcut (F2–F4, F9–F12 or any combination with a modifier that is not an
+application shortcut), show the macro bar, or record what you type (Macros → Record). Macros are
+stored in `~/.config/gtkterm-sunshine/macros.json`; old GTKTerm macros are imported once.
+
+Preferences → Connection → *Apply preset* fills in line settings (Arduino, ESP32, GPS, HC-05,
+Modbus RTU 8E1, modem, Raspberry Pi, STM32, legacy 7E1, 921600 RTS/CTS); *Save as preset* adds
+your own; menu → *Import Presets…* reads the old GTKTerm presets JSON.
 
 ## Use
 

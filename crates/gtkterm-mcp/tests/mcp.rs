@@ -428,17 +428,40 @@ async fn http_endpoint_requires_token_and_checks_origin() {
 async fn macros_presets_and_profiles() {
     let pty = PtyPair::new().unwrap();
     let f = fixture(ServerOptions::default()).await;
-    let opened = ok(&f.client, "open_port", json!({"connection": {"type": "serial", "port": pty.path_str()}})).await;
-    assert!(opened["status"]["description"].as_str().unwrap().contains("115200-8-N-1"));
+    let opened = ok(
+        &f.client,
+        "open_port",
+        json!({"connection": {"type": "serial", "port": pty.path_str()}}),
+    )
+    .await;
+    assert!(
+        opened["status"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("115200-8-N-1")
+    );
 
     // Macros: save, list, run against a responding device.
-    let saved = ok(&f.client, "macro_save", json!({"name": "probe", "text": "send: ATI\\r\nexpect[2000]: OK\\r\\n\n", "shortcut": "F9"})).await;
+    let saved = ok(
+        &f.client,
+        "macro_save",
+        json!({"name": "probe", "text": "send: ATI\\r\nexpect[2000]: OK\\r\\n\n", "shortcut": "F9"}),
+    )
+    .await;
     assert_eq!(saved["steps"], 2);
-    let msg = tool_error(&f.client, "macro_save", json!({"name": "bad", "text": "send: x\nfrobnicate: y\n"})).await;
+    let msg = tool_error(
+        &f.client,
+        "macro_save",
+        json!({"name": "bad", "text": "send: x\nfrobnicate: y\n"}),
+    )
+    .await;
     assert!(msg.contains("line 2"), "{msg}");
     let listed = ok(&f.client, "macro_list", json!({})).await;
     assert_eq!(listed["macros"][0]["name"], "probe");
-    assert_eq!(listed["macros"][0]["text"], "send: ATI\\r\nexpect[2000]: OK\\r\\n\n");
+    assert_eq!(
+        listed["macros"][0]["text"],
+        "send: ATI\\r\nexpect[2000]: OK\\r\\n\n"
+    );
     let responder = async {
         assert_eq!(pty.read_exact(4).await.unwrap(), b"ATI\r");
         pty.write(b"Modem v1\r\nOK\r\n").await.unwrap();
@@ -448,21 +471,40 @@ async fn macros_presets_and_profiles() {
     assert!(report["received"].as_str().unwrap().contains("Modem v1"));
     let msg = tool_error(&f.client, "macro_run", json!({"name": "missing"})).await;
     assert!(msg.contains("no macro"), "{msg}");
-    let res = f.client.read_resource(ReadResourceRequestParams::new("gtkterm://macros")).await.unwrap();
-    assert!(serde_json::to_string(&res.contents).unwrap().contains("# probe (F9)"));
+    let res = f
+        .client
+        .read_resource(ReadResourceRequestParams::new("gtkterm://macros"))
+        .await
+        .unwrap();
+    assert!(
+        serde_json::to_string(&res.contents)
+            .unwrap()
+            .contains("# probe (F9)")
+    );
 
     // Presets.
     let presets = ok(&f.client, "preset_list", json!({})).await;
     assert_eq!(presets["presets"].as_array().unwrap().len(), 10);
     let applied = ok(&f.client, "preset_apply", json!({"name": "modbus rtu"})).await;
-    assert!(applied["status"]["description"].as_str().unwrap().contains("19200-8-E-1"), "{applied}");
+    assert!(
+        applied["status"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("19200-8-E-1"),
+        "{applied}"
+    );
     let msg = tool_error(&f.client, "preset_apply", json!({"name": "nope"})).await;
     assert!(msg.contains("preset_list"));
 
     // Profiles.
     ok(&f.client, "profile_save", json!({"name": "bench"})).await;
     let profiles = ok(&f.client, "profile_list", json!({})).await;
-    let names: Vec<_> = profiles["profiles"].as_array().unwrap().iter().map(|p| p["name"].as_str().unwrap().to_owned()).collect();
+    let names: Vec<_> = profiles["profiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["name"].as_str().unwrap().to_owned())
+        .collect();
     assert_eq!(names, ["bench", "default"]);
     let bench = ok(&f.client, "profile_get", json!({"name": "bench"})).await;
     assert_eq!(bench["connection"]["baudrate"], 19_200);
