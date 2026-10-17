@@ -1,0 +1,26 @@
+---
+source: crates/gtkterm-mcp/tests/mcp.rs
+assertion_line: 77
+expression: names
+---
+- clear_buffer
+- close_port
+- expect
+- get_signals
+- get_status
+- list_ports
+- log_start
+- log_status
+- log_stop
+- open_port
+- read
+- search_buffer
+- send
+- send_break
+- set_signals
+- sunshine_clear
+- sunshine_export_csv
+- sunshine_get_series
+- sunshine_list_series
+- sunshine_pause
+- sunshine_set_chart_type
