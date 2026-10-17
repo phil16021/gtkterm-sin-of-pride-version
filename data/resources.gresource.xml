@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/at/philipp/GtkTermSunshine">
+    <file>style.css</file>
+    <file alias="icons/256x256/apps/at.philipp.GtkTermSunshine.png">icons/hicolor/256x256/apps/at.philipp.GtkTermSunshine.png</file>
+  </gresource>
+</gresources>

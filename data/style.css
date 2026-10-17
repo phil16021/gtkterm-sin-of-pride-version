@@ -1,0 +1,19 @@
+/* GTKTerm Sunshine */
+.statusbar {
+  padding: 2px 8px;
+  border-top: 1px solid alpha(currentColor, 0.15);
+  font-size: 0.9em;
+}
+.statusbar .led {
+  padding: 0 4px;
+  border-radius: 4px;
+  opacity: 0.35;
+}
+.statusbar .led.on {
+  opacity: 1;
+  background: alpha(@accent_bg_color, 0.25);
+}
+.statusbar .state-open { color: @success_color; }
+.statusbar .state-error { color: @error_color; }
+.chart-toolbar { padding: 2px 6px; }
+.terminal-box vte-terminal { padding: 4px; }
