@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 pub mod checksum;
+pub mod decode;
 pub mod downsample;
 pub mod escape;
 pub mod hex;

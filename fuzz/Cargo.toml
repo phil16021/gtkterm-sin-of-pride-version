@@ -58,3 +58,10 @@ path = "fuzz_targets/macro_text.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "decoders"
+path = "fuzz_targets/decoders.rs"
+test = false
+doc = false
+bench = false
