@@ -14,3 +14,6 @@ lines or RS485 direction control. Run this list on real hardware before a releas
 | 7 | unplug the adapter while streaming | port state becomes error/closed, no crash; replug + SIGUSR1 reopens | ☐ |
 | 8 | Sunshine firmware at 1 kHz | charts stay live > 10 minutes, CPU < 20 % | ☐ |
 | 9 | Claude Code via `--mcp-stdio` | agent opens the port, reads a packet, summarises a series | ☐ |
+| 10 | RS485 adapter + real Modbus RTU slave, 19200 8E1 | `modbus_request` reads registers; frames pane shows TX/RX with CRC ✓; unplugging the slave gives timeouts, no false frames | ☐ |
+| 11 | GPS module on a UART | *Auto-detect* picks NMEA within a second; positions match the module's datasheet format | ☐ |
+| 12 | RTS↔CTS jumper, *Record Modem Line Changes* | toggling RTS (F8) produces RS232 frames with `Changed: RTS,CTS` | ☐ |

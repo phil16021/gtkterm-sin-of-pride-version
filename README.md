@@ -4,8 +4,8 @@ A Linux serial / TCP / UDP terminal with **live plotting of device data** ("Suns
 and a built-in **MCP server**, so AI agents such as Claude Code can drive your devices.
 
 This is a Rust rewrite of the GTKTerm "Sin of Pride" fork (the C version lives at tag
-`legacy-c-v1.99.1`). Status **2.0.0-alpha.2**: GTK 4 / libadwaita application, headless
-terminal, MCP server, macros and presets work (milestones R0–R5). Protocol decoders,
+`legacy-c-v1.99.1`). Status **2.0.0-alpha.3**: GTK 4 / libadwaita application, headless
+terminal, MCP server, macros, presets and protocol decoders work (milestones R0–R6).
 XMODEM/YMODEM, scripting and the signal monitor follow — see [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Sunshine packets
@@ -62,6 +62,16 @@ Preferences → Connection → *Apply preset* fills in line settings (Arduino, E
 Modbus RTU 8E1, modem, Raspberry Pi, STM32, legacy 7E1, 921600 RTS/CTS); *Save as preset* adds
 your own; menu → *Import Presets…* reads the old GTKTerm presets JSON.
 
+## Protocol decoders
+
+Menu → *Decoder* (or the selector in the frames pane, Ctrl+Shift+D) decodes the traffic into
+frames: AT commands, NMEA 0183, Modbus RTU / ASCII / TCP, CAN as candump text or SLCAN,
+EtherCAT, or *Auto-detect*. Sent data is decoded as requests and received data as responses,
+so a Modbus master session shows both sides; checksums (CRC, LRC, NMEA) are verified and
+failures marked. *Record Modem Line Changes* adds a frame whenever DTR/RTS/CTS/DSR/DCD/RI
+change (the *RS232 signals* decoder records only those). Frames are reassembled across reads,
+Modbus RTU frames by CRC and the 3.5-character gap. The decoder is saved with the profile.
+
 ## Use
 
 ```bash
@@ -89,7 +99,9 @@ Or share the open window with an agent: menu → *MCP Server for AI Agents*; the
 
 Then ask e.g. *"open /dev/ttyUSB0 at 115200, wait for a Sunshine packet and summarise the
 Temperature series"*. Tools cover ports, send/read/expect, modem lines, Sunshine series and
-logging; `--mcp-read-only` hides everything that writes. See [docs/mcp.md](docs/mcp.md).
+logging, decoded frames and Modbus requests (`modbus_request` builds the frame with its CRC
+and returns the parsed registers); `--mcp-read-only` hides everything that writes. See
+[docs/mcp.md](docs/mcp.md).
 
 ## Development
 
@@ -98,6 +110,7 @@ cargo xtask check                          # fmt, clippy, all tests (GUI tests r
 cargo nextest run                          # core, protocols, MCP
 cargo nextest run -p gtkterm-gui --no-default-features   # binary end-to-end tests
 cargo run -p gtkterm-testkit --bin sunshine-gen -- /tmp/ttyB --rate 50   # test data
+cargo run -p gtkterm-testkit --bin sunshine-gen -- /tmp/ttyB --device modbus-rtu   # fake slave (also at, nmea)
 cd fuzz && cargo +nightly fuzz run sunshine_scanner
 ```
 

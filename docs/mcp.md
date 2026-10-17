@@ -40,9 +40,24 @@ The HTTP endpoint binds to `127.0.0.1` by default, requires the bearer token (`-
 | `macro_run` | run a macro and wait for its report (expect steps fail with the text received so far) |
 | `preset_list`, `preset_apply` | serial presets; applying reopens the serial port with new line settings |
 | `profile_list`, `profile_get`, `profile_save` | saved profiles; `profile_save` stores the session's current settings |
+| `decoder_set` | protocol decoder: `off`, `auto`, `raw`, `at`, `nmea`, `modbus_rtu`, `modbus_ascii`, `modbus_tcp`, `can`, `slcan`, `ethercat`, `rs232`; `signals` adds modem line changes |
+| `decoder_get_frames` | decoded frames since a sequence number (`next_seq`), with source (rx/tx/lines), summary, fields, checksum result and bytes; can wait `timeout_ms` |
+| `modbus_request` | build a Modbus request (RTU/ASCII/TCP framing incl. CRC/LRC/MBAP), send it, wait for the matching response and return registers, bits, the write echo or the exception |
 
 Write tools are hidden in read-only mode: open/close, send, expect, break, signals, clearing,
-chart changes, logging, macro_run/macro_save, preset_apply and profile_save.
+chart changes, logging, macro_run/macro_save, preset_apply, profile_save, decoder_set and
+modbus_request.
+
+**Frames.** Decoded frames get increasing sequence numbers; the last 10 000 are kept. Poll
+`decoder_get_frames` with `since` = the previous `next_seq`; `dropped` counts frames that were
+evicted before you read them. `modbus_request` switches the decoder to its framing if needed
+(`decoder_changed` in the result) and matches the response by unit, function and, for Modbus
+TCP, transaction ID. Example:
+
+```json
+{"unit": 1, "request": {"function": "read_holding_registers", "address": 0, "count": 2}}
+→ {"response": {"kind": "registers", "values": [42, 7]}, "request": "01 03 00 00 00 02 C4 0B", ...}
+```
 
 **Cursors.** Every received byte has a position in the session's RX stream. `send` returns the
 position at send time, so `read`/`expect` from there see exactly the reply. Keep passing
@@ -51,7 +66,7 @@ position at send time, so `read`/`expect` from there see exactly the reply. Keep
 ## Resources and prompts
 
 Resources: `gtkterm://ports`, `gtkterm://profiles`, `gtkterm://macros`, `gtkterm://docs/sunshine-protocol`,
-`gtkterm://session/{id}/status`, `.../rx` (last 64 KiB), `.../sunshine`,
+`gtkterm://session/{id}/status`, `.../rx` (last 64 KiB), `.../frames` (last 200 decoded frames), `.../sunshine`,
 `.../sunshine/{packet_id}` (CSV).
 
 Prompts: `debug-serial-device`, `analyze-sunshine-data`, `modbus-scan`, `at-modem-check`,
