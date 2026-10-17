@@ -273,3 +273,69 @@ async fn session_log_records_rx_and_tx() {
     assert!(matches!(s.log(LogOp::Stop).await, Err(SessionError::NotLogging)));
     assert!(s.status().log.is_none());
 }
+
+#[tokio::test]
+async fn modbus_rtu_is_decoded_in_both_directions() {
+    use gtkterm_core::decoding::{DecoderMode, FrameSource};
+    use gtkterm_protocols::decode::{Check, Protocol, modbus};
+
+    let s = session();
+    let (port, mut dev) = loopback::pair("loop");
+    s.attach(port).await.unwrap();
+    let st = s.set_decoder(DecoderMode::Protocol(Protocol::ModbusRtu), false);
+    assert_eq!(st.protocol, Some(Protocol::ModbusRtu));
+
+    let since = s.decoder_status().next_seq;
+    s.send(modbus::rtu_frame(1, &[0x03, 0x00, 0x10, 0x00, 0x02]))
+        .await
+        .unwrap();
+    dev.recv().await.unwrap();
+    // Response split over two reads; the decoder reassembles it.
+    let resp = modbus::rtu_frame(1, &[0x03, 0x04, 0x00, 0x01, 0x00, 0x02]);
+    dev.send(resp[..4].to_vec()).await.unwrap();
+    dev.send(resp[4..].to_vec()).await.unwrap();
+    let rx = s
+        .expect_frame(since, T, |f| f.source == FrameSource::Rx)
+        .await
+        .unwrap();
+    assert_eq!(rx.frame.check, Check::Ok);
+    assert!(rx.frame.summary.contains("0x0001 0x0002"), "{}", rx.frame.summary);
+    let all = s.frames_since(since, 10);
+    assert_eq!(all.frames.len(), 2);
+    assert_eq!(all.frames[0].source, FrameSource::Tx);
+
+    // Garbage is flushed by the inter-frame gap through the actor's poll tick.
+    dev.send(vec![0x01, 0x03]).await.unwrap();
+    let bad = s
+        .expect_frame(all.next_seq, T, |f| f.source == FrameSource::Rx)
+        .await
+        .unwrap();
+    assert!(matches!(bad.frame.check, Check::Failed { .. }));
+    assert_eq!(s.status().decoder.check_failures, 1);
+}
+
+#[tokio::test]
+async fn auto_decoder_announces_detection() {
+    use gtkterm_core::decoding::DecoderMode;
+    use gtkterm_protocols::decode::Protocol;
+
+    let s = session();
+    let mut ev = s.subscribe();
+    let (port, dev) = loopback::pair("loop");
+    s.attach(port).await.unwrap();
+    s.set_decoder(DecoderMode::Auto, false);
+    dev.send(&b"AT+CSQ\r\n+CSQ: 23,99\r\nOK\r\nAT+CREG?\r\n+CREG: 0,1\r\nOK\r\n"[..])
+        .await
+        .unwrap();
+    let ev = wait_for(
+        &mut ev,
+        |e| matches!(e, SessionEvent::Decoder(d) if d.protocol.is_some()),
+    )
+    .await;
+    let SessionEvent::Decoder(d) = ev else {
+        unreachable!()
+    };
+    assert_eq!(d.protocol, Some(Protocol::At));
+    assert!(!d.detecting);
+    assert!(s.last_frames(10).iter().any(|f| f.frame.summary == "[RSP] OK"));
+}

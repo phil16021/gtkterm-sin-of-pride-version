@@ -23,6 +23,9 @@ use tracing::{debug, info, warn};
 
 use crate::chunks::{Chunk, ChunkStore, Direction, RxRead};
 use crate::config::{Connection, TerminalConfig};
+use crate::decoding::{
+    DecodedFrame, DecoderConfig, DecoderMode, DecoderStatus, Decoding, FrameSource, FramesRead,
+};
 use crate::logging::{LogStatus, LogWriter};
 use crate::port::{self, ModemLines, PortError, PortKind, PortParts, PortRx, PortWriter, SerialControl};
 use crate::sunshine::{SunshineStore, SunshineUpdate};
@@ -35,6 +38,8 @@ pub type SessionId = u32;
 const WAIT_CHAR_TIMEOUT: Duration = Duration::from_secs(2);
 /// Modem line polling interval.
 const MODEM_POLL: Duration = Duration::from_millis(100);
+/// Decoder poll interval while a gap-framed protocol (Modbus RTU) is active.
+const DECODE_POLL: Duration = Duration::from_millis(10);
 /// Capacity of the event broadcast; slow subscribers lag and resync from the stores.
 const EVENT_CAPACITY: usize = 4096;
 
@@ -77,6 +82,8 @@ pub struct SessionStatus {
     pub modem: Option<ModemLines>,
     /// Session log, if logging.
     pub log: Option<LogStatus>,
+    /// Protocol decoder.
+    pub decoder: DecoderStatus,
 }
 
 /// Something that happened in a session.
@@ -94,6 +101,10 @@ pub enum SessionEvent {
     Sunshine(SunshineUpdate),
     /// History was cleared.
     Cleared,
+    /// Frames were decoded.
+    Frames(Vec<DecodedFrame>),
+    /// Decoder settings changed or a protocol was detected.
+    Decoder(DecoderStatus),
 }
 
 /// Session errors.
@@ -179,6 +190,7 @@ struct Shared {
     sunshine: Mutex<SunshineStore>,
     terminal: Mutex<TerminalConfig>,
     connection: Mutex<Option<Connection>>,
+    decoding: Mutex<Decoding>,
     tx_queue: AtomicUsize,
 }
 
@@ -231,11 +243,13 @@ impl Session {
                 tx_queue: 0,
                 modem: None,
                 log: None,
+                decoder: Decoding::default().status(),
             }),
             chunks: Mutex::new(ChunkStore::default()),
             sunshine: Mutex::new(SunshineStore::new()),
             terminal: Mutex::new(terminal),
             connection: Mutex::new(None),
+            decoding: Mutex::new(Decoding::default()),
             tx_queue: AtomicUsize::new(0),
         });
         let (cmd, cmd_rx) = mpsc::channel(64);
@@ -266,6 +280,7 @@ impl Session {
     pub fn status(&self) -> SessionStatus {
         let mut s = lock(&self.shared.status).clone();
         s.tx_queue = self.shared.tx_queue.load(Ordering::Relaxed);
+        s.decoder = self.decoder_status();
         s
     }
 
@@ -372,6 +387,80 @@ impl Session {
         let _ = self.events.send(SessionEvent::Cleared);
     }
 
+    /// Decoder state.
+    pub fn decoder_status(&self) -> DecoderStatus {
+        lock(&self.shared.decoding).status()
+    }
+
+    /// Select the protocol decoder; `signals` also records modem line changes as frames.
+    pub fn set_decoder(&self, mode: DecoderMode, signals: bool) -> DecoderStatus {
+        let status = {
+            let mut d = lock(&self.shared.decoding);
+            d.set_mode(mode);
+            d.set_signals(signals);
+            d.status()
+        };
+        let _ = self.events.send(SessionEvent::Decoder(status.clone()));
+        status
+    }
+
+    /// Decoder settings (for saving into a profile).
+    pub fn decoder_config(&self) -> DecoderConfig {
+        lock(&self.shared.decoding).config()
+    }
+
+    /// Apply decoder settings from a profile.
+    pub fn apply_decoder_config(&self, c: DecoderConfig) -> DecoderStatus {
+        self.set_decoder(c.mode, c.signals)
+    }
+
+    /// Decoded frames from sequence number `since`.
+    pub fn frames_since(&self, since: u64, max: usize) -> FramesRead {
+        lock(&self.shared.decoding).store.since(since, max)
+    }
+
+    /// The newest `n` decoded frames.
+    pub fn last_frames(&self, n: usize) -> Vec<DecodedFrame> {
+        lock(&self.shared.decoding).store.last(n)
+    }
+
+    /// Drop all decoded frames.
+    pub fn clear_frames(&self) {
+        let status = {
+            let mut d = lock(&self.shared.decoding);
+            d.store.clear();
+            d.status()
+        };
+        let _ = self.events.send(SessionEvent::Decoder(status));
+    }
+
+    /// Wait for a decoded frame with `seq >= since` that satisfies `pred`.
+    pub async fn expect_frame(
+        &self,
+        since: u64,
+        timeout: Duration,
+        pred: impl Fn(&DecodedFrame) -> bool,
+    ) -> Result<DecodedFrame, SessionError> {
+        let mut events = self.subscribe();
+        let deadline = tokio::time::Instant::now() + timeout;
+        let mut next = since;
+        loop {
+            let read = self.frames_since(next, usize::MAX);
+            next = read.next_seq;
+            if let Some(f) = read.frames.into_iter().find(|f| pred(f)) {
+                return Ok(f);
+            }
+            loop {
+                match tokio::time::timeout_at(deadline, events.recv()).await {
+                    Err(_) => return Err(SessionError::Timeout(timeout)),
+                    Ok(Ok(SessionEvent::Frames(_)) | Err(broadcast::error::RecvError::Lagged(_))) => break,
+                    Ok(Ok(_)) => {}
+                    Ok(Err(broadcast::error::RecvError::Closed)) => return Err(SessionError::Shutdown),
+                }
+            }
+        }
+    }
+
     /// Run `f` with the Sunshine store.
     pub fn with_sunshine<R>(&self, f: impl FnOnce(&SunshineStore) -> R) -> R {
         f(&lock(&self.shared.sunshine))
@@ -465,8 +554,11 @@ impl Actor {
         modem_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut flush_tick = tokio::time::interval(Duration::from_millis(500));
         flush_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut decode_tick = tokio::time::interval(DECODE_POLL);
+        decode_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             let poll_modem = self.port.as_ref().is_some_and(|p| p.modem_supported);
+            let poll_decoder = lock(&self.shared.decoding).needs_poll();
             tokio::select! {
                 cmd = cmd_rx.recv() => match cmd {
                     Some(cmd) => self.handle(cmd).await,
@@ -476,8 +568,12 @@ impl Actor {
                     PortSignal::Rx(rx) => self.on_port_rx(rx).await,
                     PortSignal::Written(ev) => self.on_written(ev).await,
                 },
-                                _ = modem_tick.tick(), if poll_modem => self.poll_modem(),
+                _ = modem_tick.tick(), if poll_modem => self.poll_modem(),
                 _ = flush_tick.tick(), if self.log.is_some() => self.flush_log(),
+                _ = decode_tick.tick(), if poll_decoder => {
+                    let frames = lock(&self.shared.decoding).poll(Timestamp::now());
+                    self.emit_frames(frames);
+                }
             }
         }
         self.teardown(PortState::Closed).await;
@@ -549,6 +645,7 @@ impl Actor {
     async fn open(&mut self, conn: Connection) -> Result<(), SessionError> {
         self.teardown(PortState::Closed).await;
         lock(&self.shared.status).description = conn.summary();
+        lock(&self.shared.decoding).set_baud(conn.serial().map(|s| s.baudrate));
         *lock(&self.shared.connection) = Some(conn.clone());
         self.set_state(PortState::Opening);
         match port::open(&conn).await {
@@ -601,9 +698,11 @@ impl Actor {
             writer_task,
             closer,
         });
+        lock(&self.shared.decoding).restart();
         self.set_state(PortState::Open);
         if let Some(m) = modem {
             self.emit(SessionEvent::Modem(m));
+            self.decode_modem(m);
         }
     }
 
@@ -644,10 +743,12 @@ impl Actor {
                 let chunk = lock(&self.shared.chunks).push(Direction::Rx, data, ts);
                 lock(&self.shared.status).rx_bytes += chunk.data.len() as u64;
                 self.log_chunk(&chunk);
+                let frames = self.decode(FrameSource::Rx, &chunk.data, ts);
                 self.emit(SessionEvent::Data(chunk));
                 for u in updates {
                     self.emit(SessionEvent::Sunshine(u));
                 }
+                self.emit_frames(frames);
             }
             Some(PortRx::Info(msg)) => self.emit(SessionEvent::Info(msg)),
             Some(PortRx::Closed(err)) => {
@@ -661,10 +762,13 @@ impl Actor {
     async fn on_written(&mut self, ev: Option<WriterEvent>) {
         match ev {
             Some(WriterEvent::Written(data)) => {
-                let chunk = lock(&self.shared.chunks).push(Direction::Tx, data, Timestamp::now());
+                let ts = Timestamp::now();
+                let chunk = lock(&self.shared.chunks).push(Direction::Tx, data, ts);
                 lock(&self.shared.status).tx_bytes += chunk.data.len() as u64;
                 self.log_chunk(&chunk);
+                let frames = self.decode(FrameSource::Tx, &chunk.data, ts);
                 self.emit(SessionEvent::Data(chunk));
+                self.emit_frames(frames);
             }
             Some(WriterEvent::Failed(e)) => {
                 warn!(error = %e, "write failed, closing port");
@@ -672,6 +776,31 @@ impl Actor {
             }
             None => {}
         }
+    }
+
+    fn decode(&self, source: FrameSource, data: &[u8], ts: Timestamp) -> Vec<DecodedFrame> {
+        let mut d = lock(&self.shared.decoding);
+        let detecting = d.status().detecting;
+        let frames = d.feed(source, data, ts);
+        if detecting && let Some(p) = d.protocol() {
+            let status = d.status();
+            drop(d);
+            info!(protocol = p.id(), "decoder detected protocol");
+            self.emit(SessionEvent::Info(format!("decoder: detected {}", p.label())));
+            self.emit(SessionEvent::Decoder(status));
+        }
+        frames
+    }
+
+    fn emit_frames(&self, frames: Vec<DecodedFrame>) {
+        if !frames.is_empty() {
+            self.emit(SessionEvent::Frames(frames));
+        }
+    }
+
+    fn decode_modem(&self, m: ModemLines) {
+        let frame = lock(&self.shared.decoding).modem(m, Timestamp::now());
+        self.emit_frames(frame.into_iter().collect());
     }
 
     fn log_op(&mut self, op: LogOp) -> Result<Option<LogStatus>, SessionError> {
@@ -751,6 +880,7 @@ impl Actor {
                 if changed {
                     self.emit(SessionEvent::Modem(m));
                 }
+                self.decode_modem(m);
             }
             Err(_) => port.modem_supported = false,
         }

@@ -505,6 +505,9 @@ pub struct Profile {
     pub connection: Connection,
     /// Terminal settings.
     pub terminal: TerminalConfig,
+    /// Protocol decoder.
+    #[serde(skip_serializing_if = "crate::decoding::DecoderConfig::is_default")]
+    pub decoder: crate::decoding::DecoderConfig,
 }
 
 impl Profile {
@@ -991,9 +994,16 @@ mod tests {
                     wait_char: Some(b'>'),
                     ..Default::default()
                 },
+                decoder: crate::decoding::DecoderConfig {
+                    mode: crate::decoding::DecoderMode::Protocol(
+                        gtkterm_protocols::decode::Protocol::ModbusRtu,
+                    ),
+                    signals: true,
+                },
             },
         );
         let text = cfg.to_toml().unwrap();
+        assert!(text.contains("mode = \"modbus_rtu\""), "{text}");
         assert_eq!(Config::from_toml(&text, Path::new("x")).unwrap(), cfg);
     }
 

@@ -172,7 +172,9 @@ impl SessionManager {
             .expect("config poisoned")
             .profile(profile)?
             .clone();
-        Ok((self.create(profile, p.terminal), p.connection))
+        let session = self.create(profile, p.terminal);
+        session.apply_decoder_config(p.decoder);
+        Ok((session, p.connection))
     }
 
     /// Session by ID.

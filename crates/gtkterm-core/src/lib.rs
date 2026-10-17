@@ -2,6 +2,7 @@
 
 pub mod chunks;
 pub mod config;
+pub mod decoding;
 pub mod logging;
 pub mod macros;
 pub mod manager;
