@@ -248,6 +248,15 @@ pub struct Cli {
     /// Only expose read-only MCP tools.
     #[arg(long = "mcp-read-only", help_heading = "MCP")]
     pub mcp_read_only: bool,
+    /// Allow `exec` in scripts run through MCP.
+    #[arg(long = "mcp-allow-exec", help_heading = "MCP")]
+    pub mcp_allow_exec: bool,
+    /// Run this automation script once the port is open (with --headless, exit with its result).
+    #[arg(long = "script", value_name = "FILE", help_heading = "Automation")]
+    pub script: Option<PathBuf>,
+    /// Allow `exec` in scripts started from the command line or the window.
+    #[arg(long = "allow-exec", help_heading = "Automation")]
+    pub allow_exec: bool,
     /// Let MCP `file_send` read files from DIR as well as the transfer directory (repeatable).
     #[arg(long = "mcp-allow-dir", value_name = "DIR", help_heading = "MCP")]
     pub mcp_allow_dir: Vec<PathBuf>,

@@ -116,9 +116,10 @@ pub fn show(
     profile: &Profile,
     mcp: &McpSettings,
     mcp_url: Option<String>,
+    script_allow_exec: bool,
     presets: Vec<(String, SerialPreset)>,
     save_preset: impl Fn(String, SerialPreset) + 'static,
-    apply: impl Fn(Profile, McpSettings) + 'static,
+    apply: impl Fn(Profile, McpSettings, bool) + 'static,
 ) {
     let dialog = adw::PreferencesDialog::builder()
         .title(format!("Preferences — [{profile_name}]"))
@@ -184,6 +185,23 @@ pub fn show(
         10_000.0,
         f64::from(serial.rs485_rts_time_after_tx),
     );
+    let rts_low = switch(
+        "RS485 RTS active low",
+        "For transceivers that enable the driver with RTS low",
+        serial.rs485_rts_active_low,
+    );
+    let rx_during_tx = switch(
+        "RS485: receive while sending",
+        "Hear the bus echo of our own frames (kernel RS485 only)",
+        serial.rs485_rx_during_tx,
+    );
+    let break_len = spin(
+        "Break length (ms)",
+        1.0,
+        5_000.0,
+        f64::from(serial.break_ms.max(1)),
+    );
+    break_len.set_subtitle("Used by Send Break (Ctrl+Shift+B)");
     let nolock = switch(
         "Do not lock the device",
         "Allow other programs to open it at the same time",
@@ -278,6 +296,9 @@ pub fn show(
             flow.upcast_ref(),
             before.upcast_ref(),
             after.upcast_ref(),
+            rts_low.upcast_ref(),
+            rx_during_tx.upcast_ref(),
+            break_len.upcast_ref(),
             nolock.upcast_ref(),
         ],
     );
@@ -482,8 +503,31 @@ pub fn show(
     mcp_group.set_description(Some(
         "Headless alternative for Claude Code: claude mcp add gtkterm -- gtkterm-sunshine --mcp-stdio",
     ));
+    let mcp_exec = switch(
+        "Agents may use exec in scripts",
+        "script_run may start programs on this computer",
+        mcp.allow_exec,
+    );
+    mcp_group.add(&mcp_exec);
     mcp_page.add(&mcp_group);
     dialog.add(&mcp_page);
+
+    // ---------- Automation ----------
+    let local_exec = switch(
+        "Allow exec in scripts",
+        "Scripts you run may start programs (arguments are never passed through a shell)",
+        script_allow_exec,
+    );
+    let auto_page = adw::PreferencesPage::builder()
+        .title("Automation")
+        .icon_name("system-run-symbolic")
+        .build();
+    let auto_group = group("Scripts", &[local_exec.upcast_ref()]);
+    auto_group.set_description(Some(
+        "Scripts: menu → Scripts… (Ctrl+Shift+J). The language reference is in the editor's help.",
+    ));
+    auto_page.add(&auto_group);
+    dialog.add(&auto_page);
 
     let original = profile.clone();
     let original_mcp = mcp.clone();
@@ -523,6 +567,9 @@ pub fn show(
                 rs485_rts_time_before_tx: before.value() as u32,
                 rs485_rts_time_after_tx: after.value() as u32,
                 disable_port_lock: nolock.is_active(),
+                break_ms: break_len.value() as u32,
+                rs485_rts_active_low: rts_low.is_active(),
+                rs485_rx_during_tx: rx_during_tx.is_active(),
             }),
         };
         p.terminal = TerminalConfig {
@@ -552,8 +599,9 @@ pub fn show(
             port: mcp_port.value() as u16,
             read_only: mcp_ro.is_active(),
             token: original_mcp.token.clone(),
+            allow_exec: mcp_exec.is_active(),
         };
-        apply(p, m);
+        apply(p, m, local_exec.is_active());
     });
     dialog.present(Some(parent));
 }

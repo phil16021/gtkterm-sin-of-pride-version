@@ -61,6 +61,10 @@ pub struct Win {
     running_macro: RefCell<Option<String>>,
     macro_editor: RefCell<Option<Rc<super::macros::MacroEditor>>>,
     mcp_allow_dirs: RefCell<Vec<PathBuf>>,
+    script_window: RefCell<Option<Rc<super::scripts::ScriptWindow>>>,
+    signal_window: RefCell<Option<Rc<super::signals::SignalMonitor>>>,
+    pending_script: RefCell<Option<PathBuf>>,
+    cli_allow_exec: Cell<bool>,
 }
 
 /// Startup options passed from the command line.
@@ -75,6 +79,10 @@ pub struct StartOptions {
     pub mcp_read_only: bool,
     /// `--mcp-allow-dir`.
     pub mcp_allow_dirs: Vec<PathBuf>,
+    /// `--script`: run once the port is open.
+    pub script: Option<PathBuf>,
+    /// `--allow-exec`.
+    pub allow_exec: bool,
     /// `--log-file` with its format.
     pub log: Option<(PathBuf, LogFormat)>,
     /// Message to show (e.g. legacy config import).
@@ -253,6 +261,10 @@ impl Win {
             running_macro: RefCell::default(),
             macro_editor: RefCell::default(),
             mcp_allow_dirs: RefCell::new(start.mcp_allow_dirs.clone()),
+            script_window: RefCell::default(),
+            signal_window: RefCell::default(),
+            pending_script: RefCell::new(start.script.clone()),
+            cli_allow_exec: Cell::new(start.allow_exec),
         });
         win.install_actions(app);
         win.rebuild_macros();
@@ -555,9 +567,20 @@ impl Win {
                 self.reflect_state(state);
                 self.status.update(&self.session.status());
                 match state {
-                    PortState::Open => self
-                        .term
-                        .notice(&format!("connected: {}", self.session.status().description)),
+                    PortState::Open => {
+                        self.term
+                            .notice(&format!("connected: {}", self.session.status().description));
+                        if let Some(path) = self.pending_script.borrow_mut().take() {
+                            let sw = self.script_window();
+                            match sw.load(&path) {
+                                Ok(()) => {
+                                    sw.present();
+                                    sw.start();
+                                }
+                                Err(e) => self.toast(&e),
+                            }
+                        }
+                    }
                     PortState::Closed => self.term.notice("disconnected"),
                     PortState::Error(e) => self.term.notice(&format!("error: {e}")),
                     PortState::Opening => {}
@@ -578,6 +601,11 @@ impl Win {
             SessionEvent::Frames(f) => self.frames.append(f),
             SessionEvent::Decoder(st) => self.on_decoder_status(st),
             SessionEvent::Transfer(st) => self.on_transfer(st),
+            SessionEvent::Signals(_) => {
+                if let Some(m) = self.signal_window.borrow().as_ref() {
+                    m.update();
+                }
+            }
         }
     }
 
@@ -759,9 +787,27 @@ impl Win {
                         w.status
                             .set_activity(w.recorder.borrow().is_some(), w.running_macro.borrow().as_deref());
                     }
-                    gtkterm_core::manager::ManagerEvent::MacroFinished { session, .. } if session == me => {
+                    gtkterm_core::manager::ManagerEvent::MacroFinished { session, .. }
+                    | gtkterm_core::manager::ManagerEvent::ScriptFinished { session, .. }
+                        if session == me =>
+                    {
                         w.running_macro.borrow_mut().take();
                         w.status.set_activity(w.recorder.borrow().is_some(), None);
+                    }
+                    gtkterm_core::manager::ManagerEvent::ScriptStarted { session, ref name }
+                        if session == me =>
+                    {
+                        *w.running_macro.borrow_mut() = Some(format!("script {name}"));
+                        w.status
+                            .set_activity(w.recorder.borrow().is_some(), w.running_macro.borrow().as_deref());
+                    }
+                    gtkterm_core::manager::ManagerEvent::ScriptLine { session, .. }
+                    | gtkterm_core::manager::ManagerEvent::ScriptLog { session, .. }
+                        if session == me =>
+                    {
+                        if let Some(sw) = w.script_window.borrow().as_ref() {
+                            sw.on_event(&ev);
+                        }
                     }
                     _ => {}
                 }
@@ -930,11 +976,7 @@ impl Win {
                 let s = w.session.clone();
                 let ww = Rc::downgrade(w);
                 spawn(
-                    async move {
-                        s.send_break(Duration::from_millis(250))
-                            .await
-                            .map_err(|e| e.to_string())
-                    },
+                    async move { s.send_default_break().await.map_err(|e| e.to_string()) },
                     move |r| {
                         if let Some(w) = ww.upgrade() {
                             w.toast(&r.map_or_else(|e| e, |()| "Break sent".into()));
@@ -948,6 +990,24 @@ impl Win {
         add("send-hex", Box::new(Self::send_hex));
         add("send-file", Box::new(Self::send_file));
         add("receive-file", Box::new(Self::receive_file));
+        add("scripts", Box::new(|w| w.script_window().present()));
+        add("signal-monitor", Box::new(|w| w.signal_window().present()));
+        add(
+            "flush",
+            Box::new(|w| {
+                let s = w.session.clone();
+                let ww = Rc::downgrade(w);
+                spawn(
+                    async move { s.flush().await.map_err(|e| e.to_string()) },
+                    move |r| {
+                        if let Some(w) = ww.upgrade() {
+                            w.toast(&r.map_or_else(|e| e, |()| "Buffers flushed".into()));
+                        }
+                    },
+                );
+            }),
+        );
+        add("auto-baud", Box::new(Self::auto_baud));
         add(
             "cancel-transfer",
             Box::new(|w| {
@@ -1103,8 +1163,10 @@ impl Win {
         let w = Rc::downgrade(self);
         action.connect_activate(move |a, _| {
             let Some(w) = w.upgrade() else { return };
-            let on = !a.state().and_then(|v| v.get::<bool>()).unwrap_or(false);
-            w.session.set_decoder(w.session.decoder_status().mode, on);
+            // The session is the source of truth: the action state follows its events later.
+            let st = w.session.decoder_status();
+            a.set_state(&(!st.signals).to_variant());
+            w.session.set_decoder(st.mode, !st.signals);
         });
         self.window.add_action(&action);
         add("clear-frames", Box::new(|w| w.session.clear_frames()));
@@ -1418,6 +1480,82 @@ impl Win {
         });
     }
 
+    fn script_window(self: &Rc<Self>) -> Rc<super::scripts::ScriptWindow> {
+        if let Some(w) = self.script_window.borrow().as_ref() {
+            return Rc::clone(w);
+        }
+        let w1 = Rc::downgrade(self);
+        let w2 = Rc::downgrade(self);
+        let sw = super::scripts::ScriptWindow::new(
+            &self.window,
+            Arc::clone(&self.manager),
+            self.session.clone(),
+            move || {
+                w1.upgrade()
+                    .is_some_and(|w| w.cli_allow_exec.get() || w.state.borrow().script_allow_exec)
+            },
+            move |p| {
+                if let Some(w) = w2.upgrade() {
+                    w.state.borrow_mut().script_path = Some(p);
+                }
+            },
+        );
+        if let Some(p) = self.state.borrow().script_path.clone()
+            && p.is_file()
+        {
+            let _ = sw.load(&p);
+        }
+        *self.script_window.borrow_mut() = Some(Rc::clone(&sw));
+        sw
+    }
+
+    fn signal_window(self: &Rc<Self>) -> Rc<super::signals::SignalMonitor> {
+        if let Some(w) = self.signal_window.borrow().as_ref() {
+            return Rc::clone(w);
+        }
+        let m = super::signals::SignalMonitor::new(&self.window, self.session.clone());
+        *self.signal_window.borrow_mut() = Some(Rc::clone(&m));
+        m
+    }
+
+    fn auto_baud(self: &Rc<Self>) {
+        if !matches!(self.session.connection(), Some(Connection::Serial(_))) || !self.is_open() {
+            self.toast("Open a serial port first; the device must be sending text");
+            return;
+        }
+        self.toast("Detecting the baud rate…");
+        let s = self.session.clone();
+        let ww = Rc::downgrade(self);
+        spawn(
+            async move {
+                gtkterm_core::autobaud::auto_baud(
+                    &s,
+                    &gtkterm_core::autobaud::CANDIDATES,
+                    Duration::from_millis(400),
+                    &tokio_util::sync::CancellationToken::new(),
+                )
+                .await
+            },
+            move |r| {
+                let Some(w) = ww.upgrade() else { return };
+                match r {
+                    Ok(r) => match r.best {
+                        Some(b) => {
+                            if let Connection::Serial(cfg) = &mut w.profile.borrow_mut().connection {
+                                cfg.baudrate = b;
+                            }
+                            w.refresh_header();
+                            w.status.update(&w.session.status());
+                            w.toast(&format!("Detected {b} baud"));
+                        }
+                        None => w.toast("No rate gave readable text; the original rate is kept"),
+                    },
+                    Err(e) => w.toast(&format!("Auto-baud failed: {e}")),
+                }
+            },
+        );
+    }
+
     fn run_transfer(self: &Rc<Self>, req: gtkterm_core::transfer::TransferRequest) {
         let s = self.session.clone();
         let ww = Rc::downgrade(self);
@@ -1495,10 +1633,12 @@ impl Win {
             &profile,
             &mcp,
             self.mcp_url.borrow().clone(),
+            self.state.borrow().script_allow_exec,
             presets,
             save_preset,
-            move |p, m| {
+            move |p, m, exec| {
                 if let Some(w) = w.upgrade() {
+                    w.state.borrow_mut().script_allow_exec = exec;
                     w.apply_settings(p, m);
                 }
             },
@@ -1654,6 +1794,7 @@ impl Win {
             ServerOptions {
                 read_only: settings.read_only,
                 allowed_dirs: self.mcp_allow_dirs.borrow().clone(),
+                allow_exec: self.state.borrow().mcp.allow_exec,
                 ..ServerOptions::default()
             },
         );
@@ -1705,6 +1846,12 @@ impl Win {
     }
 
     fn shutdown(&self) {
+        if let Some(w) = self.script_window.borrow_mut().take() {
+            w.window.destroy();
+        }
+        if let Some(w) = self.signal_window.borrow_mut().take() {
+            w.window.destroy();
+        }
         {
             let mut st = self.state.borrow_mut();
             st.maximized = self.window.is_maximized();
@@ -1779,6 +1926,8 @@ fn main_menu() -> gio::Menu {
 
     let control = gio::Menu::new();
     control.append(Some("Send Break"), Some("win.send-break"));
+    control.append(Some("Flush Buffers"), Some("win.flush"));
+    control.append(Some("Detect Baud Rate"), Some("win.auto-baud"));
     control.append(Some("Toggle DTR"), Some("win.dtr"));
     control.append(Some("Toggle RTS"), Some("win.rts"));
     menu.append_section(None, &control);
@@ -1822,6 +1971,11 @@ fn main_menu() -> gio::Menu {
     decode.append(Some("Record Modem Line Changes"), Some("win.decoder-signals"));
     decode.append(Some("Clear Frames"), Some("win.clear-frames"));
     menu.append_section(None, &decode);
+
+    let auto = gio::Menu::new();
+    auto.append(Some("Scripts…"), Some("win.scripts"));
+    auto.append(Some("Signal Monitor"), Some("win.signal-monitor"));
+    menu.append_section(None, &auto);
 
     let app = gio::Menu::new();
     app.append(Some("Import Presets…"), Some("win.import-presets"));
@@ -2025,6 +2179,8 @@ mod tests {
             mcp_token: None,
             mcp_read_only: false,
             mcp_allow_dirs: Vec::new(),
+            script: None,
+            allow_exec: false,
             log: None,
             notice: None,
         };
@@ -2036,7 +2192,7 @@ mod tests {
             profile,
             start,
         );
-        let (port, dev) = loopback::pair("loopback");
+        let (port, dev) = loopback::pair_with_lines("loopback");
         rt().block_on(session.attach(port)).unwrap();
         assert!(pump_until(Duration::from_secs(5), || win.is_open()));
         (win, dev, dir)
@@ -2203,6 +2359,8 @@ mod tests {
             snapshot(&win.frames.widget, "frames");
             gio::prelude::ActionGroupExt::activate_action(&win.window, "decoder-signals", None);
             assert!(win.session.decoder_status().signals);
+            gio::prelude::ActionGroupExt::activate_action(&win.window, "decoder-signals", None);
+            assert!(!win.session.decoder_status().signals);
             gio::prelude::ActionGroupExt::activate_action(&win.window, "clear-frames", None);
             assert!(pump_until(Duration::from_secs(1), || win.frames.len() == 0));
             gio::prelude::ActionGroupExt::activate_action(&win.window, "decoder", Some(&"off".to_variant()));
@@ -2259,6 +2417,63 @@ mod tests {
                 pump_until(Duration::from_millis(150), || false);
             }
             snapshot(&win.window, "transfer-dialog");
+        }
+
+        // Scripts: the editor runs on the window's session; logs, status and parse errors show.
+        {
+            let sw = win.script_window();
+            sw.set_text("send PING\\r\nexpect PONG (\\d)\nlog got ${MATCH_1}\n");
+            sw.present();
+            sw.start();
+            let got = rt().block_on(async { tokio::time::timeout(Duration::from_secs(2), dev.recv()).await });
+            assert_eq!(got.ok().flatten().as_deref(), Some(&b"PING\r"[..]));
+            rt().block_on(dev.send(&b"PONG 5\r\n"[..])).unwrap();
+            assert!(
+                pump_until(Duration::from_secs(3), || sw
+                    .status_text()
+                    .starts_with("Finished")),
+                "{}",
+                sw.status_text()
+            );
+            assert!(
+                pump_until(Duration::from_secs(2), || sw.log_text().contains("got 5")),
+                "{}",
+                sw.log_text()
+            );
+            sw.set_text("send a\nbogus\n");
+            sw.start();
+            assert!(
+                sw.status_text().contains(":2: unknown command"),
+                "{}",
+                sw.status_text()
+            );
+            pump_until(Duration::from_millis(200), || false);
+            snapshot(&sw.window, "script-editor");
+            sw.window.close();
+            rt().block_on(async { while !dev.drain().is_empty() {} });
+        }
+
+        // Signal monitor: DTR from the window, CTS from the device, drawn as traces.
+        {
+            gio::prelude::ActionGroupExt::activate_action(&win.window, "signal-monitor", None);
+            gio::prelude::ActionGroupExt::activate_action(&win.window, "dtr", None);
+            dev.set_inputs(gtkterm_core::port::loopback::InputLines {
+                cts: true,
+                ..Default::default()
+            });
+            assert!(pump_until(Duration::from_secs(2), || win
+                .session
+                .signal_history(None)
+                .iter()
+                .any(|s| s.changed.contains(&"CTS"))));
+            pump_until(Duration::from_millis(300), || false);
+            let m = win.signal_window.borrow().clone().unwrap();
+            snapshot(&m.window, "signal-monitor");
+            m.window.close();
+            for action in ["flush", "auto-baud"] {
+                gio::prelude::ActionGroupExt::activate_action(&win.window, action, None);
+                pump_until(Duration::from_millis(50), || false);
+            }
         }
 
         // Echo off by default, toggled on above: the TX chunk is displayed (no assertion on VTE

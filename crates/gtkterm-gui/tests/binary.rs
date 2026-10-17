@@ -223,3 +223,45 @@ async fn mcp_stdio_drives_a_pty() {
     assert_eq!(pty.read_exact(5).await.unwrap(), b"ping\n");
     client.cancel().await.unwrap();
 }
+
+#[tokio::test]
+async fn headless_script_exits_with_its_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let pty = PtyPair::new().unwrap();
+    let script = dir.path().join("probe.script");
+    std::fs::write(&script, "send AT\\r\nexpect[3000] OK\nlog modem ok\n").unwrap();
+    let run = |script: &std::path::Path| {
+        tokio::process::Command::new(BIN)
+            .arg("--config")
+            .arg(dir.path().join("c.toml"))
+            .args(["--headless", "-p", &pty.path_str(), "--script"])
+            .arg(script)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .output()
+    };
+    let (out, ()) = tokio::join!(run(&script), async {
+        let got = tokio::time::timeout(Duration::from_secs(5), pty.read())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(got, b"AT\r");
+        pty.write(b"\r\nOK\r\n").await.unwrap();
+    });
+    let out = out.unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    assert!(err.contains("[script] modem ok"), "{err}");
+
+    std::fs::write(&script, "log waiting\nexpect[200] never\n").unwrap();
+    let out = run(&script).await.unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(err.contains("probe.script:2: timed out after 200 ms"), "{err}");
+
+    std::fs::write(&script, "bogus\n").unwrap();
+    let out = run(&script).await.unwrap();
+    assert!(String::from_utf8_lossy(&out.stderr).contains("probe.script:1: unknown command"));
+}

@@ -13,7 +13,9 @@ mod frames;
 mod macros;
 mod prefs;
 mod rt;
+mod scripts;
 mod shortcuts;
+mod signals;
 mod state;
 mod statusbar;
 mod terminal;
@@ -72,6 +74,8 @@ pub fn run(cli: Cli, resolved: Resolved) -> ExitCode {
         mcp_token: cli.mcp_token.clone(),
         mcp_read_only: cli.mcp_read_only,
         mcp_allow_dirs: cli.mcp_allow_dir.clone(),
+        script: cli.script.clone(),
+        allow_exec: cli.allow_exec,
         log: cli.log_file.clone().map(|p| (p, cli.effective_log_format())),
         notice: resolved.import_message.clone(),
     }));

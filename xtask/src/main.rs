@@ -174,6 +174,7 @@ fn install(args: &[String]) -> Result<()> {
     }
     for lang in [
         "gtkterm-macro.lang",
+        "gtkterm-script.lang",
         "at-commands.lang",
         "hexdump.lang",
         "modbus-ascii.lang",

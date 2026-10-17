@@ -17,6 +17,8 @@ pub struct McpSettings {
     pub read_only: bool,
     /// Bearer token; generated on first use.
     pub token: Option<String>,
+    /// Scripts run by agents may use `exec`.
+    pub allow_exec: bool,
 }
 
 impl Default for McpSettings {
@@ -26,6 +28,7 @@ impl Default for McpSettings {
             port: 8765,
             read_only: false,
             token: None,
+            allow_exec: false,
         }
     }
 }
@@ -58,6 +61,10 @@ pub struct UiState {
     pub transfer_protocol: Option<String>,
     /// Last folder files were received into.
     pub transfer_dir: Option<PathBuf>,
+    /// Scripts run from the window may use `exec`.
+    pub script_allow_exec: bool,
+    /// Last script file.
+    pub script_path: Option<PathBuf>,
 }
 
 impl Default for UiState {
@@ -75,6 +82,8 @@ impl Default for UiState {
             frames_position: None,
             transfer_protocol: None,
             transfer_dir: None,
+            script_allow_exec: false,
+            script_path: None,
         }
     }
 }

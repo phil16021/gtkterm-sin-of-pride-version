@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  GTKTerm automation scripts (data/examples/*.script):
+    send AT\r\n   expect \+CSQ: (\d+)   if_match OK goto done   done:   ${MATCH_1}
+-->
+<language id="gtkterm-script" name="GTKTerm Script" version="2.0" _section="Scripts">
+  <metadata>
+    <property name="globs">*.script</property>
+    <property name="line-comment-start">#</property>
+  </metadata>
+  <styles>
+    <style id="comment" name="Comment" map-to="def:comment"/>
+    <style id="keyword" name="Command" map-to="def:keyword"/>
+    <style id="control" name="Control flow" map-to="def:statement"/>
+    <style id="label" name="Label" map-to="def:function"/>
+    <style id="number" name="Number" map-to="def:decimal"/>
+    <style id="escape" name="Escape" map-to="def:special-char"/>
+    <style id="variable" name="Variable" map-to="def:identifier"/>
+  </styles>
+  <definitions>
+    <context id="comment" style-ref="comment" end-at-line-end="true">
+      <start>^\s*#</start>
+    </context>
+    <context id="escape" style-ref="escape">
+      <match>\\(x[0-9A-Fa-f]{2}|.)</match>
+    </context>
+    <context id="variable" style-ref="variable">
+      <match>\$\{[A-Za-z0-9_]+\}</match>
+    </context>
+    <context id="command">
+      <match>^\s*(send_hex|send_file|receive_file|send|expect|delay|wait|timeout|set_dtr|set_rts|break|log|exec|set|include)(\[\s*([0-9.]+\s*m?s?)\s*\])?\b</match>
+      <include>
+        <context sub-pattern="1" style-ref="keyword"/>
+        <context sub-pattern="3" style-ref="number"/>
+      </include>
+    </context>
+    <context id="flow">
+      <match>^\s*(if_match|if|goto|label|exit|fail)(\[\s*([0-9.]+\s*m?s?)\s*\])?\b</match>
+      <include>
+        <context sub-pattern="1" style-ref="control"/>
+        <context sub-pattern="3" style-ref="number"/>
+      </include>
+    </context>
+    <context id="goto-target">
+      <match>\b(goto)\s+([A-Za-z0-9_.-]+)\s*$</match>
+      <include>
+        <context sub-pattern="1" style-ref="control"/>
+        <context sub-pattern="2" style-ref="label"/>
+      </include>
+    </context>
+    <context id="label-def" style-ref="label">
+      <match>^\s*[A-Za-z0-9_.-]+:\s*$</match>
+    </context>
+    <context id="gtkterm-script">
+      <include>
+        <context ref="comment"/>
+        <context ref="label-def"/>
+        <context ref="command"/>
+        <context ref="flow"/>
+        <context ref="goto-target"/>
+        <context ref="variable"/>
+        <context ref="escape"/>
+      </include>
+    </context>
+  </definitions>
+</language>

@@ -93,7 +93,7 @@ impl Recorder {
     }
 }
 
-fn language_manager() -> sourceview::LanguageManager {
+pub(super) fn language_manager() -> sourceview::LanguageManager {
     let lm = sourceview::LanguageManager::default();
     let mut dirs: Vec<std::path::PathBuf> = Vec::new();
     if let Ok(exe) = std::env::current_exe()

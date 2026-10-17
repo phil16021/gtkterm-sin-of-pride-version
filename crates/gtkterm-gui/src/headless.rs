@@ -5,7 +5,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use gtkterm_core::chunks::Direction;
-use gtkterm_core::manager::SessionManager;
+use gtkterm_core::manager::{ManagerEvent, SessionManager};
+use gtkterm_core::script::{Script, ScriptOptions};
 use gtkterm_core::session::{LogOp, PortState, Session, SessionEvent};
 use gtkterm_mcp::transport::{HttpSecurity, random_token, serve_http, serve_stdio};
 use gtkterm_mcp::{GtkTermMcp, ServerOptions};
@@ -46,6 +47,7 @@ fn mcp_options(cli: &Cli) -> ServerOptions {
     ServerOptions {
         read_only: cli.mcp_read_only,
         allowed_dirs: cli.mcp_allow_dir.clone(),
+        allow_exec: cli.mcp_allow_exec,
         ..ServerOptions::default()
     }
 }
@@ -108,6 +110,11 @@ pub async fn run_headless(cli: Cli, r: Resolved) -> Result<()> {
         return Ok(());
     }
 
+    // Parse the script first: a typo should not wait for a device.
+    let script = match &cli.script {
+        Some(path) => Some(Script::load(path, None).map_err(|e| anyhow::anyhow!("{e}"))?),
+        None => None,
+    };
     // Subscribe and start logging before opening so no early data is missed.
     let mut events = session.subscribe();
     start_log(&cli, &session, r.profile.connection.summary()).await?;
@@ -153,8 +160,41 @@ pub async fn run_headless(cli: Cli, r: Resolved) -> Result<()> {
     let mut usr1 = signal(SignalKind::user_defined1())?;
     let mut usr2 = signal(SignalKind::user_defined2())?;
     let mut stdout = std::io::stdout();
+    let mut script_done: tokio::task::JoinHandle<Option<Result<(), String>>> = match script {
+        Some(script) => {
+            let (m, s) = (Arc::clone(&manager), session.clone());
+            let opts = ScriptOptions {
+                allow_exec: cli.allow_exec,
+                ..ScriptOptions::default()
+            };
+            let mut log = manager.subscribe();
+            tokio::spawn(async move {
+                let printer = tokio::spawn(async move {
+                    while let Ok(ev) = log.recv().await {
+                        match ev {
+                            ManagerEvent::ScriptLog { message, .. } => eprintln!("[script] {message}"),
+                            ManagerEvent::ScriptFinished { .. } => break,
+                            _ => {}
+                        }
+                    }
+                });
+                let r = m.run_script(&s, &script, &opts).await;
+                let _ = printer.await;
+                Some(r.map(|_| ()).map_err(|e| e.to_string()))
+            })
+        }
+        None => tokio::spawn(std::future::pending()),
+    };
     let result = loop {
         tokio::select! {
+            done = &mut script_done => match done {
+                Ok(Some(Ok(()))) => {
+                    eprintln!("[script finished]");
+                    break Ok(());
+                }
+                Ok(Some(Err(e))) => break Err(anyhow::anyhow!("script failed: {e}")),
+                _ => break Ok(()),
+            },
                         _ = sigint.recv() => break Ok(()),
             _ = sigterm.recv() => break Ok(()),
             _ = usr1.recv() => {
