@@ -73,12 +73,16 @@ struct Device {
     fd: AsyncFd<OwnedFd>,
     original: sys::Termios2,
     path: String,
+    locked: bool,
 }
 
 impl Drop for Device {
     fn drop(&mut self) {
         if let Err(e) = sys::tcsets2(self.fd.get_ref().as_fd(), &self.original) {
             debug!(path = %self.path, error = %e, "could not restore termios");
+        }
+        if self.locked {
+            let _ = sys::flock_unlock(self.fd.get_ref().as_fd());
         }
     }
 }
@@ -138,6 +142,7 @@ pub(crate) fn open(cfg: &SerialConfig) -> Result<OpenPort, PortError> {
         fd,
         original,
         path: path.clone(),
+        locked: !cfg.disable_port_lock,
     });
     let cancel = CancellationToken::new();
     let (tx, rx) = mpsc::channel(RX_CHANNEL);

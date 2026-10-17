@@ -339,3 +339,21 @@ async fn auto_decoder_announces_detection() {
     assert!(!d.detecting);
     assert!(s.last_frames(10).iter().any(|f| f.frame.summary == "[RSP] OK"));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reopening_the_same_device_never_finds_it_locked() {
+    // The kernel releases a flock when the open file is finally released, which can be a moment
+    // after close(); the device unlocks explicitly so an immediate reopen always succeeds.
+    let pty = PtyPair::new().unwrap();
+    let s = session();
+    let conn = Connection::Serial(SerialConfig {
+        port: pty.path_str(),
+        ..SerialConfig::default()
+    });
+    for i in 0..200 {
+        s.open(conn.clone())
+            .await
+            .unwrap_or_else(|e| panic!("reopen {i}: {e}"));
+    }
+    s.close().await.unwrap();
+}

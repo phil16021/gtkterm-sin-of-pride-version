@@ -122,6 +122,13 @@ pub(crate) fn flock_exclusive(fd: BorrowedFd<'_>) -> io::Result<()> {
     check(unsafe { libc::flock(fd.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) })
 }
 
+/// Release a `flock`. The kernel drops the lock only when the open file is finally released,
+/// which can be a moment after `close` returns; unlocking first makes a reopen succeed at once.
+pub(crate) fn flock_unlock(fd: BorrowedFd<'_>) -> io::Result<()> {
+    // SAFETY: fd is open; flock has no memory arguments.
+    check(unsafe { libc::flock(fd.as_raw_fd(), libc::LOCK_UN) })
+}
+
 /// `TIOCGSERIAL`: UART type of a serial port (0 = `PORT_UNKNOWN`, i.e. no hardware behind it).
 pub(crate) fn uart_type(fd: BorrowedFd<'_>) -> io::Result<libc::c_int> {
     // `struct serial_struct` is 72 bytes on 64-bit Linux and starts with `int type`; a larger,
