@@ -218,6 +218,20 @@ async fn sunshine_series_are_visible_to_agents() {
     assert_eq!(pts["available"], 500);
     assert_eq!(pts["values"].as_array().unwrap().len(), 50);
     assert_eq!(pts["values"][49], json!([249.5]));
+    let img = call(
+        &f.client,
+        "sunshine_export_png",
+        json!({"id": "env", "width": 400, "height": 300}),
+    )
+    .await;
+    if cfg!(feature = "png") {
+        assert_ne!(img.is_error, Some(true), "{:?}", img.content);
+        let json = serde_json::to_value(&img.content).unwrap();
+        assert_eq!(json[0]["type"], "image");
+        assert_eq!(json[0]["mimeType"], "image/png");
+    } else {
+        assert_eq!(img.is_error, Some(true));
+    }
 
     ok(
         &f.client,

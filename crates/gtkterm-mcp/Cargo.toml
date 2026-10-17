@@ -11,7 +11,12 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+# Chart PNG export (`sunshine_export_png`); needs cairo/pango development files.
+png = ["dep:gtkterm-charts"]
+
 [dependencies]
+gtkterm-charts = { workspace = true, optional = true }
 gtkterm-protocols.workspace = true
 gtkterm-core.workspace = true
 rmcp.workspace = true

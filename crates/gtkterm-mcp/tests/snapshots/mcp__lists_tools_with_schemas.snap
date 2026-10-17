@@ -1,6 +1,6 @@
 ---
 source: crates/gtkterm-mcp/tests/mcp.rs
-assertion_line: 77
+assertion_line: 89
 expression: names
 ---
 - clear_buffer
@@ -20,6 +20,7 @@ expression: names
 - set_signals
 - sunshine_clear
 - sunshine_export_csv
+- sunshine_export_png
 - sunshine_get_series
 - sunshine_list_series
 - sunshine_pause

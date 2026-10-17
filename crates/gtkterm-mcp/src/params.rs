@@ -392,3 +392,22 @@ pub(crate) struct LogStartParams {
     #[serde(default)]
     pub(crate) file_name: Option<String>,
 }
+
+/// `sunshine_export_png` arguments.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub(crate) struct PngParams {
+    /// Session to use; default: the first session.
+    #[serde(default)]
+    pub(crate) session: Option<u32>,
+    /// Packet ID (chart).
+    pub(crate) id: String,
+    /// Image width in pixels (default 800, 200-2000).
+    #[serde(default)]
+    pub(crate) width: Option<i32>,
+    /// Image height in pixels (default 450, 150-1500).
+    #[serde(default)]
+    pub(crate) height: Option<i32>,
+    /// Dark theme instead of light.
+    #[serde(default)]
+    pub(crate) dark: bool,
+}

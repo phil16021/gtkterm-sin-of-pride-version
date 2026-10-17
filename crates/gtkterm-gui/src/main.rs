@@ -39,6 +39,14 @@ fn runtime() -> std::io::Result<tokio::runtime::Runtime> {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    match cli::packaging(&cli) {
+        Ok(true) => return ExitCode::SUCCESS,
+        Ok(false) => {}
+        Err(e) => {
+            eprintln!("gtkterm-sunshine: {e}");
+            return ExitCode::FAILURE;
+        }
+    }
     init_tracing(cli.verbose);
     let resolved = match cli.resolve() {
         Ok(r) => r,

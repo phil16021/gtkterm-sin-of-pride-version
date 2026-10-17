@@ -12,6 +12,7 @@ as well.
 | Claude Code, stdio (headless) | `claude mcp add gtkterm -- gtkterm-sunshine --mcp-stdio` |
 | Claude Code, with a port opened at start | `claude mcp add gtkterm -- gtkterm-sunshine --mcp-stdio -p /dev/ttyUSB0 -s 115200` |
 | Read-only access | add `--mcp-read-only` |
+| GUI window | menu → *MCP Server for AI Agents* (or Preferences → MCP); a toast offers the `claude mcp add` command |
 | HTTP (shared with a running instance) | `gtkterm-sunshine --headless -p /dev/ttyUSB0 --mcp-http 8765` prints the URL and token, then `claude mcp add --transport http gtkterm http://127.0.0.1:8765/mcp --header "Authorization: Bearer <token>"` |
 | MCP Inspector | `npx @modelcontextprotocol/inspector@latest gtkterm-sunshine --mcp-stdio` |
 
@@ -32,6 +33,7 @@ The HTTP endpoint binds to `127.0.0.1` by default, requires the bearer token (`-
 | `clear_buffer`, `search_buffer` | history management and regex search |
 | `sunshine_list_series` | charts and per-series min/max/mean/last, packet/error counters |
 | `sunshine_get_series` | samples (LTTB-downsampled to `max_points`) |
+| `sunshine_export_png` | the chart as a PNG image (as the user sees it; GUI builds) |
 | `sunshine_set_chart_type`, `sunshine_pause`, `sunshine_clear`, `sunshine_export_csv` | chart control |
 | `log_start`, `log_stop`, `log_status` | session logs (raw/text/csv/json/xml) inside the log directory |
 

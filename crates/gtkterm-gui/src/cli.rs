@@ -262,6 +262,36 @@ pub struct Cli {
     /// More diagnostics on stderr (-v info, -vv debug, -vvv trace). RUST_LOG overrides.
     #[arg(short = 'v', long, action = ArgAction::Count, help_heading = "Logging")]
     pub verbose: u8,
+
+    /// Write the man page into DIR and exit (packaging).
+    #[arg(long = "generate-man", hide = true, value_name = "DIR")]
+    pub generate_man: Option<PathBuf>,
+    /// Print shell completions (bash, zsh, fish, elvish, powershell) and exit (packaging).
+    #[arg(long = "generate-completions", hide = true, value_name = "SHELL")]
+    pub generate_completions: Option<clap_complete::Shell>,
+}
+
+/// Handle the packaging flags; returns true if one was given.
+pub fn packaging(cli: &Cli) -> std::io::Result<bool> {
+    use clap::CommandFactory;
+    if let Some(dir) = &cli.generate_man {
+        std::fs::create_dir_all(dir)?;
+        let man = clap_mangen::Man::new(Cli::command());
+        let mut buf = Vec::new();
+        man.render(&mut buf)?;
+        std::fs::write(dir.join("gtkterm-sunshine.1"), buf)?;
+        return Ok(true);
+    }
+    if let Some(shell) = cli.generate_completions {
+        clap_complete::generate(
+            shell,
+            &mut Cli::command(),
+            "gtkterm-sunshine",
+            &mut std::io::stdout(),
+        );
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 /// A configuration operation that ends the program.

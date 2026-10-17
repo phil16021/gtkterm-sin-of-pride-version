@@ -31,8 +31,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::params::{
     BreakParams, ChartParams, ChartTypeParams, ClearChartParams, ExpectParams, GetSeriesParams,
-    LogStartParams, OpenPortParams, PauseParams, ReadParams, ReadResult, SearchHit, SearchParams, SendParams,
-    SessionArg, SignalParams,
+    LogStartParams, OpenPortParams, PauseParams, PngParams, ReadParams, ReadResult, SearchHit, SearchParams,
+    SendParams, SessionArg, SignalParams,
 };
 
 /// Read caps protecting the agent's context window and the app.
@@ -685,6 +685,45 @@ impl GtkTermMcp {
     ) -> Result<Json<TextOut>, String> {
         let session = self.session(p.session)?;
         Self::chart(&session, &p.id, |c| Json(TextOut { text: c.to_csv() }))
+    }
+
+    /// Render a Sunshine chart as a PNG image, to look at the data the way the user sees it.
+    #[tool(annotations(title = "Chart image", read_only_hint = true))]
+    async fn sunshine_export_png(
+        &self,
+        Parameters(p): Parameters<PngParams>,
+    ) -> Result<rmcp::model::CallToolResult, String> {
+        let session = self.session(p.session)?;
+        let chart = Self::chart(&session, &p.id, Clone::clone)?;
+        #[cfg(feature = "png")]
+        {
+            use base64::Engine as _;
+            use gtkterm_charts::render::{Style, render_png};
+            let style = if p.dark { Style::dark() } else { Style::light() };
+            let width = p.width.unwrap_or(800).clamp(200, 2000);
+            let height = p.height.unwrap_or(450).clamp(150, 1500);
+            let png = tokio::task::spawn_blocking(move || {
+                render_png(
+                    &chart,
+                    &gtkterm_charts::model::ViewState::default(),
+                    &style,
+                    width,
+                    height,
+                )
+                .map_err(err)
+            })
+            .await
+            .map_err(err)??;
+            let data = base64::engine::general_purpose::STANDARD.encode(png);
+            Ok(rmcp::model::CallToolResult::success(vec![
+                rmcp::model::ContentBlock::image(data, "image/png"),
+            ]))
+        }
+        #[cfg(not(feature = "png"))]
+        {
+            let _ = (chart, p.width, p.height, p.dark);
+            Err("this build has no chart rendering (feature `png`); use sunshine_get_series".into())
+        }
     }
 
     /// Pause or resume a Sunshine chart.

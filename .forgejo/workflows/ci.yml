@@ -33,7 +33,11 @@ jobs:
         run: |
           if pkg-config --exists gtk4 libadwaita-1 vte-2.91-gtk4; then
             cargo clippy --workspace --all-targets -- -D warnings
+            cargo nextest run -p gtkterm-mcp --features png
             GSK_RENDERER=cairo xvfb-run -a cargo nextest run -p gtkterm-gui -p gtkterm-charts
+            cargo xtask install --prefix /usr --destdir "$PWD/target/stage"
+            desktop-file-validate target/stage/usr/share/applications/*.desktop
+            appstreamcli validate --no-net target/stage/usr/share/metainfo/*.xml
           else
             echo "GTK development packages not installed; skipping GUI crates"
           fi
