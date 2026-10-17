@@ -12,7 +12,15 @@ expression: names
 - log_start
 - log_status
 - log_stop
+- macro_list
+- macro_run
+- macro_save
 - open_port
+- preset_apply
+- preset_list
+- profile_get
+- profile_list
+- profile_save
 - read
 - search_buffer
 - send

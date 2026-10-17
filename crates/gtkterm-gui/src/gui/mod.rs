@@ -34,6 +34,7 @@ pub fn run(cli: Cli, resolved: Resolved) -> ExitCode {
     gio::resources_register_include!("gtkterm.gresource").expect("embedded resources");
     let _guard = rt::rt().enter();
     let manager = SessionManager::new(resolved.config.clone(), Some(resolved.config_path.clone()));
+    manager.set_macros(resolved.macros.0.clone(), Some(resolved.macros.1.clone()));
     let session = manager.create(&resolved.profile_name, resolved.profile.terminal.clone());
 
     let app = adw::Application::builder()

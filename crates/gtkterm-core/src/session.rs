@@ -178,6 +178,7 @@ struct Shared {
     chunks: Mutex<ChunkStore>,
     sunshine: Mutex<SunshineStore>,
     terminal: Mutex<TerminalConfig>,
+    connection: Mutex<Option<Connection>>,
     tx_queue: AtomicUsize,
 }
 
@@ -234,6 +235,7 @@ impl Session {
             chunks: Mutex::new(ChunkStore::default()),
             sunshine: Mutex::new(SunshineStore::new()),
             terminal: Mutex::new(terminal),
+            connection: Mutex::new(None),
             tx_queue: AtomicUsize::new(0),
         });
         let (cmd, cmd_rx) = mpsc::channel(64);
@@ -270,6 +272,11 @@ impl Session {
     /// Subscribe to events.
     pub fn subscribe(&self) -> broadcast::Receiver<SessionEvent> {
         self.events.subscribe()
+    }
+
+    /// Connection settings of the last `open` (`None` before the first open or for attached ports).
+    pub fn connection(&self) -> Option<Connection> {
+        lock(&self.shared.connection).clone()
     }
 
     /// Terminal settings.
@@ -542,6 +549,7 @@ impl Actor {
     async fn open(&mut self, conn: Connection) -> Result<(), SessionError> {
         self.teardown(PortState::Closed).await;
         lock(&self.shared.status).description = conn.summary();
+        *lock(&self.shared.connection) = Some(conn.clone());
         self.set_state(PortState::Opening);
         match port::open(&conn).await {
             Ok(p) => {

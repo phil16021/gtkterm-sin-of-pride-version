@@ -31,7 +31,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::params::{
     BreakParams, ChartParams, ChartTypeParams, ClearChartParams, ExpectParams, GetSeriesParams,
-    LogStartParams, OpenPortParams, PauseParams, PngParams, ReadParams, ReadResult, SearchHit, SearchParams,
+    LogStartParams, MacroRunParams, MacroSaveParams, OpenPortParams, PauseParams, PngParams,
+    PresetApplyParams, ProfileParams, ProfileSaveParams, ReadParams, ReadResult, SearchHit, SearchParams,
     SendParams, SessionArg, SignalParams,
 };
 
@@ -42,6 +43,10 @@ const MAX_EXPECT: Duration = Duration::from_secs(600);
 
 /// Tools that change device state or files; hidden in read-only mode.
 pub const WRITE_TOOLS: &[&str] = &[
+    "macro_run",
+    "macro_save",
+    "preset_apply",
+    "profile_save",
     "open_port",
     "close_port",
     "send",
@@ -726,6 +731,166 @@ impl GtkTermMcp {
         }
     }
 
+    /// List macros with their shortcuts and steps (in the editor syntax accepted by macro_save).
+    #[tool(annotations(title = "List macros", read_only_hint = true))]
+    async fn macro_list(&self) -> Result<Json<serde_json::Value>, String> {
+        let macros: Vec<serde_json::Value> = self.manager.with_macros(|s| {
+            s.list()
+                .iter()
+                .map(|m| {
+                    serde_json::json!({
+                        "name": m.name,
+                        "shortcut": m.shortcut,
+                        "text": gtkterm_core::macros::format_text(&m.commands),
+                    })
+                })
+                .collect()
+        });
+        Ok(Json(serde_json::json!({ "macros": macros })))
+    }
+
+    /// Run a macro in a session and wait until it finishes (expect steps fail on timeout).
+    #[tool(annotations(title = "Run macro", open_world_hint = true))]
+    async fn macro_run(
+        &self,
+        Parameters(p): Parameters<MacroRunParams>,
+        ct: CancellationToken,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let session = self.session(p.session)?;
+        let id = session.id();
+        let run = self.manager.run_macro(&session, &p.name);
+        tokio::pin!(run);
+        let result = tokio::select! {
+            r = &mut run => r,
+            () = ct.cancelled() => {
+                self.manager.stop_macro(id);
+                run.await
+            }
+        };
+        match result {
+            Ok(report) => Ok(Json(serde_json::to_value(report).unwrap_or_default())),
+            Err(gtkterm_core::macros::MacroError::Step {
+                step,
+                message,
+                report,
+            }) => Err(format!(
+                "step {step} failed: {message}; completed steps: {}; received: {:?}",
+                serde_json::to_string(&report.steps).unwrap_or_default(),
+                report.received
+            )),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    /// Create or replace a macro from editor text.
+    #[tool(annotations(title = "Save macro", idempotent_hint = true))]
+    async fn macro_save(
+        &self,
+        Parameters(p): Parameters<MacroSaveParams>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let commands = gtkterm_core::macros::parse_text(&p.text).map_err(err)?;
+        let m = gtkterm_core::macros::Macro {
+            name: p.name.trim().to_owned(),
+            shortcut: p.shortcut.filter(|s| !s.trim().is_empty()),
+            commands,
+        };
+        let name = m.name.clone();
+        let steps = m.commands.len();
+        self.manager
+            .update_macros(|s| s.upsert(Some(&name), m))
+            .map_err(err)?;
+        Ok(Json(serde_json::json!({ "saved": name, "steps": steps })))
+    }
+
+    /// List serial presets (built-in and user defined).
+    #[tool(annotations(title = "List presets", read_only_hint = true))]
+    async fn preset_list(&self) -> Result<Json<serde_json::Value>, String> {
+        let presets: Vec<serde_json::Value> = self.manager.with_config(|c| {
+            gtkterm_core::presets::all_presets(&c.presets)
+                .into_iter()
+                .map(|(name, p, builtin)| {
+                    serde_json::json!({
+                        "name": name,
+                        "settings": p.summary(),
+                        "flow_control": p.flow_control,
+                        "description": p.description,
+                        "builtin": builtin,
+                    })
+                })
+                .collect()
+        });
+        Ok(Json(serde_json::json!({ "presets": presets })))
+    }
+
+    /// Apply a preset's line settings to the session's serial port (reopens it).
+    #[tool(annotations(title = "Apply preset"))]
+    async fn preset_apply(&self, Parameters(p): Parameters<PresetApplyParams>) -> Result<Json<Done>, String> {
+        let session = self.session(p.session)?;
+        let preset = self
+            .manager
+            .with_config(|c| gtkterm_core::presets::find_preset(&c.presets, &p.name))
+            .ok_or_else(|| format!("no preset {:?}; see preset_list", p.name))?;
+        let mut conn = session
+            .connection()
+            .ok_or("the session has no connection yet; open a serial port first")?;
+        let gtkterm_core::config::Connection::Serial(cfg) = &mut conn else {
+            return Err("presets apply to serial ports only".into());
+        };
+        preset.apply(cfg);
+        session.open(conn).await.map_err(err)?;
+        Ok(Self::done(
+            &session,
+            format!("applied {} ({})", p.name, preset.summary()),
+        ))
+    }
+
+    /// List saved profiles.
+    #[tool(annotations(title = "List profiles", read_only_hint = true))]
+    async fn profile_list(&self) -> Result<Json<serde_json::Value>, String> {
+        let profiles: Vec<serde_json::Value> = self.manager.with_config(|c| {
+            c.profiles
+                .iter()
+                .map(|(n, p)| serde_json::json!({ "name": n, "endpoint": p.connection.summary() }))
+                .collect()
+        });
+        Ok(Json(serde_json::json!({ "profiles": profiles })))
+    }
+
+    /// Get a profile's settings (connection and terminal).
+    #[tool(annotations(title = "Get profile", read_only_hint = true))]
+    async fn profile_get(
+        &self,
+        Parameters(p): Parameters<ProfileParams>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let profile = self
+            .manager
+            .with_config(|c| c.profile(&p.name).cloned())
+            .map_err(err)?;
+        Ok(Json(serde_json::to_value(profile).map_err(err)?))
+    }
+
+    /// Save the session's current connection and terminal settings as a profile.
+    #[tool(annotations(title = "Save profile", idempotent_hint = true))]
+    async fn profile_save(
+        &self,
+        Parameters(p): Parameters<ProfileSaveParams>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let session = self.session(p.session)?;
+        let connection = session
+            .connection()
+            .ok_or("the session has no connection settings yet")?;
+        let profile = gtkterm_core::config::Profile {
+            connection,
+            terminal: session.terminal(),
+        };
+        profile.validate().map_err(err)?;
+        self.manager
+            .with_config_mut(|c| c.profile_mut(&p.name).map(|slot| *slot = profile))
+            .map_err(err)?;
+        self.manager.save_config().map_err(err)?;
+        Ok(Json(serde_json::json!({ "saved": p.name })))
+    }
+
     /// Pause or resume a Sunshine chart.
     #[tool(annotations(title = "Pause chart", idempotent_hint = true))]
     async fn sunshine_pause(&self, Parameters(p): Parameters<PauseParams>) -> Result<Json<Done>, String> {
@@ -940,6 +1105,12 @@ impl ServerHandler for GtkTermMcp {
                 "Sunshine packet format",
                 "text/markdown",
             ),
+            resource(
+                "gtkterm://macros",
+                "macros",
+                "Macros in editor syntax",
+                "text/plain",
+            ),
         ];
         for s in self.manager.list() {
             let id = s.id();
@@ -994,6 +1165,31 @@ impl ServerHandler for GtkTermMcp {
         let text = |t: String| Ok(ReadResourceResult::new(vec![ResourceContents::text(t, uri)]).into());
         match uri {
             "gtkterm://docs/sunshine-protocol" => return text(SUNSHINE_DOC.to_owned()),
+            "gtkterm://macros" => {
+                let all = self.manager.with_macros(|s| {
+                    s.list()
+                        .iter()
+                        .map(|m| {
+                            let key = m
+                                .shortcut
+                                .as_deref()
+                                .map(|k| format!(" ({k})"))
+                                .unwrap_or_default();
+                            format!(
+                                "# {}{key}
+{}",
+                                m.name,
+                                gtkterm_core::macros::format_text(&m.commands)
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(
+                            "
+",
+                        )
+                });
+                return text(all);
+            }
             "gtkterm://profiles" => {
                 return text(self.manager.with_config(|c| c.to_toml().unwrap_or_default()));
             }

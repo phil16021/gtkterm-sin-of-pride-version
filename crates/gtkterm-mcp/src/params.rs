@@ -411,3 +411,53 @@ pub(crate) struct PngParams {
     #[serde(default)]
     pub(crate) dark: bool,
 }
+
+/// `macro_run` arguments.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub(crate) struct MacroRunParams {
+    /// Session to use; default: the first session.
+    #[serde(default)]
+    pub(crate) session: Option<u32>,
+    /// Macro name (see macro_list).
+    pub(crate) name: String,
+}
+
+/// `macro_save` arguments.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub(crate) struct MacroSaveParams {
+    /// Macro name; an existing macro with this name is replaced.
+    pub(crate) name: String,
+    /// Steps, one per line: `send: ATZ\r`, `send[250]: text` (pause first), `wait: 500 ms`,
+    /// `expect: OK` or `expect[2000]: regex` (timeout in ms). `#` starts a comment.
+    pub(crate) text: String,
+    /// Optional keyboard shortcut in GTK syntax, e.g. `F9` or `<Control><Shift>1`.
+    #[serde(default)]
+    pub(crate) shortcut: Option<String>,
+}
+
+/// `preset_apply` arguments.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub(crate) struct PresetApplyParams {
+    /// Session to use; default: the first session.
+    #[serde(default)]
+    pub(crate) session: Option<u32>,
+    /// Preset name (see preset_list), e.g. "Modbus RTU".
+    pub(crate) name: String,
+}
+
+/// Profile selection.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub(crate) struct ProfileParams {
+    /// Profile name.
+    pub(crate) name: String,
+}
+
+/// `profile_save` arguments.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub(crate) struct ProfileSaveParams {
+    /// Session whose current connection and terminal settings are saved; default: the first.
+    #[serde(default)]
+    pub(crate) session: Option<u32>,
+    /// Profile name (created or replaced).
+    pub(crate) name: String,
+}

@@ -324,6 +324,8 @@ pub struct Resolved {
     pub explicit_connection: bool,
     /// Requested config operation.
     pub op: Option<ConfigOp>,
+    /// Macro store and where it is saved.
+    pub macros: (gtkterm_core::macros::MacroStore, PathBuf),
 }
 
 impl Cli {
@@ -379,8 +381,21 @@ impl Cli {
         } else {
             legacy_keyfile_path()
         };
-        let (config, import_message) =
+        let (config, mut import_message) =
             load_or_import(&config_path, legacy.as_deref()).map_err(|e| e.to_string())?;
+        let (macros_path, c_macros) = match &self.config_file {
+            Some(f) => (f.with_file_name("macros.json"), None),
+            None => (
+                gtkterm_core::macros::macros_path(),
+                gtkterm_core::macros::c_macros_path(),
+            ),
+        };
+        let (macro_store, macro_message) =
+            gtkterm_core::macros::load_or_import(&macros_path, c_macros.as_deref(), legacy.as_deref())
+                .map_err(|e| e.to_string())?;
+        if let Some(m) = macro_message {
+            import_message = Some(import_message.map_or(m.clone(), |prev| format!("{prev}\n{m}")));
+        }
         let profile_name = self
             .use_config
             .clone()
@@ -426,6 +441,7 @@ impl Cli {
             profile,
             explicit_connection,
             op: self.config_op(),
+            macros: (macro_store, macros_path),
         })
     }
 

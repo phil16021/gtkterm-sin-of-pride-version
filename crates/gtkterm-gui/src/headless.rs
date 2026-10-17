@@ -20,6 +20,7 @@ use crate::cli::{Cli, Resolved};
 /// Shared setup: a session manager with the resolved profile's session.
 fn setup(r: &Resolved) -> (Arc<SessionManager>, Session) {
     let manager = SessionManager::new(r.config.clone(), Some(r.config_path.clone()));
+    manager.set_macros(r.macros.0.clone(), Some(r.macros.1.clone()));
     let session = manager.create(&r.profile_name, r.profile.terminal.clone());
     (manager, session)
 }
