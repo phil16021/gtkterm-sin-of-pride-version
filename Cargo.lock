@@ -1021,7 +1021,7 @@ dependencies = [
 
 [[package]]
 name = "gtkterm-charts"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 dependencies = [
  "cairo-rs",
  "gtkterm-core",
@@ -1035,7 +1035,7 @@ dependencies = [
 
 [[package]]
 name = "gtkterm-core"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1057,12 +1057,13 @@ dependencies = [
  "tokio-util",
  "toml",
  "tracing",
+ "tracing-subscriber",
  "udev",
 ]
 
 [[package]]
 name = "gtkterm-gui"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1098,7 +1099,7 @@ dependencies = [
 
 [[package]]
 name = "gtkterm-mcp"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 dependencies = [
  "axum",
  "base64",
@@ -1123,7 +1124,7 @@ dependencies = [
 
 [[package]]
 name = "gtkterm-protocols"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 dependencies = [
  "crc",
  "insta",
@@ -1137,7 +1138,7 @@ dependencies = [
 
 [[package]]
 name = "gtkterm-testkit"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 dependencies = [
  "anyhow",
  "clap",

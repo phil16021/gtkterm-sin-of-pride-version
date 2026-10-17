@@ -19,7 +19,7 @@ use regex::bytes::Regex;
 use serde::Serialize;
 use thiserror::Error;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 
 use crate::chunks::{Chunk, ChunkStore, Direction, RxRead};
 use crate::config::{Connection, TerminalConfig};
@@ -29,6 +29,7 @@ use crate::decoding::{
 use crate::logging::{LogStatus, LogWriter};
 use crate::port::{self, ModemLines, PortError, PortKind, PortParts, PortRx, PortWriter, SerialControl};
 use crate::sunshine::{SunshineStore, SunshineUpdate};
+use crate::transfer::{ActiveTransfer, Step, TransferRequest, TransferState, TransferStatus};
 use gtkterm_protocols::logfmt::{LogFormat, LogMeta};
 
 /// Session identifier, unique within a [`crate::manager::SessionManager`].
@@ -84,6 +85,8 @@ pub struct SessionStatus {
     pub log: Option<LogStatus>,
     /// Protocol decoder.
     pub decoder: DecoderStatus,
+    /// Running or last file transfer.
+    pub transfer: Option<TransferStatus>,
 }
 
 /// Something that happened in a session.
@@ -105,6 +108,8 @@ pub enum SessionEvent {
     Frames(Vec<DecodedFrame>),
     /// Decoder settings changed or a protocol was detected.
     Decoder(DecoderStatus),
+    /// File transfer progress or result.
+    Transfer(TransferStatus),
 }
 
 /// Session errors.
@@ -131,6 +136,12 @@ pub enum SessionError {
     /// No log is running.
     #[error("not logging")]
     NotLogging,
+    /// A file transfer owns the port.
+    #[error("a file transfer is in progress")]
+    Busy,
+    /// A file transfer could not start.
+    #[error("{0}")]
+    Transfer(String),
 }
 
 /// Successful [`Session::expect`].
@@ -153,6 +164,8 @@ enum Command {
     Send(Bytes, Option<oneshot::Sender<Result<(), SessionError>>>),
     Control(ControlOp, oneshot::Sender<Result<(), SessionError>>),
     Log(LogOp, oneshot::Sender<Result<Option<LogStatus>, SessionError>>),
+    Transfer(TransferRequest, oneshot::Sender<Result<(), SessionError>>),
+    CancelTransfer(oneshot::Sender<bool>),
 }
 
 /// Log control operations.
@@ -191,6 +204,7 @@ struct Shared {
     terminal: Mutex<TerminalConfig>,
     connection: Mutex<Option<Connection>>,
     decoding: Mutex<Decoding>,
+    transfer: Mutex<Option<TransferStatus>>,
     tx_queue: AtomicUsize,
 }
 
@@ -244,12 +258,14 @@ impl Session {
                 modem: None,
                 log: None,
                 decoder: Decoding::default().status(),
+                transfer: None,
             }),
             chunks: Mutex::new(ChunkStore::default()),
             sunshine: Mutex::new(SunshineStore::new()),
             terminal: Mutex::new(terminal),
             connection: Mutex::new(None),
             decoding: Mutex::new(Decoding::default()),
+            transfer: Mutex::new(None),
             tx_queue: AtomicUsize::new(0),
         });
         let (cmd, cmd_rx) = mpsc::channel(64);
@@ -261,6 +277,10 @@ impl Session {
             pacing: pacing_rx,
             port: None,
             log: None,
+            transfer: None,
+            transfer_writes: 0,
+            transfer_held: Vec::new(),
+            transfer_emitted: std::time::Instant::now(),
         };
         tokio::spawn(actor.run(cmd_rx));
         Self {
@@ -281,6 +301,7 @@ impl Session {
         let mut s = lock(&self.shared.status).clone();
         s.tx_queue = self.shared.tx_queue.load(Ordering::Relaxed);
         s.decoder = self.decoder_status();
+        s.transfer = self.transfer_status();
         s
     }
 
@@ -385,6 +406,51 @@ impl Session {
         lock(&self.shared.chunks).clear();
         lock(&self.shared.sunshine).clear();
         let _ = self.events.send(SessionEvent::Cleared);
+    }
+
+    /// Start a file transfer; progress and the result arrive as [`SessionEvent::Transfer`].
+    pub async fn start_transfer(&self, req: TransferRequest) -> Result<(), SessionError> {
+        self.request(|tx| Command::Transfer(req, tx)).await?
+    }
+
+    /// Run a file transfer to the end; `progress` sees every status update.
+    pub async fn transfer(
+        &self,
+        req: TransferRequest,
+        mut progress: impl FnMut(&TransferStatus),
+    ) -> Result<TransferStatus, SessionError> {
+        let mut events = self.subscribe();
+        self.start_transfer(req).await?;
+        loop {
+            match events.recv().await {
+                Ok(SessionEvent::Transfer(st)) => {
+                    progress(&st);
+                    if st.state != TransferState::Running {
+                        return Ok(st);
+                    }
+                }
+                Ok(_) => {}
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    if let Some(st) = self
+                        .transfer_status()
+                        .filter(|s| s.state != TransferState::Running)
+                    {
+                        return Ok(st);
+                    }
+                }
+                Err(broadcast::error::RecvError::Closed) => return Err(SessionError::Shutdown),
+            }
+        }
+    }
+
+    /// Cancel the running transfer; `false` if none was running.
+    pub async fn cancel_transfer(&self) -> bool {
+        self.request(Command::CancelTransfer).await.unwrap_or(false)
+    }
+
+    /// The running or last transfer.
+    pub fn transfer_status(&self) -> Option<TransferStatus> {
+        lock(&self.shared.transfer).clone()
     }
 
     /// Decoder state.
@@ -524,10 +590,13 @@ struct ActivePort {
 struct TxJob {
     data: Bytes,
     done: Option<oneshot::Sender<Result<(), SessionError>>>,
+    /// File transfer data: no pacing, not recorded as a chunk.
+    raw: bool,
 }
 
 enum WriterEvent {
     Written(Bytes),
+    RawWritten(usize),
     Failed(PortError),
 }
 
@@ -537,6 +606,21 @@ struct Actor {
     pacing: watch::Receiver<Pacing>,
     port: Option<ActivePort>,
     log: Option<LogWriter>,
+    transfer: Option<ActiveTransfer>,
+    /// Transfer writes queued but not yet written.
+    transfer_writes: usize,
+    /// Received while transfer writes were pending; delivered after them, because the device
+    /// cannot have answered bytes that were not written yet (the reader task may simply have
+    /// been faster than the writer's completion report).
+    transfer_held: Vec<u8>,
+    transfer_emitted: std::time::Instant,
+}
+
+async fn transfer_event(t: &mut Option<ActiveTransfer>) -> crate::transfer::ExternalEvent {
+    match t {
+        Some(t) => t.external_event().await,
+        None => std::future::pending().await,
+    }
 }
 
 impl Actor {
@@ -559,6 +643,7 @@ impl Actor {
         loop {
             let poll_modem = self.port.as_ref().is_some_and(|p| p.modem_supported);
             let poll_decoder = lock(&self.shared.decoding).needs_poll();
+            let transfer_deadline = self.transfer.as_ref().and_then(ActiveTransfer::deadline);
             tokio::select! {
                 cmd = cmd_rx.recv() => match cmd {
                     Some(cmd) => self.handle(cmd).await,
@@ -570,6 +655,19 @@ impl Actor {
                 },
                 _ = modem_tick.tick(), if poll_modem => self.poll_modem(),
                 _ = flush_tick.tick(), if self.log.is_some() => self.flush_log(),
+                () = tokio::time::sleep_until(transfer_deadline.unwrap_or_else(tokio::time::Instant::now)),
+                    if transfer_deadline.is_some() => {
+                    if let Some(t) = self.transfer.as_mut() {
+                        let step = t.tick();
+                        self.transfer_step(step);
+                    }
+                }
+                ev = transfer_event(&mut self.transfer) => {
+                    if let Some(t) = self.transfer.as_mut() {
+                        let step = t.on_external(ev);
+                        self.transfer_step(step);
+                    }
+                }
                 _ = decode_tick.tick(), if poll_decoder => {
                     let frames = lock(&self.shared.decoding).poll(Timestamp::now());
                     self.emit_frames(frames);
@@ -595,10 +693,20 @@ impl Actor {
                 self.teardown(PortState::Closed).await;
                 let _ = reply.send(());
             }
+            Command::Send(data, done) if self.transfer.is_some() => {
+                drop(data);
+                if let Some(done) = done {
+                    let _ = done.send(Err(SessionError::Busy));
+                }
+            }
             Command::Send(data, done) => match &self.port {
                 Some(p) => {
                     self.shared.tx_queue.fetch_add(1, Ordering::Relaxed);
-                    if let Err(e) = p.jobs.send(TxJob { data, done }) {
+                    if let Err(e) = p.jobs.send(TxJob {
+                        data,
+                        done,
+                        raw: false,
+                    }) {
                         self.shared.tx_queue.fetch_sub(1, Ordering::Relaxed);
                         if let Some(done) = e.0.done {
                             let _ = done.send(Err(SessionError::NotOpen));
@@ -613,6 +721,16 @@ impl Actor {
             },
             Command::Log(op, reply) => {
                 let _ = reply.send(self.log_op(op));
+            }
+            Command::Transfer(req, reply) => {
+                let _ = reply.send(self.start_transfer(req).await);
+            }
+            Command::CancelTransfer(reply) => {
+                let running = self.transfer.as_mut().map(ActiveTransfer::cancel);
+                let _ = reply.send(running.is_some());
+                if let Some(step) = running {
+                    self.transfer_step(step);
+                }
             }
             Command::Control(op, reply) => {
                 let result = self.control(op).await;
@@ -707,6 +825,13 @@ impl Actor {
     }
 
     async fn teardown(&mut self, state: PortState) {
+        if let Some(t) = self.transfer.as_mut() {
+            self.transfer_writes = 0;
+            self.transfer_held.clear();
+            if t.port_closed("the port was closed") {
+                self.finish_transfer();
+            }
+        }
         let Some(port) = self.port.take() else { return };
         let ActivePort {
             jobs,
@@ -737,6 +862,16 @@ impl Actor {
 
     async fn on_port_rx(&mut self, rx: Option<PortRx>) {
         match rx {
+            Some(PortRx::Data(data)) if self.transfer.is_some() => {
+                lock(&self.shared.status).rx_bytes += data.len() as u64;
+                trace!(held = self.transfer_writes > 0, data = %preview(&data), "transfer rx");
+                if self.transfer_writes > 0 {
+                    self.transfer_held.extend_from_slice(&data);
+                } else if let Some(t) = self.transfer.as_mut() {
+                    let step = t.input(&data);
+                    self.transfer_step(step);
+                }
+            }
             Some(PortRx::Data(data)) => {
                 let ts = Timestamp::now();
                 let updates = lock(&self.shared.sunshine).feed(&data, ts);
@@ -770,12 +905,93 @@ impl Actor {
                 self.emit(SessionEvent::Data(chunk));
                 self.emit_frames(frames);
             }
+            Some(WriterEvent::RawWritten(n)) => {
+                lock(&self.shared.status).tx_bytes += n as u64;
+                self.transfer_writes = self.transfer_writes.saturating_sub(1);
+                if self.transfer_writes == 0 {
+                    if let Some(t) = self.transfer.as_mut() {
+                        let step = t.drained();
+                        self.transfer_step(step);
+                    }
+                    let held = std::mem::take(&mut self.transfer_held);
+                    if self.transfer_writes == 0 && !held.is_empty() {
+                        if let Some(t) = self.transfer.as_mut() {
+                            let step = t.input(&held);
+                            self.transfer_step(step);
+                        }
+                    } else {
+                        self.transfer_held = held;
+                    }
+                }
+            }
             Some(WriterEvent::Failed(e)) => {
                 warn!(error = %e, "write failed, closing port");
                 self.teardown(PortState::Error(e.to_string())).await;
             }
             None => {}
         }
+    }
+
+    async fn start_transfer(&mut self, req: TransferRequest) -> Result<(), SessionError> {
+        if self.transfer.is_some() {
+            return Err(SessionError::Busy);
+        }
+        if self.port.is_none() {
+            return Err(SessionError::NotOpen);
+        }
+        let protocol = req.protocol();
+        let (t, step) = ActiveTransfer::start(req).await.map_err(SessionError::Transfer)?;
+        info!(protocol = protocol.id(), "file transfer started");
+        self.transfer = Some(t);
+        self.transfer_writes = 0;
+        self.transfer_held.clear();
+        self.transfer_emitted = std::time::Instant::now();
+        self.publish_transfer();
+        self.transfer_step(step);
+        Ok(())
+    }
+
+    fn publish_transfer(&mut self) {
+        let Some(t) = self.transfer.as_ref() else { return };
+        let st = t.status.clone();
+        *lock(&self.shared.transfer) = Some(st.clone());
+        self.transfer_emitted = std::time::Instant::now();
+        self.emit(SessionEvent::Transfer(st));
+    }
+
+    fn transfer_step(&mut self, step: Step) {
+        if !step.write.is_empty() {
+            trace!(data = %preview(&step.write), "transfer tx");
+            // Without a port (it closed under an lrzsz child that is finishing) the bytes are dropped.
+            if let Some(p) = &self.port {
+                self.shared.tx_queue.fetch_add(1, Ordering::Relaxed);
+                let job = TxJob {
+                    data: Bytes::from(step.write),
+                    done: None,
+                    raw: true,
+                };
+                if p.jobs.send(job).is_ok() {
+                    self.transfer_writes += 1;
+                } else {
+                    self.shared.tx_queue.fetch_sub(1, Ordering::Relaxed);
+                }
+            }
+        }
+        if step.changed && self.transfer_emitted.elapsed() >= Duration::from_millis(100) {
+            self.publish_transfer();
+        }
+        if self.transfer.as_ref().is_some_and(|t| t.finishing) && self.transfer_writes == 0 {
+            self.finish_transfer();
+        }
+    }
+
+    fn finish_transfer(&mut self) {
+        let Some(mut t) = self.transfer.take() else { return };
+        let st = t.finish_status();
+        info!(summary = %st.summary(), "file transfer ended");
+        *lock(&self.shared.transfer) = Some(st.clone());
+        self.emit(SessionEvent::Info(st.summary()));
+        self.emit(SessionEvent::Transfer(st));
     }
 
     fn decode(&self, source: FrameSource, data: &[u8], ts: Timestamp) -> Vec<DecodedFrame> {
@@ -903,6 +1119,21 @@ async fn recv_port(port: &mut Option<ActivePort>) -> PortSignal {
     }
 }
 
+/// Hex of the first and last bytes, for trace logs.
+fn preview(d: &[u8]) -> String {
+    let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02X}")).collect::<Vec<_>>().join(" ");
+    if d.len() <= 16 {
+        hex(d)
+    } else {
+        format!(
+            "{} … {} ({} bytes)",
+            hex(&d[..8]),
+            hex(&d[d.len() - 4..]),
+            d.len()
+        )
+    }
+}
+
 /// Split `data` into lines for paced transmission; each piece ends after `\n` or a lone `\r`.
 fn split_lines(data: &[u8]) -> Vec<&[u8]> {
     let mut out = Vec::new();
@@ -944,6 +1175,19 @@ async fn writer_loop(
     shared: Arc<Shared>,
 ) {
     while let Some(job) = jobs.recv().await {
+        if job.raw {
+            let result = writer.write_all(&job.data).await;
+            shared.tx_queue.fetch_sub(1, Ordering::Relaxed);
+            match result {
+                Ok(()) => {
+                    let _ = written.send(WriterEvent::RawWritten(job.data.len())).await;
+                }
+                Err(e) => {
+                    let _ = written.send(WriterEvent::Failed(e)).await;
+                }
+            }
+            continue;
+        }
         let p = *pacing.borrow();
         let pieces = if p.active() {
             split_lines(&job.data)
