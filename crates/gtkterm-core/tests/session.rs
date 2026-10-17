@@ -239,6 +239,7 @@ async fn session_log_records_rx_and_tx() {
             path: path.clone(),
             format: LogFormat::Csv,
             append: false,
+            port_label: None,
         })
         .await
         .unwrap()

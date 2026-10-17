@@ -15,22 +15,36 @@ workspace = true
 name = "gtkterm-sunshine"
 path = "src/main.rs"
 
+[features]
+default = ["gui"]
+# The GTK user interface. Without it the binary still offers --headless and the MCP server.
+gui = ["dep:gtk", "dep:adw", "dep:vte", "dep:glib", "dep:gio", "dep:gtkterm-charts", "dep:async-channel", "dep:glib-build-tools"]
+
 [dependencies]
 gtkterm-protocols.workspace = true
 gtkterm-core.workspace = true
-gtkterm-charts.workspace = true
 gtkterm-mcp.workspace = true
-gtk.workspace = true
-adw.workspace = true
-vte.workspace = true
-glib.workspace = true
-gio.workspace = true
+gtkterm-charts = { workspace = true, optional = true }
+gtk = { workspace = true, optional = true }
+adw = { workspace = true, optional = true }
+vte = { workspace = true, optional = true }
+glib = { workspace = true, optional = true }
+gio = { workspace = true, optional = true }
+async-channel = { workspace = true, optional = true }
 tokio.workspace = true
-async-channel.workspace = true
 clap.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true
+bytes.workspace = true
+jiff.workspace = true
+nix.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+tempfile.workspace = true
+serde_json.workspace = true
+rmcp = { workspace = true, features = ["client", "transport-child-process"] }
 
 [build-dependencies]
-glib-build-tools.workspace = true
+glib-build-tools = { workspace = true, optional = true }

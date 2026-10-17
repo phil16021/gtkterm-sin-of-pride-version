@@ -155,6 +155,8 @@ pub enum LogOp {
         format: LogFormat,
         /// Append to an existing raw/text log instead of truncating.
         append: bool,
+        /// Endpoint written into structured headers; default: the current port description.
+        port_label: Option<String>,
     },
     /// Pause (`true`) or resume (`false`).
     Pause(bool),
@@ -666,7 +668,12 @@ impl Actor {
 
     fn log_op(&mut self, op: LogOp) -> Result<Option<LogStatus>, SessionError> {
         let result = match op {
-            LogOp::Start { path, format, append } => {
+            LogOp::Start {
+                path,
+                format,
+                append,
+                port_label,
+            } => {
                 if let Some(old) = self.log.take() {
                     let _ = old.finish();
                 }
@@ -677,7 +684,7 @@ impl Actor {
                             .to_zoned(TimeZone::system())
                             .strftime("%Y-%m-%dT%H:%M:%S%:z")
                             .to_string(),
-                        port: st.description.clone(),
+                        port: port_label.unwrap_or_else(|| st.description.clone()),
                         profile: st.name.clone(),
                     }
                 };

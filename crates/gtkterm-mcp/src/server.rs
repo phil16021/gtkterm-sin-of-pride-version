@@ -738,6 +738,7 @@ impl GtkTermMcp {
                 path,
                 format,
                 append: false,
+                port_label: None,
             })
             .await
             .map_err(err)?;

@@ -20,16 +20,21 @@ jobs:
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: |
+          cargo clippy --all-targets -- -D warnings
+          cargo clippy -p gtkterm-gui --no-default-features --all-targets -- -D warnings
       - name: Tests
         run: |
-          if command -v cargo-nextest >/dev/null; then
-            cargo nextest run --workspace --no-fail-fast
+          cargo nextest run --no-fail-fast
+          cargo nextest run -p gtkterm-gui --no-default-features --no-fail-fast
+      - name: GUI crates (needs GTK dev packages on the runner)
+        run: |
+          if pkg-config --exists gtk4 libadwaita-1 vte-2.91-gtk4; then
+            cargo clippy --workspace --all-targets -- -D warnings
+            GSK_RENDERER=cairo xvfb-run -a cargo nextest run -p gtkterm-gui -p gtkterm-charts
           else
-            cargo test --workspace --no-fail-fast
+            echo "GTK development packages not installed; skipping GUI crates"
           fi
-      - name: GUI tests (Xvfb)
-        run: GSK_RENDERER=cairo xvfb-run -a cargo test -p gtkterm-gui
       - name: Supply chain
         run: |
           cargo audit
