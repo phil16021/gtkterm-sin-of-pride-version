@@ -76,8 +76,21 @@ struct Device {
     locked: bool,
 }
 
+/// How long closing waits for queued output before discarding it. Without this, a close with
+/// output blocked by flow control (CTS low) hangs in the kernel for `closing_wait` (30 s).
+const CLOSE_DRAIN: Duration = Duration::from_millis(250);
+
 impl Drop for Device {
     fn drop(&mut self) {
+        let fd = self.fd.get_ref().as_fd();
+        let deadline = std::time::Instant::now() + CLOSE_DRAIN;
+        while sys::output_pending(fd).is_ok_and(|n| n > 0) && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if sys::output_pending(fd).is_ok_and(|n| n > 0) {
+            debug!(path = %self.path, "discarding output that could not be sent before close");
+            let _ = tcflush(self.fd.get_ref(), FlushArg::TCOFLUSH);
+        }
         if let Err(e) = sys::tcsets2(self.fd.get_ref().as_fd(), &self.original) {
             debug!(path = %self.path, error = %e, "could not restore termios");
         }
@@ -212,6 +225,15 @@ struct SerialWriter {
     device: Arc<Device>,
     /// Software RS485: (RTS lead time, RTS tail time) when the kernel cannot do it.
     rs485_soft: Option<SoftRs485>,
+}
+
+impl Drop for SerialWriter {
+    /// A write cancelled while software RS485 held RTS must not leave the bus driven.
+    fn drop(&mut self) {
+        if let Some(SoftRs485 { active_low, .. }) = self.rs485_soft {
+            let _ = sys::tiocm_set(self.device.fd.get_ref().as_fd(), libc::TIOCM_RTS, active_low);
+        }
+    }
 }
 
 impl SerialWriter {

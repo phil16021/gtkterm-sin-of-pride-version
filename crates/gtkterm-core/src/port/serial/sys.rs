@@ -57,6 +57,14 @@ pub(crate) fn tiocm_set(fd: BorrowedFd<'_>, bits: libc::c_int, on: bool) -> io::
     check(unsafe { libc::ioctl(fd.as_raw_fd(), request, &raw const bits) })
 }
 
+/// `TIOCOUTQ`: bytes still waiting in the driver's output queue.
+pub(crate) fn output_pending(fd: BorrowedFd<'_>) -> io::Result<libc::c_int> {
+    let mut n: libc::c_int = 0;
+    // SAFETY: fd is open; TIOCOUTQ writes one c_int.
+    check(unsafe { libc::ioctl(fd.as_raw_fd(), libc::TIOCOUTQ, &raw mut n) })?;
+    Ok(n)
+}
+
 /// `TIOCSBRK` / `TIOCCBRK`: start or stop a break condition.
 pub(crate) fn set_break(fd: BorrowedFd<'_>, on: bool) -> io::Result<()> {
     let request = if on { libc::TIOCSBRK } else { libc::TIOCCBRK };

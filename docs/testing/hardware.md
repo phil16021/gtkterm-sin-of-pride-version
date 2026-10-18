@@ -25,3 +25,5 @@ lines or RS485 direction control. Run this list on real hardware before a releas
 | 18 | `data/examples/example_modem.script` against a real modem, `--headless --script` | exit code 0, log lines on stderr; a missing answer exits 1 naming the line | ☐ |
 | 19 | Claude Code on the window's HTTP endpoint (menu → *MCP Server for AI Agents*) | the first `send` shows the approval dialog; *Deny* reaches the agent as a refusal; `mcp-audit.jsonl` lists every call | ☐ |
 | 20 | Device that rings the bell (`printf '\a'` from the far side), *Visual bell* on | the terminal flashes, no beep | ☐ |
+| 21 | `-w rts` with CTS held low, send 10 kB, then close the port | close returns within a second (queued output is discarded after 250 ms, not after the kernel's 30 s `closing_wait`); reopen works | ☐ |
+| 22 | Software RS485 (adapter without kernel RS485), close the port in the middle of a long send | RTS returns to idle (logic analyser), the bus is not left driven | ☐ |
