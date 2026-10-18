@@ -244,6 +244,8 @@ async fn tcp_server_merges_clients_and_survives_disconnects() {
 /// A client that stops reading is dropped instead of blocking the writes to everyone else.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn tcp_server_drops_a_client_that_stops_reading() {
+    const CHUNK: usize = 64 * 1024;
+    const WRITES: usize = 400;
     let conn = Connection::TcpServer {
         bind: "127.0.0.1".into(),
         port: 0,
@@ -252,8 +254,6 @@ async fn tcp_server_drops_a_client_that_stops_reading() {
     let local_port: u16 = port.description.rsplit(':').next().unwrap().parse().unwrap();
     let stalled = TcpStream::connect(("127.0.0.1", local_port)).await.unwrap();
     assert!(next_info(&mut port).await.contains("connected"));
-    const CHUNK: usize = 64 * 1024;
-    const WRITES: usize = 400;
     let mut readers = Vec::new();
     for _ in 0..2 {
         let mut c = TcpStream::connect(("127.0.0.1", local_port)).await.unwrap();

@@ -51,6 +51,8 @@ pub struct RxRead {
 #[derive(Debug, Clone)]
 pub struct ChunkStore {
     chunks: VecDeque<Chunk>,
+    /// RX stream position after each chunk (monotonic, so `read_rx` can binary-search).
+    rx_end: VecDeque<u64>,
     bytes: usize,
     max_bytes: usize,
     max_chunks: usize,
@@ -70,6 +72,7 @@ impl ChunkStore {
     pub fn new(max_bytes: usize, max_chunks: usize) -> Self {
         Self {
             chunks: VecDeque::new(),
+            rx_end: VecDeque::new(),
             bytes: 0,
             max_bytes: max_bytes.max(1),
             max_chunks: max_chunks.max(1),
@@ -96,8 +99,10 @@ impl ChunkStore {
         self.next_seq += 1;
         self.bytes += chunk.data.len();
         self.chunks.push_back(chunk.clone());
+        self.rx_end.push_back(self.rx_total);
         while self.chunks.len() > 1 && (self.bytes > self.max_bytes || self.chunks.len() > self.max_chunks) {
             if let Some(old) = self.chunks.pop_front() {
+                self.rx_end.pop_front();
                 self.bytes -= old.data.len();
             }
         }
@@ -152,14 +157,18 @@ impl ChunkStore {
     pub fn read_rx(&self, cursor: u64, max: usize) -> RxRead {
         let mut data = Vec::new();
         let mut pos = cursor.min(self.rx_total);
-        let oldest = self
-            .chunks
-            .iter()
-            .find(|c| c.dir == Direction::Rx)
-            .map_or(self.rx_total, |c| c.offset);
+        // The oldest retained RX byte: the first chunk's offset, or the RX position after a
+        // leading TX chunk.
+        let oldest = match self.chunks.front() {
+            Some(c) if c.dir == Direction::Rx => c.offset,
+            Some(_) => self.rx_end[0],
+            None => self.rx_total,
+        };
         let lost = oldest.saturating_sub(pos);
         pos = pos.max(oldest);
-        for c in self.chunks.iter().filter(|c| c.dir == Direction::Rx) {
+        // Skip chunks that end before `pos` without walking them.
+        let first = self.rx_end.partition_point(|&end| end <= pos);
+        for c in self.chunks.range(first..).filter(|c| c.dir == Direction::Rx) {
             let end = c.offset + c.data.len() as u64;
             if end <= pos {
                 continue;
@@ -182,6 +191,7 @@ impl ChunkStore {
     /// Drop all retained data; counters and sequence numbers keep increasing.
     pub fn clear(&mut self) {
         self.chunks.clear();
+        self.rx_end.clear();
         self.bytes = 0;
     }
 }
@@ -281,6 +291,38 @@ mod tests {
                 prop_assert!(s.len() <= max_chunks);
                 prop_assert!(s.len() == 1 || s.bytes() <= max_bytes);
             }
+        }
+
+        /// `read_rx` (binary search) equals a plain walk over the retained RX chunks, with
+        /// TX chunks interleaved and eviction going on.
+        #[test]
+        fn read_rx_matches_a_linear_walk(
+            pushes in proptest::collection::vec((any::<bool>(), 0usize..40), 0..120),
+            max_bytes in 1usize..600,
+            cursor in 0u64..2000,
+            max in 0usize..300,
+        ) {
+            let mut s = ChunkStore::new(max_bytes, 50);
+            for (i, (rx, len)) in pushes.iter().enumerate() {
+                let dir = if *rx { Direction::Rx } else { Direction::Tx };
+                s.push(dir, Bytes::from(vec![i as u8; *len]), ts());
+            }
+            let rx: Vec<&Chunk> = s.iter().filter(|c| c.dir == Direction::Rx).collect();
+            let oldest = rx.first().map_or(s.rx_total(), |c| c.offset);
+            let mut pos = cursor.min(s.rx_total()).max(oldest);
+            let lost = oldest.saturating_sub(cursor.min(s.rx_total()));
+            let mut data = Vec::new();
+            for c in rx {
+                let end = c.offset + c.data.len() as u64;
+                if end <= pos || data.len() >= max {
+                    continue;
+                }
+                let skip = (pos - c.offset) as usize;
+                let take = (c.data.len() - skip).min(max - data.len());
+                data.extend_from_slice(&c.data[skip..skip + take]);
+                pos += take as u64;
+            }
+            prop_assert_eq!(s.read_rx(cursor, max), RxRead { data, next_cursor: pos, lost });
         }
     }
 }

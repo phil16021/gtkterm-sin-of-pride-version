@@ -36,6 +36,9 @@ use gtkterm_protocols::logfmt::{LogFormat, LogMeta};
 /// Session identifier, unique within a [`crate::manager::SessionManager`].
 pub type SessionId = u32;
 
+/// `expect` re-searches this many bytes before newly received data, so matches that started
+/// earlier are still found; longer matches spanning a read boundary are not.
+const EXPECT_OVERLAP: usize = 64 * 1024;
 /// How long closing the log or the port waits for queued sends to be reported.
 const SETTLE_TIMEOUT: Duration = Duration::from_millis(500);
 /// How long the writer waits for the configured "wait char" before sending the next line.
@@ -591,10 +594,16 @@ impl Session {
     ) -> Result<ExpectMatch, SessionError> {
         let mut events = self.subscribe();
         let deadline = tokio::time::Instant::now() + timeout;
+        // Everything received since `cursor`, appended as it arrives; each round only searches
+        // the new bytes plus EXPECT_OVERLAP before them (a match cannot end in old data, or it
+        // would have been found already), so a fast stream costs linear, not quadratic, work.
+        let first = self.read_rx(cursor, usize::MAX);
+        let mut start = first.next_cursor - first.data.len() as u64;
+        let mut buf = first.data;
+        let mut searched = 0usize;
         loop {
-            let read = self.read_rx(cursor, usize::MAX);
-            let start = read.next_cursor - read.data.len() as u64;
-            if let Some(caps) = re.captures(&read.data) {
+            let from = searched.saturating_sub(EXPECT_OVERLAP);
+            if let Some(caps) = re.captures_at(&buf, from) {
                 let m = caps.get(0).expect("group 0 always exists");
                 let text = |b: &[u8]| String::from_utf8_lossy(b).into_owned();
                 return Ok(ExpectMatch {
@@ -604,10 +613,11 @@ impl Session {
                         .skip(1)
                         .map(|c| c.map(|c| text(c.as_bytes())))
                         .collect(),
-                    before: text(&read.data[..m.start()]),
+                    before: text(&buf[..m.start()]),
                     cursor: start + m.end() as u64,
                 });
             }
+            searched = buf.len();
             loop {
                 match tokio::time::timeout_at(deadline, events.recv()).await {
                     Err(_) => return Err(SessionError::Timeout(timeout)),
@@ -616,6 +626,15 @@ impl Session {
                     Ok(Ok(_)) => {}
                     Ok(Err(broadcast::error::RecvError::Closed)) => return Err(SessionError::Shutdown),
                 }
+            }
+            let more = self.read_rx(start + buf.len() as u64, usize::MAX);
+            if more.lost > 0 {
+                // History moved past what we had (cleared, or evicted): continue from what is left.
+                start = more.next_cursor - more.data.len() as u64;
+                buf = more.data;
+                searched = 0;
+            } else {
+                buf.extend_from_slice(&more.data);
             }
         }
     }

@@ -534,3 +534,39 @@ async fn undeliverable_udp_writes_keep_the_port_open() {
     assert_eq!(sizes, [65_507, 34_493]);
     assert!(matches!(s.status().state, PortState::Open));
 }
+
+/// `expect` on a fast stream does work proportional to the data, and finds a match that is
+/// split across reads.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn expect_stays_fast_on_a_busy_stream() {
+    let s = session();
+    let (port, dev) = loopback::pair("loop");
+    s.attach(port).await.unwrap();
+    let cursor = s.status().rx_bytes;
+    let feeder = tokio::spawn(async move {
+        let noise = vec![b'.'; 256];
+        for _ in 0..8192 {
+            dev.send(noise.clone()).await.unwrap();
+        }
+        dev.send(&b"RE"[..]).await.unwrap();
+        dev.send(&b"ADY 42\n"[..]).await.unwrap();
+        dev
+    });
+    let started = Instant::now();
+    let m = s
+        .expect(
+            &Regex::new(r"READY (\d+)").unwrap(),
+            cursor,
+            Duration::from_secs(20),
+        )
+        .await
+        .unwrap();
+    let _dev = feeder.await.unwrap();
+    assert_eq!(m.captures, [Some("42".to_owned())]);
+    assert_eq!(m.before.len(), 8192 * 256);
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "took {:?}",
+        started.elapsed()
+    );
+}
