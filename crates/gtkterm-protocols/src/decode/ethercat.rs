@@ -114,22 +114,24 @@ impl Decoder for EtherCatDecoder {
     fn feed(&mut self, data: &[u8], _ts_us: i64) -> Vec<Frame> {
         self.buf.extend_from_slice(data);
         let mut out = Vec::new();
-        while self.buf.len() >= 2 {
-            let header = u16::from_le_bytes([self.buf[0], self.buf[1]]);
+        // Scan with an index and drop the consumed prefix once: removing bytes one by one
+        // while resynchronising on noise would be quadratic.
+        let mut i = 0;
+        while self.buf.len() - i >= 2 {
+            let b = &self.buf[i..];
+            let header = u16::from_le_bytes([b[0], b[1]]);
             let (len, kind) = ((header & 0x07FF) as usize, header >> 12);
-            if kind != 1
-                || !(12..=MAX_LEN).contains(&len)
-                || !plausible(&self.buf[..self.buf.len().min(2 + len)], len)
-            {
-                self.buf.remove(0); // resynchronise
+            if kind != 1 || !(12..=MAX_LEN).contains(&len) || !plausible(&b[..b.len().min(2 + len)], len) {
+                i += 1; // resynchronise
                 continue;
             }
-            if self.buf.len() < 2 + len {
+            if b.len() < 2 + len {
                 break;
             }
-            let frame: Vec<u8> = self.buf.drain(..2 + len).collect();
-            out.push(decode_frame(&frame));
+            out.push(decode_frame(&b[..2 + len]));
+            i += 2 + len;
         }
+        self.buf.drain(..i);
         out
     }
 
@@ -150,6 +152,21 @@ mod tests {
         d.extend_from_slice(data);
         d.extend_from_slice(&wkc.to_le_bytes());
         d
+    }
+
+    /// Noise that looks like EtherCAT headers at every offset costs linear time to skip.
+    #[test]
+    fn resync_on_noise_is_fast() {
+        let mut d = EtherCatDecoder::default();
+        let noise: Vec<u8> = [0x40, 0x10].iter().copied().cycle().take(256 * 1024).collect();
+        let started = std::time::Instant::now();
+        assert!(d.feed(&noise, 0).is_empty());
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "{:?}",
+            started.elapsed()
+        );
+        assert!(d.buf.len() < 2 + MAX_LEN, "skipped noise is dropped");
     }
 
     #[test]
