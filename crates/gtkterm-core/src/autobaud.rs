@@ -78,7 +78,11 @@ pub async fn auto_baud(
         }
         let mut cfg = original.clone();
         cfg.baudrate = rate;
-        session.open(Connection::Serial(cfg)).await?;
+        if let Err(e) = session.open(Connection::Serial(cfg)).await {
+            // Leave the port as it was, not closed or at a candidate rate.
+            let _ = session.open(Connection::Serial(original.clone())).await;
+            return Err(e);
+        }
         let start = session.rx_cursor();
         // Counters arrive with the first modem poll after opening.
         tokio::time::sleep(Duration::from_millis(60)).await;

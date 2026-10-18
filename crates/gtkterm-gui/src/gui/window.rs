@@ -1158,7 +1158,15 @@ impl Win {
         );
         add(
             "shortcuts",
-            Box::new(|w| shortcuts_dialog().present(Some(&w.window))),
+            Box::new(|w| {
+                let macros: Vec<(String, String)> = w.manager.with_macros(|s| {
+                    s.list()
+                        .iter()
+                        .filter_map(|m| Some((m.name.clone(), m.shortcut.clone()?)))
+                        .collect()
+                });
+                shortcuts_dialog(&macros).present(Some(&w.window));
+            }),
         );
         add("about", Box::new(|w| about_dialog().present(Some(&w.window))));
         // Terminal zoom, like GNOME Terminal (VTE scales the configured font).
@@ -1767,7 +1775,15 @@ impl Win {
             ));
             return;
         }
-        self.toast(&gettext("Detecting the baud rate…"));
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let toast = adw::Toast::builder()
+            .title(gettext("Detecting the baud rate…"))
+            .button_label(gettext("Cancel"))
+            .timeout(0)
+            .build();
+        let c = cancel.clone();
+        toast.connect_button_clicked(move |_| c.cancel());
+        self.toast.add_toast(toast.clone());
         let s = self.session.clone();
         let ww = Rc::downgrade(self);
         spawn(
@@ -1776,11 +1792,12 @@ impl Win {
                     &s,
                     &gtkterm_core::autobaud::CANDIDATES,
                     Duration::from_millis(400),
-                    &tokio_util::sync::CancellationToken::new(),
+                    &cancel,
                 )
                 .await
             },
             move |r| {
+                toast.dismiss();
                 let Some(w) = ww.upgrade() else { return };
                 match r {
                     Ok(r) => match r.best {
@@ -2297,6 +2314,7 @@ fn main_menu() -> gio::Menu {
     zoom.append(Some(&gettext("Fullscreen")), Some("win.fullscreen"));
     view.append_submenu(Some(&gettext("Zoom")), &zoom);
     view.append(Some(&gettext("Clear Screen")), Some("win.clear-screen"));
+    view.append(Some(&gettext("Clear Scrollback")), Some("win.clear-scrollback"));
     view.append(Some(&gettext("Remove All Charts")), Some("win.clear-charts"));
     menu.append_section(None, &view);
 
@@ -2360,7 +2378,8 @@ thread_local! {
     static MACRO_NAMES: RefCell<Vec<(String, Option<String>)>> = const { RefCell::new(Vec::new()) };
 }
 
-fn shortcuts_dialog() -> adw::ShortcutsDialog {
+/// The shortcuts dialog: application shortcuts, then macros with a shortcut (name, accelerator).
+fn shortcuts_dialog(macros: &[(String, String)]) -> adw::ShortcutsDialog {
     let dialog = adw::ShortcutsDialog::new();
     let mut sections: Vec<(&str, adw::ShortcutsSection)> = Vec::new();
     for (section, title, _, accel) in SHORTCUTS {
@@ -2381,6 +2400,13 @@ fn shortcuts_dialog() -> adw::ShortcutsDialog {
         "<Control>c",
     ));
     sections.push(("Device", typing));
+    if !macros.is_empty() {
+        let section = adw::ShortcutsSection::new(Some(&gettext("Macros")));
+        for (name, accel) in macros {
+            section.add(adw::ShortcutsItem::new(name, accel));
+        }
+        sections.push(("Macros", section));
+    }
     for (_, s) in sections {
         dialog.add(s);
     }

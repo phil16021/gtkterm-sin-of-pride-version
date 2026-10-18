@@ -351,9 +351,11 @@ pub fn show(
     );
     let udp_host_row = entry(&gettext("Remote host (empty: first sender)"), &udp_host);
     let udp_port_row = spin(&gettext("Remote port"), 0.0, 65_535.0, f64::from(udp_port));
+    let udp_bind_row = entry(&gettext("Bind address"), &bind);
     let udp_group = group(
         "UDP",
         &[
+            udp_bind_row.upcast_ref(),
             udp_local_row.upcast_ref(),
             udp_host_row.upcast_ref(),
             udp_port_row.upcast_ref(),
@@ -455,6 +457,17 @@ pub fn show(
         &gettext("Wait for character after each line (empty: off)"),
         &show_wait_char(t.wait_char),
     );
+    // Say right away when the text is not a character (it would be ignored on close).
+    wait_char.connect_changed(|row| match parse_wait_char(&row.text()) {
+        Ok(_) => {
+            row.remove_css_class("error");
+            row.set_tooltip_text(None);
+        }
+        Err(e) => {
+            row.add_css_class("error");
+            row.set_tooltip_text(Some(&e));
+        }
+    });
     let mode_labels: Vec<&str> = ViewMode::ALL.iter().map(|m| m.label()).collect();
     let mode = combo(
         &gettext("View mode"),
@@ -606,6 +619,13 @@ pub fn show(
     auto_page.add(&auto_group);
     dialog.add(&auto_page);
 
+    // Keep a connect timeout set in config.toml (there is no row for it).
+    let connect_timeout_ms = match &profile.connection {
+        Connection::TcpClient {
+            connect_timeout_ms, ..
+        } => *connect_timeout_ms,
+        _ => 5_000,
+    };
     let original = profile.clone();
     let original_mcp = mcp.clone();
     let apply = Rc::new(apply);
@@ -615,7 +635,7 @@ pub fn show(
             1 => Connection::TcpClient {
                 host: host_row.text().trim().to_owned(),
                 port: tcp_port_row.value() as u16,
-                connect_timeout_ms: 5_000,
+                connect_timeout_ms,
             },
             2 => Connection::TcpServer {
                 bind: bind_row.text().trim().to_owned(),
@@ -623,12 +643,9 @@ pub fn show(
             },
             3 => {
                 let h = udp_host_row.text().trim().to_owned();
+                let bind = udp_bind_row.text().trim().to_owned();
                 Connection::Udp {
-                    bind: if bind.is_empty() {
-                        "0.0.0.0".into()
-                    } else {
-                        bind.clone()
-                    },
+                    bind: if bind.is_empty() { "0.0.0.0".into() } else { bind },
                     local_port: udp_local_row.value() as u16,
                     remote_host: (!h.is_empty()).then_some(h),
                     remote_port: udp_port_row.value() as u16,
