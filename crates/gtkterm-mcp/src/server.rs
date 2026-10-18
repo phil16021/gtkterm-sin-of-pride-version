@@ -156,8 +156,9 @@ pub struct GtkTermMcp {
     tool_router: ToolRouter<Self>,
     prompt_router: PromptRouter<Self>,
     audit: Option<Arc<crate::guard::AuditLog>>,
-    /// The user answered "Always" (shared by every client of this server).
-    approved: Arc<std::sync::atomic::AtomicBool>,
+    /// Clients the user allowed until the server stops, by reported name and version.
+    /// Kept across server instances: in stateless HTTP mode every request gets a new one.
+    approved: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
 }
 
 fn err(e: impl std::fmt::Display) -> String {
@@ -497,11 +498,16 @@ impl GtkTermMcp {
         args: Option<&serde_json::Map<String, serde_json::Value>>,
         client: Option<&str>,
     ) -> Result<(), String> {
-        use std::sync::atomic::Ordering;
         let Some(approver) = &self.options.approver else {
             return Ok(());
         };
-        if !WRITE_TOOLS.contains(&tool) || self.approved.load(Ordering::Relaxed) {
+        let key = client.unwrap_or("unknown client").to_owned();
+        let allowed = || {
+            self.approved
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        };
+        if !WRITE_TOOLS.contains(&tool) || allowed().contains(&key) {
             return Ok(());
         }
         let request = crate::ApprovalRequest {
@@ -511,7 +517,7 @@ impl GtkTermMcp {
         };
         match approver.ask(request).await {
             crate::Approval::Always => {
-                self.approved.store(true, Ordering::Relaxed);
+                allowed().insert(key);
                 Ok(())
             }
             crate::Approval::Once => Ok(()),
@@ -1764,7 +1770,14 @@ impl ServerHandler for GtkTermMcp {
         let started = std::time::Instant::now();
         let tool = request.name.to_string();
         let args = request.arguments.clone();
-        let client = context.peer.peer_info().map(|i| i.client_info.name.clone());
+        let client = context.peer.peer_info().map(|i| {
+            let c = &i.client_info;
+            if c.version.is_empty() {
+                c.name.clone()
+            } else {
+                format!("{} {}", c.name, c.version)
+            }
+        });
         let audit = |outcome: &str, error: Option<String>| {
             if let Some(log) = &self.audit {
                 log.write(&crate::guard::AuditEntry {

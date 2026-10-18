@@ -20,11 +20,17 @@ use serde_json::{Value, json};
 #[derive(Debug, Clone, Default)]
 struct Client {
     progress: Arc<std::sync::Mutex<Vec<rmcp::model::ProgressNotificationParam>>>,
+    /// Name reported in `clientInfo` (default: rmcp's).
+    name: Option<&'static str>,
 }
 
 impl ClientHandler for Client {
     fn get_info(&self) -> ClientConfig {
-        ClientConfig::default()
+        let mut c = ClientConfig::default();
+        if let Some(name) = self.name {
+            c.client_info = rmcp::model::Implementation::new(name, "1.0");
+        }
+        c
     }
 
     async fn on_progress(
@@ -943,4 +949,53 @@ async fn write_tools_ask_the_approver_and_every_call_is_audited() {
         serde_json::from_str(std::fs::read_to_string(&audit).unwrap().lines().last().unwrap()).unwrap();
     assert_eq!(last["outcome"], "error");
     assert!(last["error"].as_str().unwrap().contains("nope"), "{last}");
+}
+
+/// "Allow until the server stops" applies to the client that was asked, not to others.
+#[tokio::test]
+async fn approval_is_remembered_per_client() {
+    use std::sync::Mutex;
+
+    use gtkterm_mcp::{Approval, Approver};
+    let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+    let q = Arc::clone(&asked);
+    let manager = SessionManager::new(Config::default(), None);
+    let server = GtkTermMcp::new(
+        Arc::clone(&manager),
+        ServerOptions {
+            approver: Some(Approver::new(move |req| {
+                q.lock().unwrap().push(req.client.unwrap_or_default());
+                async { Approval::Always }
+            })),
+            ..ServerOptions::default()
+        },
+    );
+    let connect = |name: &'static str| {
+        let server = server.clone();
+        async move {
+            let (server_io, client_io) = tokio::io::duplex(1 << 16);
+            tokio::spawn(async move {
+                if let Ok(running) = server.serve(server_io).await {
+                    let _ = running.waiting().await;
+                }
+            });
+            Client {
+                name: Some(name),
+                ..Client::default()
+            }
+            .serve(client_io)
+            .await
+            .unwrap()
+        }
+    };
+    let a = connect("agent-a").await;
+    let b = connect("agent-b").await;
+    let session = manager.first_or_create();
+    let (port, _dev) = loopback::pair("loopback");
+    session.attach(port).await.unwrap();
+    ok(&a, "send", json!({"data": "1"})).await;
+    ok(&a, "send", json!({"data": "2"})).await;
+    ok(&b, "send", json!({"data": "3"})).await;
+    ok(&b, "send", json!({"data": "4"})).await;
+    assert_eq!(*asked.lock().unwrap(), ["agent-a 1.0", "agent-b 1.0"]);
 }

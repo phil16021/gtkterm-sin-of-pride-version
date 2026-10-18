@@ -99,7 +99,8 @@ should only observe.
 
 **Approval (window).** The embedded server asks before an agent's write tool runs: *Deny*,
 *Allow Once* or *Allow Until the Server Stops* (Preferences → MCP → *Ask before agents change
-anything*, on by default). A denied call is a tool error that tells the agent to ask you; an
+anything*, on by default). "Until the server stops" applies to the client that was asked,
+recognised by the name and version it reports (two instances of the same client share it). A denied call is a tool error that tells the agent to ask you; an
 unanswered question is denied after two minutes. Headless servers (`--mcp-stdio`,
 `--mcp-http`) do not ask: whoever starts them chooses the access with `--mcp-read-only`.
 
