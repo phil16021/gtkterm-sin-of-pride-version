@@ -13,6 +13,8 @@ use super::{OpenPort, PortError, PortKind, PortRx, PortWriter, RX_CHANNEL};
 
 /// Largest datagram received in one piece.
 const MAX_DATAGRAM: usize = 65_535;
+/// Largest payload sent in one datagram (IPv4: 65 535 − 20 IP − 8 UDP header bytes).
+const MAX_SEND: usize = 65_507;
 
 /// Bind `bind:local_port`, optionally fixing the remote.
 pub(crate) async fn open(
@@ -109,7 +111,7 @@ struct UdpWriter {
 impl PortWriter for UdpWriter {
     async fn write_all(&mut self, data: &[u8]) -> Result<(), PortError> {
         let remote = (*self.remote.lock().expect("remote mutex poisoned")).ok_or(PortError::NoRemote)?;
-        for chunk in data.chunks(MAX_DATAGRAM - 8) {
+        for chunk in data.chunks(MAX_SEND) {
             self.socket
                 .send_to(chunk, remote)
                 .await

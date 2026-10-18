@@ -241,6 +241,55 @@ async fn tcp_server_merges_clients_and_survives_disconnects() {
     }
 }
 
+/// A client that stops reading is dropped instead of blocking the writes to everyone else.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn tcp_server_drops_a_client_that_stops_reading() {
+    let conn = Connection::TcpServer {
+        bind: "127.0.0.1".into(),
+        port: 0,
+    };
+    let mut port = port::open(&conn).await.unwrap();
+    let local_port: u16 = port.description.rsplit(':').next().unwrap().parse().unwrap();
+    let stalled = TcpStream::connect(("127.0.0.1", local_port)).await.unwrap();
+    assert!(next_info(&mut port).await.contains("connected"));
+    const CHUNK: usize = 64 * 1024;
+    const WRITES: usize = 400;
+    let mut readers = Vec::new();
+    for _ in 0..2 {
+        let mut c = TcpStream::connect(("127.0.0.1", local_port)).await.unwrap();
+        assert!(next_info(&mut port).await.contains("connected"));
+        readers.push(tokio::spawn(async move {
+            let mut buf = vec![0u8; CHUNK];
+            let mut total = 0;
+            while total < CHUNK * WRITES {
+                let n = timeout(T, c.read(&mut buf)).await.unwrap().unwrap();
+                assert!(n > 0, "closed early");
+                total += n;
+            }
+            total
+        }));
+    }
+    let data = vec![0xA5u8; CHUNK];
+    for i in 0..WRITES {
+        timeout(Duration::from_secs(2), port.writer.write_all(&data))
+            .await
+            .unwrap_or_else(|_| panic!("write {i} blocked on the stalled client"))
+            .unwrap();
+        if i % 16 == 0 {
+            tokio::task::yield_now().await;
+        }
+    }
+    for r in readers {
+        assert_eq!(r.await.unwrap(), CHUNK * WRITES);
+    }
+    let mut dropped = false;
+    while let Ok(Some(PortRx::Info(msg))) = timeout(Duration::from_millis(500), port.rx.recv()).await {
+        dropped |= msg.contains("dropped: not reading");
+    }
+    assert!(dropped, "the stalled client was dropped");
+    drop(stalled);
+}
+
 #[tokio::test]
 async fn udp_learns_remote_and_resolves_hostnames() {
     // U1: hostnames must resolve (the C version passed NULL addresses on).

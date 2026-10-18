@@ -78,6 +78,25 @@ pub enum PortError {
 }
 
 impl PortError {
+    /// The connection itself is broken (close the port), as opposed to one write that
+    /// could not be delivered (no UDP remote yet, datagram too large, ICMP unreachable).
+    pub fn is_fatal(&self) -> bool {
+        match self {
+            Self::NoRemote | Self::Unsupported(_) | Self::Config(_) => false,
+            Self::Io { source, .. } => !matches!(
+                source.raw_os_error(),
+                Some(
+                    nix::libc::EMSGSIZE
+                        | nix::libc::ECONNREFUSED
+                        | nix::libc::EHOSTUNREACH
+                        | nix::libc::ENETUNREACH
+                        | nix::libc::ENOBUFS
+                )
+            ),
+            Self::Locked(_) | Self::Timeout(_) | Self::Closed => true,
+        }
+    }
+
     pub(crate) fn io(context: impl Into<String>, source: impl Into<std::io::Error>) -> Self {
         Self::Io {
             context: context.into(),

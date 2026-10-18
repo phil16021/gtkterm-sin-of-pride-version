@@ -477,3 +477,60 @@ async fn stopping_the_log_right_after_a_send_keeps_the_tx_record() {
         assert!(std::fs::read_to_string(&path).unwrap().contains("T: AT<0D>"));
     }
 }
+
+/// A UDP send before any peer is known, or a datagram the network refuses, fails that one
+/// send but keeps the port open; large sends are split into datagrams that fit IPv4.
+#[tokio::test]
+async fn undeliverable_udp_writes_keep_the_port_open() {
+    use tokio::net::UdpSocket;
+    let s = session();
+    s.open(Connection::Udp {
+        bind: "127.0.0.1".into(),
+        local_port: 0,
+        remote_host: None,
+        remote_port: 0,
+    })
+    .await
+    .unwrap();
+    let mut ev = s.subscribe();
+    assert!(s.send(&b"early"[..]).await.is_err(), "no remote yet");
+    wait_for(
+        &mut ev,
+        |e| matches!(e, SessionEvent::Info(m) if m.starts_with("not sent:")),
+    )
+    .await;
+    assert!(
+        matches!(s.status().state, PortState::Open),
+        "{:?}",
+        s.status().state
+    );
+
+    let addr: std::net::SocketAddr = s
+        .status()
+        .description
+        .trim_start_matches("UDP:")
+        .split("->")
+        .next()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let peer = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    peer.send_to(b"hello", addr).await.unwrap();
+    wait_for(
+        &mut ev,
+        |e| matches!(e, SessionEvent::Data(c) if c.dir == Direction::Rx),
+    )
+    .await;
+    s.send(vec![0x55; 100_000]).await.unwrap();
+    let mut buf = vec![0u8; 70_000];
+    let mut sizes = Vec::new();
+    while sizes.iter().sum::<usize>() < 100_000 {
+        let (n, _) = tokio::time::timeout(Duration::from_secs(2), peer.recv_from(&mut buf))
+            .await
+            .unwrap()
+            .unwrap();
+        sizes.push(n);
+    }
+    assert_eq!(sizes, [65_507, 34_493]);
+    assert!(matches!(s.status().state, PortState::Open));
+}

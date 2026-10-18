@@ -642,7 +642,21 @@ struct TxJob {
 enum WriterEvent {
     Written(Bytes),
     RawWritten(usize),
+    /// One write could not be delivered; the port stays open.
+    Rejected {
+        error: PortError,
+        raw: bool,
+    },
     Failed(PortError),
+}
+
+/// The writer's report for a failed write.
+fn write_error(error: PortError, raw: bool) -> WriterEvent {
+    if error.is_fatal() {
+        WriterEvent::Failed(error)
+    } else {
+        WriterEvent::Rejected { error, raw }
+    }
 }
 
 struct Actor {
@@ -1007,6 +1021,14 @@ impl Actor {
                     }
                 }
             }
+            Some(WriterEvent::Rejected { error, raw }) => {
+                debug!(%error, "write rejected, port stays open");
+                if raw {
+                    // A transfer write that went nowhere; the protocol's timeouts handle it.
+                    self.transfer_writes = self.transfer_writes.saturating_sub(1);
+                }
+                self.emit(SessionEvent::Info(format!("not sent: {error}")));
+            }
             Some(WriterEvent::Failed(e)) => {
                 warn!(error = %e, "write failed, closing port");
                 self.teardown(PortState::Error(e.to_string())).await;
@@ -1272,7 +1294,7 @@ async fn writer_loop(
                     let _ = written.send(WriterEvent::RawWritten(job.data.len())).await;
                 }
                 Err(e) => {
-                    let _ = written.send(WriterEvent::Failed(e)).await;
+                    let _ = written.send(write_error(e, true)).await;
                 }
             }
             continue;
@@ -1290,7 +1312,7 @@ async fn writer_loop(
             }
             if let Err(e) = writer.write_all(piece).await {
                 let msg = e.to_string();
-                let _ = written.send(WriterEvent::Failed(e)).await;
+                let _ = written.send(write_error(e, false)).await;
                 result = Err(SessionError::Write(msg));
                 break;
             }

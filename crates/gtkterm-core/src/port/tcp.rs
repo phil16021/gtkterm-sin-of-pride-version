@@ -13,7 +13,7 @@ use bytes::Bytes;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
@@ -86,7 +86,24 @@ impl PortWriter for ClientWriter {
     }
 }
 
-type Clients = Arc<Mutex<Vec<(SocketAddr, OwnedWriteHalf)>>>;
+/// Most clients a TCP server serves at once; later connections are refused.
+const MAX_CLIENTS: usize = 32;
+/// Writes queued per client; a client that falls this far behind is dropped.
+const CLIENT_QUEUE: usize = 256;
+
+/// A connected client: its write queue and the token that ends both of its tasks.
+#[derive(Debug)]
+struct Client {
+    peer: SocketAddr,
+    queue: mpsc::Sender<Bytes>,
+    cancel: CancellationToken,
+}
+
+type Clients = Arc<std::sync::Mutex<Vec<Client>>>;
+
+fn lock_clients(c: &Clients) -> std::sync::MutexGuard<'_, Vec<Client>> {
+    c.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 /// Listen on `bind:port`.
 pub(crate) async fn listen(bind: &str, port: u16) -> Result<OpenPort, PortError> {
@@ -99,12 +116,17 @@ pub(crate) async fn listen(bind: &str, port: u16) -> Result<OpenPort, PortError>
     let clients: Clients = Arc::default();
     let cancel = CancellationToken::new();
     let (tx, rx) = mpsc::channel(RX_CHANNEL);
-    let task = tokio::spawn(accept_loop(listener, Arc::clone(&clients), tx, cancel.clone()));
+    let task = tokio::spawn(accept_loop(
+        listener,
+        Arc::clone(&clients),
+        tx.clone(),
+        cancel.clone(),
+    ));
     Ok(OpenPort::new(
         PortKind::TcpServer,
         format!("TCP-Server:{}", local.port()),
         rx,
-        Box::new(ServerWriter { clients }),
+        Box::new(ServerWriter { clients, info: tx }),
         None,
         cancel,
         Some(task),
@@ -123,14 +145,31 @@ async fn accept_loop(
             r = listener.accept() => match r {
                 Ok(c) => c,
                 Err(e) => {
+                    // Out of file descriptors and the like: do not spin.
                     debug!(error = %e, "accept failed");
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                     continue;
                 }
             },
         };
+        if lock_clients(&clients).len() >= MAX_CLIENTS {
+            drop(stream);
+            let _ = tx
+                .send(PortRx::Info(format!(
+                    "client {peer} refused: {MAX_CLIENTS} clients connected"
+                )))
+                .await;
+            continue;
+        }
         let _ = stream.set_nodelay(true);
         let (read, write) = stream.into_split();
-        clients.lock().await.push((peer, write));
+        let (queue, pending) = mpsc::channel(CLIENT_QUEUE);
+        let client_cancel = cancel.child_token();
+        lock_clients(&clients).push(Client {
+            peer,
+            queue,
+            cancel: client_cancel.clone(),
+        });
         if tx
             .send(PortRx::Info(format!("client {peer} connected")))
             .await
@@ -138,10 +177,12 @@ async fn accept_loop(
         {
             return;
         }
-        let (tx, clients, cancel) = (tx.clone(), Arc::clone(&clients), cancel.clone());
+        tokio::spawn(client_writer(write, pending, client_cancel.clone()));
+        let (tx, clients) = (tx.clone(), Arc::clone(&clients));
         tokio::spawn(async move {
-            let reason = read_stream(read, &tx, &cancel, Some(peer)).await;
-            clients.lock().await.retain(|(p, _)| *p != peer);
+            let reason = read_stream(read, &tx, &client_cancel, Some(peer)).await;
+            client_cancel.cancel();
+            lock_clients(&clients).retain(|c| c.peer != peer);
             let msg = match reason {
                 Some(e) => format!("client {peer} disconnected: {e}"),
                 None => format!("client {peer} disconnected"),
@@ -151,23 +192,55 @@ async fn accept_loop(
     }
 }
 
+/// Deliver one client's queue; a write error ends the client.
+async fn client_writer(
+    mut write: OwnedWriteHalf,
+    mut pending: mpsc::Receiver<Bytes>,
+    cancel: CancellationToken,
+) {
+    loop {
+        let data = tokio::select! {
+            () = cancel.cancelled() => return,
+            d = pending.recv() => match d {
+                Some(d) => d,
+                None => return,
+            },
+        };
+        if let Err(e) = write.write_all(&data).await {
+            debug!(error = %e, "TCP client write failed");
+            cancel.cancel();
+            return;
+        }
+    }
+}
+
 #[derive(Debug)]
 struct ServerWriter {
     clients: Clients,
+    info: mpsc::Sender<PortRx>,
 }
 
 #[async_trait]
 impl PortWriter for ServerWriter {
+    /// Queue `data` for every client without waiting for any of them: a client that stops
+    /// reading must not hold up the others (or the session).
     async fn write_all(&mut self, data: &[u8]) -> Result<(), PortError> {
-        let mut clients = self.clients.lock().await;
-        let mut alive = Vec::with_capacity(clients.len());
-        for (peer, mut w) in clients.drain(..) {
-            match w.write_all(data).await {
-                Ok(()) => alive.push((peer, w)),
-                Err(e) => debug!(%peer, error = %e, "dropping TCP client after write error"),
+        let data = Bytes::copy_from_slice(data);
+        let mut dropped = Vec::new();
+        lock_clients(&self.clients).retain(|c| {
+            if c.queue.try_send(data.clone()).is_ok() {
+                return true;
             }
+            c.cancel.cancel();
+            dropped.push(c.peer);
+            false
+        });
+        for peer in dropped {
+            let _ = self
+                .info
+                .send(PortRx::Info(format!("client {peer} dropped: not reading")))
+                .await;
         }
-        *clients = alive;
         Ok(())
     }
 }
