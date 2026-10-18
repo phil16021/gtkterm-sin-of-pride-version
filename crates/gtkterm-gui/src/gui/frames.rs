@@ -92,7 +92,7 @@ fn column(title: &str, cell: CellFn, expand: bool) -> gtk::ColumnViewColumn {
 
 impl FramesView {
     /// Build the pane for `session`, showing the frames it already has.
-    pub fn new(session: &Session) -> Rc<Self> {
+    pub fn new(session: &Session, toast: &adw::ToastOverlay) -> Rc<Self> {
         let store = gio::ListStore::new::<glib::BoxedAnyObject>();
         let query: Rc<RefCell<String>> = Rc::default();
         let q = Rc::clone(&query);
@@ -202,6 +202,10 @@ impl FramesView {
             .icon_name("edit-clear-all-symbolic")
             .tooltip_text(gettext("Clear frames"))
             .build();
+        let export = gtk::Button::builder()
+            .icon_name("document-save-symbolic")
+            .tooltip_text(gettext("Export frames as CSV"))
+            .build();
         let count = gtk::Label::new(None);
         count.add_css_class("dim-label");
         let toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 6);
@@ -212,6 +216,7 @@ impl FramesView {
         toolbar.append(&search);
         toolbar.append(&count);
         toolbar.append(&follow);
+        toolbar.append(&export);
         toolbar.append(&clear);
 
         let widget = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -265,6 +270,16 @@ impl FramesView {
         });
         let s = session.clone();
         clear.connect_clicked(move |_| s.clear_frames());
+        let s = session.clone();
+        // Weak: the overlay contains this pane (a strong reference would be a cycle).
+        let toast = toast.downgrade();
+        export.connect_clicked(move |b| {
+            let Some(toast) = toast.upgrade() else { return };
+            let frames = s.frames_since(0, usize::MAX).frames;
+            let csv = gtkterm_core::decoding::frames_to_csv(&frames, &jiff::tz::TimeZone::system());
+            let stamp = jiff::Zoned::now().strftime("%Y%m%d_%H%M%S");
+            super::charts::save_dialog(b, &format!("frames_{stamp}.csv"), csv.into_bytes(), toast);
+        });
         let w = Rc::downgrade(&this);
         this.selection.connect_selected_item_notify(move |sel| {
             if let Some(w) = w.upgrade() {

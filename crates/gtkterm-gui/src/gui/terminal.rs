@@ -294,6 +294,7 @@ impl TerminalView {
     fn install_context_menu(&self) {
         let menu = gio::Menu::new();
         menu.append(Some(&gettext("Copy")), Some("win.copy"));
+        menu.append(Some(&gettext("Copy as Hex")), Some("win.copy-hex"));
         menu.append(Some(&gettext("Paste")), Some("win.paste"));
         menu.append(Some(&gettext("Select All")), Some("win.select-all"));
         let section = gio::Menu::new();
@@ -430,8 +431,7 @@ impl TerminalView {
         });
     }
 
-    /// Feed everything queued now.
-    #[cfg(test)]
+    /// Feed everything queued now (before reading the terminal's text).
     pub fn flush_output(&self) {
         while self.pending.flush(&self.term) {}
     }

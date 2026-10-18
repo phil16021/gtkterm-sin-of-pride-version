@@ -368,7 +368,7 @@ impl Win {
         let term = TerminalView::new(&session, &profile.terminal);
         term.term.set_font_scale(st.font_scale.clamp(0.25, 4.0));
         let panel = VizPanel::new(&session, &chrome.toast);
-        let frames = FramesView::new(&session);
+        let frames = FramesView::new(&session, &chrome.toast);
         let term_paned = gtk::Paned::builder()
             .orientation(gtk::Orientation::Vertical)
             .start_child(&term.widget)
@@ -1406,6 +1406,40 @@ impl Win {
             }),
         );
         add("save-raw", Box::new(Self::save_raw));
+        add(
+            "save-terminal-text",
+            Box::new(|w| {
+                w.term.flush_output();
+                let text = w
+                    .term
+                    .term
+                    .text_format(vte::Format::Text)
+                    .map(|t| t.to_string())
+                    .unwrap_or_default();
+                let stamp = jiff::Zoned::now().strftime("%Y%m%d_%H%M%S");
+                save_dialog(
+                    &w.window,
+                    &format!("terminal_{stamp}.txt"),
+                    text.into_bytes(),
+                    w.toast.clone(),
+                );
+            }),
+        );
+        add(
+            "copy-hex",
+            Box::new(|w| {
+                let Some(text) = w.term.term.text_selected(vte::Format::Text) else {
+                    return;
+                };
+                let hex = text
+                    .as_bytes()
+                    .iter()
+                    .map(|b| format!("{b:02X}"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                w.window.clipboard().set_text(&hex);
+            }),
+        );
         add("log-start", Box::new(Self::log_start));
         add(
             "log-pause",
@@ -2835,6 +2869,10 @@ fn main_menu() -> gio::Menu {
         Some("win.cancel-transfer"),
     );
     data.append(Some(&gettext("Save Received Data…")), Some("win.save-raw"));
+    data.append(
+        Some(&gettext("Save Terminal Text…")),
+        Some("win.save-terminal-text"),
+    );
     let log = gio::Menu::new();
     log.append(Some(&gettext("Start Logging…")), Some("win.log-start"));
     log.append(Some(&gettext("Pause / Resume")), Some("win.log-pause"));
@@ -3263,6 +3301,7 @@ mod tests {
             "copy",
             "paste",
             "select-all",
+            "copy-hex",
             "search",
             "clear-screen",
             "clear-scrollback",

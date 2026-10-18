@@ -136,6 +136,45 @@ pub struct DecodedFrame {
     pub frame: Frame,
 }
 
+/// Frames as CSV: `Seq,Timestamp,Direction,Protocol,Check,Summary,Bytes_Hex`.
+pub fn frames_to_csv(frames: &[DecodedFrame], tz: &jiff::tz::TimeZone) -> String {
+    use std::fmt::Write as _;
+    let quote = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
+    let mut out = String::from("Seq,Timestamp,Direction,Protocol,Check,Summary,Bytes_Hex\n");
+    for f in frames {
+        let check = match &f.frame.check {
+            Check::None => String::new(),
+            Check::Ok => "ok".into(),
+            Check::Failed { received, computed } => {
+                format!("failed (received {received}, computed {computed})")
+            }
+        };
+        let dir = match f.source {
+            FrameSource::Rx => "rx",
+            FrameSource::Tx => "tx",
+            FrameSource::Lines => "lines",
+        };
+        let hex = f
+            .frame
+            .bytes
+            .iter()
+            .map(|b| format!("{b:02X}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let _ = writeln!(
+            out,
+            "{},{},{dir},{},{},{},{}",
+            f.seq,
+            f.time.to_zoned(tz.clone()).strftime("%Y-%m-%d %H:%M:%S%.3f"),
+            quote(f.frame.protocol.label()),
+            quote(&check),
+            quote(&f.frame.summary),
+            quote(&hex)
+        );
+    }
+    out
+}
+
 /// Result of [`FrameStore::since`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FramesRead {
@@ -491,6 +530,32 @@ impl Decoding {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frames_export_as_csv() {
+        let f = DecodedFrame {
+            seq: 7,
+            time: Timestamp::from_millisecond(1_700_000_000_123).unwrap(),
+            source: FrameSource::Tx,
+            frame: Frame {
+                protocol: Protocol::ModbusRtu,
+                bytes: vec![0x01, 0x03],
+                summary: "Read \"holding\", 2".into(),
+                fields: Vec::new(),
+                check: Check::Ok,
+            },
+        };
+        let csv = frames_to_csv(&[f], &jiff::tz::TimeZone::UTC);
+        let mut lines = csv.lines();
+        assert_eq!(
+            lines.next(),
+            Some("Seq,Timestamp,Direction,Protocol,Check,Summary,Bytes_Hex")
+        );
+        assert_eq!(
+            lines.next(),
+            Some(r#"7,2023-11-14 22:13:20.123,tx,"Modbus RTU","ok","Read ""holding"", 2","01 03""#)
+        );
+    }
     use gtkterm_protocols::decode::modbus;
 
     fn ts(ms: i64) -> Timestamp {
