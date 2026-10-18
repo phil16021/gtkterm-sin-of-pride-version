@@ -17,3 +17,7 @@ pub use server::{
 /// Reference of the automation script language (Markdown), also served as
 /// `gtkterm://docs/script-language`.
 pub const SCRIPT_LANGUAGE: &str = include_str!("script_language.md");
+
+/// Reference of the Sunshine packet format (Markdown), also served as
+/// `gtkterm://docs/sunshine-protocol`.
+pub const SUNSHINE_PROTOCOL: &str = include_str!("sunshine_protocol.md");

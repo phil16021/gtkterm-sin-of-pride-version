@@ -55,6 +55,10 @@ pub struct ScriptWindow {
     running: Cell<bool>,
     allow_exec: Box<dyn Fn() -> bool>,
     remember: Box<dyn Fn(PathBuf)>,
+    /// The text differs from the file (or from the template).
+    dirty: Cell<bool>,
+    /// Text is being replaced by the program, not edited.
+    loading: Cell<bool>,
 }
 
 impl ScriptWindow {
@@ -138,6 +142,10 @@ impl ScriptWindow {
         let header = adw::HeaderBar::new();
         let title = adw::WindowTitle::new(&gettext("Script"), &gettext("unsaved"));
         header.set_title_widget(Some(&title));
+        let new = gtk::Button::builder()
+            .icon_name("document-new-symbolic")
+            .tooltip_text(gettext("New script"))
+            .build();
         let open = gtk::Button::builder()
             .icon_name("document-open-symbolic")
             .tooltip_text(gettext("Open script…"))
@@ -178,6 +186,7 @@ impl ScriptWindow {
             .tooltip_text(gettext("Language reference"))
             .popover(&gtk::Popover::builder().child(&help_scroll).build())
             .build();
+        header.pack_start(&new);
         header.pack_start(&open);
         header.pack_start(&save);
         header.pack_start(&save_as);
@@ -218,6 +227,8 @@ impl ScriptWindow {
             running: Cell::new(false),
             allow_exec: Box::new(allow_exec),
             remember: Box::new(remember),
+            dirty: Cell::new(false),
+            loading: Cell::new(false),
         });
         let w = Rc::downgrade(&this);
         this.run.connect_clicked(move |_| {
@@ -234,8 +245,38 @@ impl ScriptWindow {
         let w = Rc::downgrade(&this);
         open.connect_clicked(move |_| {
             if let Some(w) = w.upgrade() {
-                w.choose_open();
+                w.unless_unsaved(Self::choose_open);
             }
+        });
+        let w = Rc::downgrade(&this);
+        new.connect_clicked(move |_| {
+            if let Some(w) = w.upgrade() {
+                w.unless_unsaved(Self::new_script);
+            }
+        });
+        let w = Rc::downgrade(&this);
+        this.window.connect_close_request(move |win| {
+            let Some(w) = w.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
+            if !w.dirty.get() {
+                return glib::Propagation::Proceed;
+            }
+            let win = win.clone();
+            w.unless_unsaved(move |w: &Rc<Self>| {
+                w.mark_dirty(false);
+                // After the question has gone: closing while it is still shown would only
+                // close the question.
+                let win = win.clone();
+                glib::idle_add_local_once(move || {
+                    for _ in 0..4 {
+                        let Some(d) = win.visible_dialog() else { break };
+                        d.force_close();
+                    }
+                    win.close();
+                });
+            });
+            glib::Propagation::Stop
         });
         let w = Rc::downgrade(&this);
         save.connect_clicked(move |_| {
@@ -275,6 +316,9 @@ impl ScriptWindow {
         this.buffer.connect_changed(move |b| {
             if let Some(w) = w.upgrade() {
                 b.remove_tag(&w.error_tag, &b.start_iter(), &b.end_iter());
+                if !w.loading.get() {
+                    w.mark_dirty(true);
+                }
             }
         });
         this
@@ -301,11 +345,88 @@ impl ScriptWindow {
     /// Load a file into the editor.
     pub fn load(&self, path: &std::path::Path) -> Result<(), String> {
         let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        self.buffer.set_text(&text);
+        self.replace_text(&text);
         self.set_path(path.to_owned());
+        self.mark_dirty(false);
         let path_name = path.display();
         self.set_status(&gettext_f("Opened {path}", &[("path", &path_name)]), false);
         Ok(())
+    }
+
+    /// Replace the text without marking it as edited.
+    fn replace_text(&self, text: &str) {
+        self.loading.set(true);
+        self.buffer.set_text(text);
+        self.loading.set(false);
+    }
+
+    /// Start over with the template.
+    fn new_script(self: &Rc<Self>) {
+        self.replace_text(TEMPLATE);
+        self.path.borrow_mut().take();
+        self.title.set_subtitle(&gettext("unsaved"));
+        self.mark_dirty(false);
+    }
+
+    /// The text has (or no longer has) changes that are not saved: shown as "• name".
+    fn mark_dirty(&self, dirty: bool) {
+        self.dirty.set(dirty);
+        let name = self
+            .path
+            .borrow()
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map_or_else(|| gettext("Script"), |n| n.to_string_lossy().into_owned());
+        self.title
+            .set_title(&if dirty { format!("• {name}") } else { name });
+    }
+
+    /// Run `then` now, or after the user agreed to discard unsaved changes.
+    fn unless_unsaved(self: &Rc<Self>, then: impl Fn(&Rc<Self>) + 'static) {
+        if !self.dirty.get() {
+            then(self);
+            return;
+        }
+        let dialog = adw::AlertDialog::builder()
+            .heading(gettext("Discard unsaved changes?"))
+            .body(gettext("The script has changes that are not saved."))
+            .close_response("cancel")
+            .default_response("cancel")
+            .build();
+        dialog.add_responses(&[
+            ("cancel", gettext("Cancel").as_str()),
+            ("discard", gettext("Discard").as_str()),
+        ]);
+        dialog.set_response_appearance("discard", adw::ResponseAppearance::Destructive);
+        let w = Rc::downgrade(self);
+        dialog.connect_response(None, move |_, resp| {
+            if let (Some(w), "discard") = (w.upgrade(), resp) {
+                then(&w);
+            }
+        });
+        dialog.present(Some(&self.window));
+    }
+
+    /// Unsaved changes are kept in a recovery file when the window goes away (application
+    /// quit); returns where.
+    pub fn keep_unsaved(&self) -> Option<PathBuf> {
+        if !self.dirty.get() {
+            return None;
+        }
+        let path = gtkterm_core::config::config_dir().join("unsaved.script");
+        match gtkterm_core::fsutil::write_atomic(&path, self.text().as_bytes(), Some(0o600)) {
+            Ok(()) => Some(path),
+            Err(e) => {
+                tracing::warn!(error = %e, "cannot keep the unsaved script");
+                None
+            }
+        }
+    }
+
+    /// The text has unsaved changes.
+    #[cfg(test)]
+    pub fn is_dirty(&self) -> bool {
+        self.dirty.get()
     }
 
     fn set_path(&self, path: PathBuf) {
@@ -359,7 +480,10 @@ impl ScriptWindow {
         if let (false, Some(path)) = (choose, current) {
             let shown = path.display();
             match std::fs::write(&path, self.text()) {
-                Ok(()) => self.set_status(&gettext_f("Saved {path}", &[("path", &shown)]), false),
+                Ok(()) => {
+                    self.mark_dirty(false);
+                    self.set_status(&gettext_f("Saved {path}", &[("path", &shown)]), false);
+                }
                 Err(e) => self.set_status(
                     &gettext_f("Cannot save {path}: {error}", &[("path", &shown), ("error", &e)]),
                     true,

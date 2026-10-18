@@ -1676,7 +1676,7 @@ impl GtkTermMcp {
     }
 }
 
-const SUNSHINE_DOC: &str = include_str!("sunshine_protocol.md");
+const SUNSHINE_DOC: &str = crate::SUNSHINE_PROTOCOL;
 const SCRIPT_DOC: &str = crate::SCRIPT_LANGUAGE;
 
 #[prompt_router]

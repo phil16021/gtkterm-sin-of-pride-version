@@ -238,6 +238,11 @@ impl StatusBar {
             } else {
                 l.remove_css_class("on");
             }
+            // The level is shown by opacity only; tell assistive technology (and the tooltip).
+            let state = if on { gettext("high") } else { gettext("low") };
+            let text = format!("{}: {state}", l.label());
+            l.set_tooltip_text(Some(&text));
+            l.update_property(&[gtk::accessible::Property::Description(&text)]);
         }
     }
 

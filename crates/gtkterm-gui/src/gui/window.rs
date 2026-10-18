@@ -1738,6 +1738,14 @@ impl Win {
             }),
         );
         add("import-presets", Box::new(Self::import_presets));
+        let action = gio::SimpleAction::new("help", Some(glib::VariantTy::STRING));
+        let w = self.current();
+        action.connect_activate(move |_, param| {
+            if let (Some(w), Some(topic)) = (w.upgrade(), param.and_then(glib::Variant::get::<String>)) {
+                help_dialog(&topic).present(Some(&w.window));
+            }
+        });
+        self.window.add_action(&action);
         let action = gio::SimpleAction::new("play-macro", Some(glib::VariantTy::STRING));
         let w = self.current();
         action.connect_activate(move |_, param| {
@@ -2681,6 +2689,9 @@ impl Win {
     fn close_tab_resources(&self) {
         self.flush_autosave();
         if let Some(w) = self.script_window.borrow_mut().take() {
+            if let Some(path) = w.keep_unsaved() {
+                tracing::info!(path = %path.display(), "unsaved script kept");
+            }
             w.window.destroy();
         }
         if let Some(w) = self.signal_window.borrow_mut().take() {
@@ -3012,7 +3023,18 @@ fn main_menu() -> gio::Menu {
     let app = gio::Menu::new();
     app.append(Some(&gettext("Import Presets…")), Some("win.import-presets"));
     app.append(Some(&gettext("MCP Server for AI Agents")), Some("win.mcp"));
-    app.append(Some(&gettext("Keyboard Shortcuts")), Some("win.shortcuts"));
+    let help = gio::Menu::new();
+    for (label, topic) in [
+        (gettext("Sunshine Packet Format"), "sunshine"),
+        (gettext("Script Language"), "scripts"),
+        (gettext("MCP Server for AI Agents"), "mcp"),
+    ] {
+        let item = gio::MenuItem::new(Some(&label), None);
+        item.set_action_and_target_value(Some("win.help"), Some(&topic.to_variant()));
+        help.append_item(&item);
+    }
+    help.append(Some(&gettext("Keyboard Shortcuts")), Some("win.shortcuts"));
+    app.append_submenu(Some(&gettext("Help")), &help);
     app.append(Some(&gettext("About GTKTerm Sunshine")), Some("win.about"));
     app.append(Some(&gettext("Quit")), Some("app.quit"));
     menu.append_section(None, &app);
@@ -3098,6 +3120,64 @@ fn shortcuts_dialog(macros: &[(String, String)]) -> adw::ShortcutsDialog {
     }
     dialog
 }
+
+/// Reference text for the Help menu.
+fn help_dialog(topic: &str) -> adw::Dialog {
+    let (title, text) = match topic {
+        "scripts" => (
+            gettext("Script Language"),
+            gtkterm_mcp::SCRIPT_LANGUAGE.to_owned(),
+        ),
+        "mcp" => (gettext("MCP Server for AI Agents"), gettext(MCP_HELP)),
+        _ => (
+            gettext("Sunshine Packet Format"),
+            gtkterm_mcp::SUNSHINE_PROTOCOL.to_owned(),
+        ),
+    };
+    let view = gtk::TextView::builder()
+        .editable(false)
+        .cursor_visible(false)
+        .monospace(true)
+        .wrap_mode(gtk::WrapMode::WordChar)
+        .left_margin(12)
+        .right_margin(12)
+        .top_margin(12)
+        .bottom_margin(12)
+        .build();
+    view.buffer().set_text(&text);
+    let scroller = gtk::ScrolledWindow::builder()
+        .child(&view)
+        .vexpand(true)
+        .hexpand(true)
+        .build();
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&adw::HeaderBar::new());
+    toolbar.set_content(Some(&scroller));
+    adw::Dialog::builder()
+        .title(title)
+        .content_width(760)
+        .content_height(620)
+        .child(&toolbar)
+        .build()
+}
+
+/// The MCP part of the Help menu.
+const MCP_HELP: &str = crate::n_!(
+    "AI agents such as Claude Code can use this window's connections through the Model Context Protocol.
+
+Turn it on in the menu (MCP Server for AI Agents) or in Preferences → MCP. The toast shows the
+`claude mcp add --transport http …` command with the bearer token; paste it into a terminal.
+
+Without the window: claude mcp add gtkterm -- gtkterm-sunshine --mcp-stdio
+
+Safety:
+• Read-only mode lets agents read data but not send, open or close.
+• 'Ask before agents change anything' (on by default) shows a dialog before an agent's first
+  change: Deny, Allow Once, or Allow Until the Server Stops.
+• Every tool call is written to ~/.local/share/gtkterm-sunshine/mcp-audit.jsonl.
+• Scripts started by agents may run programs (exec) only when allowed in Preferences → MCP.
+• Agents can send files only from the transfer folder or folders given with --mcp-allow-dir."
+);
 
 /// How long an agent's write waits for the user before it is denied.
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(120);
@@ -3388,6 +3468,14 @@ mod tests {
             gio::prelude::ActionGroupExt::activate_action(&win.window, action, None);
             pump_until(Duration::from_millis(50), || false);
         }
+        for topic in ["sunshine", "scripts", "mcp"] {
+            gio::prelude::ActionGroupExt::activate_action(&win.window, "help", Some(&topic.to_variant()));
+            pump_until(Duration::from_millis(50), || false);
+            assert!(win.window.visible_dialog().is_some(), "help {topic}");
+            if let Some(d) = win.window.visible_dialog() {
+                d.force_close();
+            }
+        }
         for mode in ViewMode::ALL {
             let target = format!("{mode:?}").to_lowercase();
             gio::prelude::ActionGroupExt::activate_action(
@@ -3586,7 +3674,18 @@ mod tests {
             );
             pump_until(Duration::from_millis(200), || false);
             snapshot(&sw.window, "script-editor");
+            // Edited text is not lost by closing: the editor asks first.
+            assert!(sw.is_dirty());
             sw.window.close();
+            pump_until(Duration::from_millis(100), || false);
+            assert!(sw.window.is_visible(), "still open while asking");
+            let ask = sw
+                .window
+                .visible_dialog()
+                .and_downcast::<adw::AlertDialog>()
+                .expect("asked");
+            ask.emit_by_name::<()>("response", &[&"discard"]);
+            assert!(pump_until(Duration::from_secs(1), || !sw.window.is_visible()));
             rt().block_on(async { while !dev.drain().is_empty() {} });
         }
 
