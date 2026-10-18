@@ -22,6 +22,8 @@ pub enum ManagerEvent {
     Removed(SessionId),
     /// The macro store changed.
     MacrosChanged,
+    /// The configuration (profiles) was saved.
+    ConfigSaved,
     /// A macro started in a session.
     MacroStarted {
         /// Session.
@@ -333,9 +335,10 @@ impl SessionManager {
 
     /// Persist the configuration, if a path is set.
     pub fn save_config(&self) -> Result<(), ConfigError> {
-        match &self.config_path {
-            Some(path) => lock(&self.config).save(path),
-            None => Ok(()),
+        if let Some(path) = &self.config_path {
+            lock(&self.config).save(path)?;
         }
+        let _ = self.events.send(ManagerEvent::ConfigSaved);
+        Ok(())
     }
 }

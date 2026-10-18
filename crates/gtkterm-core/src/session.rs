@@ -43,6 +43,8 @@ const EXPECT_OVERLAP: usize = 64 * 1024;
 const MAX_BREAK: Duration = Duration::from_secs(5);
 /// Unpaced sends are written in pieces of this size (a flush takes effect between pieces).
 const WRITE_PIECE: usize = 4096;
+/// Longest pause between characters (like `TerminalConfig::char_delay_ms`).
+const MAX_CHAR_DELAY: Duration = Duration::from_secs(1);
 /// Most bytes waiting to be sent (behind flow control or pacing) before sends are refused.
 const MAX_TX_QUEUE: usize = 16 * 1024 * 1024;
 /// How long closing the log or the port waits for queued sends to be reported.
@@ -183,7 +185,12 @@ enum Command {
     Open(Connection, oneshot::Sender<Result<(), SessionError>>),
     Attach(port::OpenPort, oneshot::Sender<()>),
     Close(oneshot::Sender<()>),
-    Send(Bytes, Option<oneshot::Sender<Result<(), SessionError>>>),
+    /// Data, a per-send character delay overriding the profile's, and the reply.
+    Send(
+        Bytes,
+        Option<Duration>,
+        Option<oneshot::Sender<Result<(), SessionError>>>,
+    ),
     Control(ControlOp, oneshot::Sender<Result<(), SessionError>>),
     Log(LogOp, oneshot::Sender<Result<Option<LogStatus>, SessionError>>),
     Transfer(TransferRequest, oneshot::Sender<Result<(), SessionError>>),
@@ -389,13 +396,22 @@ impl Session {
     /// Queue bytes for transmission and wait until they were written.
     pub async fn send(&self, data: impl Into<Bytes>) -> Result<(), SessionError> {
         let data = data.into();
-        self.request(|tx| Command::Send(data, Some(tx))).await?
+        self.request(|tx| Command::Send(data, None, Some(tx))).await?
+    }
+
+    /// Like [`Session::send`], pausing `char_delay` after every byte instead of the profile's
+    /// character delay (`Duration::ZERO` sends without pauses).
+    pub async fn send_paced(&self, data: impl Into<Bytes>, char_delay: Duration) -> Result<(), SessionError> {
+        let data = data.into();
+        let delay = char_delay.min(MAX_CHAR_DELAY);
+        self.request(|tx| Command::Send(data, Some(delay), Some(tx)))
+            .await?
     }
 
     /// Queue bytes without waiting (keyboard input).
     pub fn send_nowait(&self, data: impl Into<Bytes>) -> Result<(), SessionError> {
         self.cmd
-            .try_send(Command::Send(data.into(), None))
+            .try_send(Command::Send(data.into(), None, None))
             .map_err(|e| match e {
                 mpsc::error::TrySendError::Full(_) => SessionError::Full,
                 mpsc::error::TrySendError::Closed(_) => SessionError::Shutdown,
@@ -707,6 +723,8 @@ struct ActivePort {
 struct TxJob {
     data: Bytes,
     done: Option<oneshot::Sender<Result<(), SessionError>>>,
+    /// Character delay for this job instead of the profile's.
+    char_delay: Option<Duration>,
     /// File transfer data: no pacing, not recorded as a chunk, not discarded by `flush`.
     raw: bool,
     /// `tx_epoch` when queued.
@@ -846,13 +864,13 @@ impl Actor {
                 self.teardown(PortState::Closed).await;
                 let _ = reply.send(());
             }
-            Command::Send(data, done) if self.transfer.is_some() => {
+            Command::Send(data, _, done) if self.transfer.is_some() => {
                 drop(data);
                 if let Some(done) = done {
                     let _ = done.send(Err(SessionError::Busy));
                 }
             }
-            Command::Send(data, done) => match &self.port {
+            Command::Send(data, char_delay, done) => match &self.port {
                 Some(_)
                     if self.shared.tx_queued_bytes.load(Ordering::Relaxed) + data.len() > MAX_TX_QUEUE =>
                 {
@@ -870,6 +888,7 @@ impl Actor {
                     if let Err(e) = p.jobs.send(TxJob {
                         data,
                         done,
+                        char_delay,
                         raw: false,
                         epoch: self.shared.tx_epoch.load(Ordering::Relaxed),
                     }) {
@@ -1223,6 +1242,7 @@ impl Actor {
                 let job = TxJob {
                     data: Bytes::from(step.write),
                     done: None,
+                    char_delay: None,
                     raw: true,
                     epoch: 0,
                 };
@@ -1469,7 +1489,10 @@ async fn writer_loop(
             }
             continue;
         }
-        let p = *pacing.borrow();
+        let mut p = *pacing.borrow();
+        if let Some(d) = job.char_delay {
+            p.char_delay = d;
+        }
         // Unpaced data goes out in pieces too, so a flush can stop a large send that flow
         // control is holding back.
         let pieces: Vec<&[u8]> = if p.active() {

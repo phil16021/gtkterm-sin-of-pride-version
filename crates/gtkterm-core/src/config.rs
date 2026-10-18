@@ -402,7 +402,8 @@ impl Connection {
         }
     }
 
-    fn validate(&self) -> Result<(), ConfigError> {
+    /// Check the settings (ranges, names) without opening anything.
+    pub fn validate(&self) -> Result<(), ConfigError> {
         match self {
             Self::Serial(s) => s.validate(),
             Self::TcpClient { host, port, .. } => {

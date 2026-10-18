@@ -697,3 +697,36 @@ async fn char_delay_paces_every_byte() {
     }
     assert_eq!(got, b"abcd");
 }
+
+/// A per-send character delay overrides the profile's (MCP `send.char_delay_ms`).
+#[tokio::test]
+async fn send_paced_overrides_the_profile_delay() {
+    let s = session();
+    let (port, mut dev) = loopback::pair("loop");
+    s.attach(port).await.unwrap();
+    let started = Instant::now();
+    s.send_paced(&b"xyz"[..], Duration::from_millis(40))
+        .await
+        .unwrap();
+    assert!(
+        started.elapsed() >= Duration::from_millis(80),
+        "{:?}",
+        started.elapsed()
+    );
+    for want in [b"x", b"y", b"z"] {
+        assert_eq!(&dev.recv().await.unwrap()[..], want);
+    }
+    // With a profile delay, ZERO sends in one piece.
+    s.set_terminal(TerminalConfig {
+        char_delay_ms: 200,
+        ..TerminalConfig::default()
+    });
+    let started = Instant::now();
+    s.send_paced(&b"fast"[..], Duration::ZERO).await.unwrap();
+    assert!(
+        started.elapsed() < Duration::from_millis(150),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(&dev.recv().await.unwrap()[..], b"fast");
+}
