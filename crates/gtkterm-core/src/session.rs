@@ -39,6 +39,8 @@ pub type SessionId = u32;
 /// `expect` re-searches this many bytes before newly received data, so matches that started
 /// earlier are still found; longer matches spanning a read boundary are not.
 const EXPECT_OVERLAP: usize = 64 * 1024;
+/// Longest break; longer requests (a typo in `break_ms` or a script) are shortened.
+const MAX_BREAK: Duration = Duration::from_secs(5);
 /// How long closing the log or the port waits for queued sends to be reported.
 const SETTLE_TIMEOUT: Duration = Duration::from_millis(500);
 /// How long the writer waits for the configured "wait char" before sending the next line.
@@ -131,6 +133,9 @@ pub enum SessionError {
     /// No port is open.
     #[error("port is not open")]
     NotOpen,
+    /// The request was overtaken (e.g. Close while still connecting).
+    #[error("cancelled")]
+    Cancelled,
     /// The session actor stopped.
     #[error("session has shut down")]
     Shutdown,
@@ -295,6 +300,7 @@ impl Session {
             transfer_writes: 0,
             transfer_held: Vec::new(),
             transfer_emitted: std::time::Instant::now(),
+            opening: None,
         };
         tokio::spawn(actor.run(cmd_rx));
         Self {
@@ -692,6 +698,22 @@ struct Actor {
     /// been faster than the writer's completion report).
     transfer_held: Vec<u8>,
     transfer_emitted: std::time::Instant,
+    /// A connection being opened in the background, so Close can overtake a slow connect.
+    opening: Option<Opening>,
+}
+
+struct Opening {
+    task: tokio::task::JoinHandle<Result<port::OpenPort, PortError>>,
+    reply: oneshot::Sender<Result<(), SessionError>>,
+}
+
+async fn opening_done(
+    o: &mut Option<Opening>,
+) -> Result<Result<port::OpenPort, PortError>, tokio::task::JoinError> {
+    match o {
+        Some(o) => (&mut o.task).await,
+        None => std::future::pending().await,
+    }
 }
 
 async fn transfer_event(t: &mut Option<ActiveTransfer>) -> crate::transfer::ExternalEvent {
@@ -727,6 +749,7 @@ impl Actor {
                     Some(cmd) => self.handle(cmd).await,
                     None => break,
                 },
+                opened = opening_done(&mut self.opening) => self.finish_open(opened),
                 signal = recv_port(&mut self.port) => match signal {
                     PortSignal::Rx(rx) => self.on_port_rx(rx).await,
                     PortSignal::Written(ev) => self.on_written(ev).await,
@@ -759,15 +782,17 @@ impl Actor {
 
     async fn handle(&mut self, cmd: Command) {
         match cmd {
-            Command::Open(conn, reply) => {
-                let _ = reply.send(self.open(conn).await);
-            }
+            Command::Open(conn, reply) => self.open(conn, reply).await,
             Command::Attach(port, reply) => {
+                self.cancel_opening();
                 self.teardown(PortState::Closed).await;
                 self.activate(port);
                 let _ = reply.send(());
             }
             Command::Close(reply) => {
+                if self.cancel_opening() {
+                    self.set_state(PortState::Closed);
+                }
                 self.settle_writes().await;
                 self.teardown(PortState::Closed).await;
                 let _ = reply.send(());
@@ -814,6 +839,24 @@ impl Actor {
                     self.transfer_step(step);
                 }
             }
+            Command::Control(ControlOp::Break(d), reply) => {
+                // Off the actor loop: data keeps flowing and Close stays possible meanwhile.
+                match self.control_lines() {
+                    Ok(ctl) => {
+                        tokio::spawn(async move {
+                            let mut r = ctl.set_break(true);
+                            if r.is_ok() {
+                                tokio::time::sleep(d.min(MAX_BREAK)).await;
+                                r = ctl.set_break(false);
+                            }
+                            let _ = reply.send(r.map_err(SessionError::from));
+                        });
+                    }
+                    Err(e) => {
+                        let _ = reply.send(Err(e));
+                    }
+                }
+            }
             Command::Control(op, reply) => {
                 let result = self.control(op).await;
                 if result.is_ok() {
@@ -824,12 +867,16 @@ impl Actor {
         }
     }
 
-    async fn control(&self, op: ControlOp) -> Result<(), SessionError> {
+    fn control_lines(&self) -> Result<Arc<dyn SerialControl>, SessionError> {
         let port = self.port.as_ref().ok_or(SessionError::NotOpen)?;
-        let ctl = port
+        Ok(port
             .control
             .clone()
-            .ok_or_else(|| PortError::Unsupported(format!("{:?} ports have no control lines", port.kind)))?;
+            .ok_or_else(|| PortError::Unsupported(format!("{:?} ports have no control lines", port.kind)))?)
+    }
+
+    async fn control(&self, op: ControlOp) -> Result<(), SessionError> {
+        let ctl = self.control_lines()?;
         match op {
             ControlOp::Dtr(on) => ctl.set_dtr(on)?,
             ControlOp::Rts(on) => ctl.set_rts(on)?,
@@ -843,22 +890,42 @@ impl Actor {
         Ok(())
     }
 
-    async fn open(&mut self, conn: Connection) -> Result<(), SessionError> {
+    /// Start opening `conn`; the reply is sent when it is open (or failed, or overtaken).
+    async fn open(&mut self, conn: Connection, reply: oneshot::Sender<Result<(), SessionError>>) {
+        self.cancel_opening();
         self.teardown(PortState::Closed).await;
         lock(&self.shared.status).description = conn.summary();
         lock(&self.shared.decoding).set_baud(conn.serial().map(|s| s.baudrate));
         *lock(&self.shared.connection) = Some(conn.clone());
         self.set_state(PortState::Opening);
-        match port::open(&conn).await {
-            Ok(p) => {
+        let task = tokio::spawn(async move { port::open(&conn).await });
+        self.opening = Some(Opening { task, reply });
+    }
+
+    /// Abort a pending open; true if there was one.
+    fn cancel_opening(&mut self) -> bool {
+        let Some(o) = self.opening.take() else {
+            return false;
+        };
+        o.task.abort();
+        let _ = o.reply.send(Err(SessionError::Cancelled));
+        true
+    }
+
+    fn finish_open(&mut self, result: Result<Result<port::OpenPort, PortError>, tokio::task::JoinError>) {
+        let Some(o) = self.opening.take() else { return };
+        let result = match result {
+            Ok(Ok(p)) => {
                 self.activate(p);
                 Ok(())
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 self.set_state(PortState::Error(e.to_string()));
                 Err(e.into())
             }
-        }
+            Err(_) => Err(SessionError::Cancelled),
+        };
+        let _ = o.reply.send(result);
     }
 
     fn activate(&mut self, opened: port::OpenPort) {

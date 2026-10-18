@@ -570,3 +570,55 @@ async fn expect_stays_fast_on_a_busy_stream() {
         started.elapsed()
     );
 }
+
+/// Close overtakes a connect that is still waiting, and a long break does not freeze the
+/// session (data, Close and status keep working meanwhile).
+#[tokio::test]
+async fn close_overtakes_a_slow_connect_and_breaks_run_aside() {
+    let s = session();
+    let opener = {
+        let s = s.clone();
+        tokio::spawn(async move {
+            s.open(Connection::TcpClient {
+                host: "192.0.2.1".into(),
+                port: 9,
+                connect_timeout_ms: 10_000,
+            })
+            .await
+        })
+    };
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let started = Instant::now();
+    s.close().await.unwrap();
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "close waited {:?}",
+        started.elapsed()
+    );
+    let r = opener.await.unwrap();
+    assert!(matches!(r, Err(SessionError::Cancelled)), "{r:?}");
+    assert!(
+        matches!(s.status().state, PortState::Closed),
+        "{:?}",
+        s.status().state
+    );
+
+    let (port, mut dev) = loopback::pair_with_lines("loop");
+    s.attach(port).await.unwrap();
+    let breaker = {
+        let s = s.clone();
+        tokio::spawn(async move { s.send_break(Duration::from_secs(60)).await })
+    };
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let started = Instant::now();
+    s.send(&b"during break"[..]).await.unwrap();
+    assert_eq!(&dev.recv().await.unwrap()[..], b"during break");
+    assert!(started.elapsed() < Duration::from_secs(1));
+    let started = Instant::now();
+    breaker.await.unwrap().unwrap();
+    assert!(
+        started.elapsed() < Duration::from_secs(6),
+        "a 60 s break is capped at 5 s: {:?}",
+        started.elapsed()
+    );
+}
