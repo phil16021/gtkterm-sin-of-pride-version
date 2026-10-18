@@ -7,9 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use nix::fcntl::{OFlag, open};
 use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
-use nix::sys::stat::Mode;
 use serde::Serialize;
 use tokio::sync::mpsc;
 use tracing::debug;
@@ -94,17 +92,13 @@ fn classify(name: &str) -> Option<PortClass> {
 }
 
 /// Legacy 8250 UARTs are always registered (ttyS0-31); keep only those with hardware behind.
-fn uart_present(path: &Path) -> bool {
-    match open(
-        path,
-        OFlag::O_RDWR | OFlag::O_NOCTTY | OFlag::O_NONBLOCK | OFlag::O_CLOEXEC,
-        Mode::empty(),
-    ) {
-        Ok(fd) => crate::port::serial::sys::uart_type(fd.as_fd()).map_or(true, |t| t != 0),
-        // No permission (not in group dialout): show it so the user can fix that.
-        Err(nix::errno::Errno::EACCES) => true,
-        Err(_) => false,
-    }
+/// Reads the UART type from sysfs (`0` = `PORT_UNKNOWN`): opening the device to ask would
+/// raise and drop DTR/RTS, which resets boards and modems attached to a real UART.
+fn uart_present(syspath: &Path) -> bool {
+    std::fs::read_to_string(syspath.join("type"))
+        .ok()
+        .and_then(|t| t.trim().parse::<i32>().ok())
+        .is_none_or(|t| t != 0)
 }
 
 fn prop(dev: &udev::Device, key: &str) -> Option<String> {
@@ -123,7 +117,7 @@ pub fn list_ports() -> Vec<PortInfo> {
                 let Some(node) = dev.devnode() else { continue };
                 let name = dev.sysname().to_string_lossy().into_owned();
                 let Some(class) = classify(&name) else { continue };
-                if class == PortClass::Uart && name.starts_with("ttyS") && !uart_present(node) {
+                if class == PortClass::Uart && name.starts_with("ttyS") && !uart_present(dev.syspath()) {
                     continue;
                 }
                 ports.push(PortInfo {
@@ -254,6 +248,22 @@ mod tests {
         assert_eq!(classify("tty0"), None);
         assert_eq!(classify("console"), None);
         assert!(natural_key("/dev/ttyUSB9") < natural_key("/dev/ttyUSB10"));
+    }
+
+    /// UART presence comes from sysfs; the device itself is never opened while listing.
+    #[test]
+    fn uart_presence_from_sysfs() {
+        let dir = tempfile::tempdir().unwrap();
+        let (real, empty, unknown) = (dir.path().join("a"), dir.path().join("b"), dir.path().join("c"));
+        for (d, t) in [(&real, Some("4\n")), (&empty, Some("0\n")), (&unknown, None)] {
+            std::fs::create_dir(d).unwrap();
+            if let Some(t) = t {
+                std::fs::write(d.join("type"), t).unwrap();
+            }
+        }
+        assert!(uart_present(&real));
+        assert!(!uart_present(&empty), "PORT_UNKNOWN: no hardware");
+        assert!(uart_present(&unknown), "no type attribute: keep it listed");
     }
 
     #[test]
