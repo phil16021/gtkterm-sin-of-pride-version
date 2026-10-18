@@ -63,6 +63,8 @@ pub struct Win {
     running_macro: RefCell<Option<String>>,
     /// A raw file send in progress (cancelled by the transfer cancel button).
     raw_send: RefCell<Option<tokio_util::sync::CancellationToken>>,
+    /// A save of the active profile is scheduled (changes from the header and menus).
+    autosave_pending: Cell<bool>,
     macro_editor: RefCell<Option<Rc<super::macros::MacroEditor>>>,
     mcp_allow_dirs: RefCell<Vec<PathBuf>>,
     script_window: RefCell<Option<Rc<super::scripts::ScriptWindow>>>,
@@ -266,6 +268,7 @@ impl Win {
             recorder: RefCell::default(),
             running_macro: RefCell::default(),
             raw_send: RefCell::default(),
+            autosave_pending: Cell::new(false),
             macro_editor: RefCell::default(),
             mcp_allow_dirs: RefCell::new(start.mcp_allow_dirs.clone()),
             script_window: RefCell::default(),
@@ -420,6 +423,10 @@ impl Win {
                 return;
             };
             w.profile.borrow_mut().connection.serial_mut().port = path;
+            w.profile_changed();
+            if w.is_open() {
+                w.open_port();
+            }
         });
         let w = Rc::downgrade(self);
         self.baud_drop.connect_selected_notify(move |d| {
@@ -431,6 +438,7 @@ impl Win {
                 return;
             };
             w.profile.borrow_mut().connection.serial_mut().baudrate = b;
+            w.profile_changed();
             if w.is_open() {
                 w.open_port();
             }
@@ -458,8 +466,9 @@ impl Win {
         });
     }
 
-    fn set_view_mode(&self, mode: ViewMode) {
+    fn set_view_mode(self: &Rc<Self>, mode: ViewMode) {
         self.profile.borrow_mut().terminal.view_mode = mode;
+        self.profile_changed();
         self.term.set_view_mode(mode);
         if let Some(a) = self.window.lookup_action("view-mode") {
             a.change_state(&format!("{mode:?}").to_lowercase().to_variant());
@@ -1138,7 +1147,7 @@ impl Win {
             "save-profile",
             Box::new(|w| {
                 let name = w.profile_name.borrow().clone();
-                w.store_profile(&name);
+                w.store_profile(&name, true);
             }),
         );
         add("save-profile-as", Box::new(Self::save_profile_as));
@@ -1167,6 +1176,7 @@ impl Win {
                 };
                 w.term.apply_config(&t);
                 w.session.set_terminal(t);
+                w.profile_changed();
             });
             self.window.add_action(&action);
         }
@@ -1205,6 +1215,7 @@ impl Win {
             };
             w.term.apply_config(&t);
             w.session.set_terminal(t);
+            w.profile_changed();
         });
         self.window.add_action(&action);
 
@@ -1243,6 +1254,7 @@ impl Win {
                 Ok(mode) => {
                     let signals = w.session.decoder_status().signals;
                     w.session.set_decoder(mode, signals);
+                    w.profile_changed();
                     if !mode.is_off() {
                         w.set_frames_visible(true);
                     }
@@ -1259,6 +1271,7 @@ impl Win {
             let st = w.session.decoder_status();
             a.set_state(&(!st.signals).to_variant());
             w.session.set_decoder(st.mode, !st.signals);
+            w.profile_changed();
         });
         self.window.add_action(&action);
         add("clear-frames", Box::new(|w| w.session.clear_frames()));
@@ -1725,6 +1738,7 @@ impl Win {
                             if let Connection::Serial(cfg) = &mut w.profile.borrow_mut().connection {
                                 cfg.baudrate = b;
                             }
+                            w.profile_changed();
                             w.refresh_header();
                             w.status.update(&w.session.status());
                             w.toast(&gettext_f("Detected {baud} baud", &[("baud", &b)]));
@@ -1836,7 +1850,7 @@ impl Win {
         self.session.set_terminal(p.terminal.clone());
         *self.profile.borrow_mut() = p;
         let name = self.profile_name.borrow().clone();
-        self.store_profile(&name);
+        self.store_profile(&name, false);
         self.refresh_header();
         self.sync_toggle_states();
         if reconnect {
@@ -1856,7 +1870,31 @@ impl Win {
         self.state.borrow().save();
     }
 
-    fn store_profile(&self, name: &str) {
+    /// Save the active profile soon (debounced): changes from the header and menus are kept
+    /// like the ones made in Preferences.
+    fn profile_changed(self: &Rc<Self>) {
+        if self.autosave_pending.replace(true) {
+            return;
+        }
+        let w = Rc::downgrade(self);
+        glib::timeout_add_local_once(Duration::from_millis(500), move || {
+            if let Some(w) = w.upgrade() {
+                w.flush_autosave();
+            }
+        });
+    }
+
+    /// Write a scheduled profile save now (also on close).
+    fn flush_autosave(&self) {
+        if self.autosave_pending.replace(false) {
+            let name = self.profile_name.borrow().clone();
+            self.store_profile(&name, false);
+        }
+    }
+
+    /// Save the current settings as profile `name`; `announce` confirms it with a toast
+    /// (errors are always shown).
+    fn store_profile(&self, name: &str, announce: bool) {
         let p = Profile {
             connection: self.profile.borrow().connection.clone(),
             terminal: self.term.config(),
@@ -1867,7 +1905,8 @@ impl Win {
             .with_config_mut(|c| c.profile_mut(name).map(|slot| *slot = p))
             .and_then(|()| self.manager.save_config());
         match result {
-            Ok(()) => self.toast(&gettext_f("Profile [{name}] saved", &[("name", &name)])),
+            Ok(()) if announce => self.toast(&gettext_f("Profile [{name}] saved", &[("name", &name)])),
+            Ok(()) => {}
             Err(e) => self.toast(&gettext_f("Cannot save profile: {error}", &[("error", &e)])),
         }
     }
@@ -1877,7 +1916,10 @@ impl Win {
             self.toast(&gettext_f("No profile [{name}]", &[("name", &name)]));
             return;
         };
+        // A pending save belongs to the profile being left.
+        self.flush_autosave();
         name.clone_into(&mut self.profile_name.borrow_mut());
+        self.session.set_name(name);
         self.term.apply_config(&p.terminal);
         self.session.set_terminal(p.terminal.clone());
         self.session.apply_decoder_config(p.decoder);
@@ -1920,8 +1962,9 @@ impl Win {
                 w.toast(&e.to_string());
                 return;
             }
-            w.store_profile(&name);
+            w.store_profile(&name, true);
             w.profile_name.borrow_mut().clone_from(&name);
+            w.session.set_name(&name);
             w.status.profile.set_label(&format!("[{name}]"));
         });
         dialog.present(Some(&self.window));
@@ -2082,6 +2125,7 @@ impl Win {
     }
 
     fn shutdown(&self) {
+        self.flush_autosave();
         if let Some(w) = self.script_window.borrow_mut().take() {
             w.window.destroy();
         }
@@ -2931,6 +2975,42 @@ mod tests {
             worst < Duration::from_millis(500),
             "main loop stalled for {worst:?}"
         );
+        assert_eq!(UNEXPECTED_LOGS.load(Ordering::SeqCst), 0, "GTK warnings");
+    }
+
+    /// Header and menu changes are saved to the active profile; the status bar keeps showing
+    /// the loaded profile (it used to fall back to the startup one).
+    #[gtk::test]
+    fn profile_changes_are_saved_and_named() {
+        if std::env::var_os("GTKTERM_GUI_TESTS").is_none() {
+            return;
+        }
+        let (win, _dev, _dir) = setup();
+        let echo = |w: &Rc<Win>, name: &str| {
+            w.manager
+                .with_config(|c| c.profile(name).map(|p| p.terminal.echo))
+                .unwrap()
+        };
+        assert!(!echo(&win, "default"));
+        gio::prelude::ActionGroupExt::activate_action(&win.window, "echo", None);
+        assert!(
+            pump_until(Duration::from_secs(3), || echo(&win, "default")),
+            "echo saved"
+        );
+
+        win.manager.with_config_mut(|c| {
+            c.profiles.insert("bench".into(), Profile::default());
+        });
+        win.load_profile("bench");
+        pump_until(Duration::from_millis(600), || false);
+        assert_eq!(win.status.profile.label().as_deref(), Some("[bench]"));
+        assert_eq!(win.session.status().name, "bench");
+        gio::prelude::ActionGroupExt::activate_action(&win.window, "view-mode", Some(&"hex".to_variant()));
+        assert!(pump_until(Duration::from_secs(3), || win
+            .manager
+            .with_config(|c| c.profile("bench").map(|p| p.terminal.view_mode))
+            .is_ok_and(|m| m == ViewMode::Hex)));
+        assert!(echo(&win, "default"), "the default profile keeps its own setting");
         assert_eq!(UNEXPECTED_LOGS.load(Ordering::SeqCst), 0, "GTK warnings");
     }
 

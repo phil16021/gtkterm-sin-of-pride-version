@@ -618,6 +618,11 @@ impl Session {
         f(&mut lock(&self.shared.sunshine))
     }
 
+    /// Rename the session (the profile it runs changed).
+    pub fn set_name(&self, name: &str) {
+        name.clone_into(&mut lock(&self.shared.status).name);
+    }
+
     /// Tell subscribers that charts changed outside the data path.
     pub fn notify_sunshine(&self, update: SunshineUpdate) {
         let _ = self.events.send(SessionEvent::Sunshine(update));
