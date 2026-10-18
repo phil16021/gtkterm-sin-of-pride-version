@@ -41,6 +41,21 @@ curl -s -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
      -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' http://127.0.0.1:8765/mcp
 ```
 
+## Agents (MCP audit log)
+
+```bash
+tail -f ~/.local/share/gtkterm-sunshine/mcp-audit.jsonl | jq -c '{time, tool, outcome, ms}'
+jq 'select(.outcome == "denied")' ~/.local/share/gtkterm-sunshine/mcp-audit.jsonl
+```
+
+## Translations
+
+```bash
+cargo xtask po                                           # refresh po/gtkterm-sunshine.pot and po/*.po
+msgfmt -o /tmp/l/de/LC_MESSAGES/gtkterm-sunshine.mo po/de.po
+LANGUAGE=de GTKTERM_LOCALEDIR=/tmp/l cargo run -p gtkterm-gui     # try a translation uninstalled
+```
+
 ## Debuggers, sanitizers, profilers
 
 ```bash

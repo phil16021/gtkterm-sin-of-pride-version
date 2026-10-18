@@ -95,7 +95,20 @@ Prompts: `debug-serial-device`, `analyze-sunshine-data`, `modbus-scan`, `at-mode
 ## Safety
 
 Agents writing to real hardware can have physical effects. Use `--mcp-read-only` when an agent
-should only observe. Log files can only be created inside the log directory
+should only observe.
+
+**Approval (window).** The embedded server asks before an agent's write tool runs: *Deny*,
+*Allow Once* or *Allow Until the Server Stops* (Preferences → MCP → *Ask before agents change
+anything*, on by default). A denied call is a tool error that tells the agent to ask you; an
+unanswered question is denied after two minutes. Headless servers (`--mcp-stdio`,
+`--mcp-http`) do not ask: whoever starts them chooses the access with `--mcp-read-only`.
+
+**Audit log.** Every tool call is appended to `~/.local/share/gtkterm-sunshine/mcp-audit.jsonl`
+(mode 0600; moved to `.1` beyond 8 MiB): time, tool, client name, arguments (cut at 4 KiB),
+`outcome` (`ok`, `error`, `denied`), error text and duration. For example:
+`jq -r 'select(.outcome != "ok") | [.time, .tool, .error] | @tsv' ~/.local/share/gtkterm-sunshine/mcp-audit.jsonl`.
+
+ Log files can only be created inside the log directory
 (`~/.local/share/gtkterm-sunshine/logs`); file names with path components are rejected.
 `file_send` reads only files inside the transfer directory
 (`~/.local/share/gtkterm-sunshine/transfers`) or a directory given with `--mcp-allow-dir DIR`

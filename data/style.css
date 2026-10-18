@@ -17,3 +17,4 @@
 .statusbar .state-error { color: @error_color; }
 .chart-toolbar { padding: 2px 6px; }
 .terminal-box vte-terminal { padding: 4px; }
+.terminal-box vte-terminal.bell-flash { filter: invert(100%); }

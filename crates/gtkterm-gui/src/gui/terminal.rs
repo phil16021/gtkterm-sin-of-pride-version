@@ -3,6 +3,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use gtk::glib;
 use gtk::prelude::*;
 use gtkterm_core::chunks::{Chunk, Direction};
 use gtkterm_core::config::TerminalConfig;
@@ -124,6 +125,22 @@ impl TerminalView {
             transform: RefCell::new(transform_for(config)),
         });
         view.apply_config(config);
+
+        // Visual bell: flash the terminal (VTE only beeps).
+        let v = Rc::downgrade(&view);
+        view.term.connect_bell(move |t| {
+            let Some(v) = v.upgrade() else { return };
+            if !v.config.borrow().visual_bell || t.has_css_class("bell-flash") {
+                return;
+            }
+            t.add_css_class("bell-flash");
+            let t = t.downgrade();
+            glib::timeout_add_local_once(std::time::Duration::from_millis(150), move || {
+                if let Some(t) = t.upgrade() {
+                    t.remove_css_class("bell-flash");
+                }
+            });
+        });
 
         let s = session.clone();
         let v = Rc::downgrade(&view);

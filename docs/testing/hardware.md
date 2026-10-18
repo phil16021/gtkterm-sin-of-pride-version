@@ -23,3 +23,5 @@ lines or RS485 direction control. Run this list on real hardware before a releas
 | 16 | Function generator or a button on CTS/RI, 1–20 ms pulses | Signal Monitor shows a pulse marker for each (counters), CSV lists `(pulse)` rows | ☐ |
 | 17 | RS485 transceiver with active-low enable | *RS485 RTS active low* makes the device answer; logic analyser confirms the level only during frames | ☐ |
 | 18 | `data/examples/example_modem.script` against a real modem, `--headless --script` | exit code 0, log lines on stderr; a missing answer exits 1 naming the line | ☐ |
+| 19 | Claude Code on the window's HTTP endpoint (menu → *MCP Server for AI Agents*) | the first `send` shows the approval dialog; *Deny* reaches the agent as a refusal; `mcp-audit.jsonl` lists every call | ☐ |
+| 20 | Device that rings the bell (`printf '\a'` from the far side), *Visual bell* on | the terminal flashes, no beep | ☐ |

@@ -127,7 +127,7 @@ msgid "Clear frames"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/frames.rs:209
-#: crates/gtkterm-gui/src/gui/window.rs:2137
+#: crates/gtkterm-gui/src/gui/window.rs:2138
 msgid "Decoder"
 msgstr ""
 
@@ -334,7 +334,7 @@ msgid "TCP server"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/prefs.rs:168
-#: crates/gtkterm-gui/src/gui/window.rs:2204
+#: crates/gtkterm-gui/src/gui/window.rs:2205
 msgid "Device"
 msgstr ""
 
@@ -550,7 +550,7 @@ msgid "Insert LF after a bare CR"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/prefs.rs:439
-#: crates/gtkterm-gui/src/gui/window.rs:2100
+#: crates/gtkterm-gui/src/gui/window.rs:2101
 msgid "Timestamps"
 msgstr ""
 
@@ -756,12 +756,12 @@ msgid "Failed at {at}: {message}"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:11
-#: crates/gtkterm-gui/src/gui/terminal.rs:173
+#: crates/gtkterm-gui/src/gui/terminal.rs:190
 msgid "Copy"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:17
-#: crates/gtkterm-gui/src/gui/terminal.rs:174
+#: crates/gtkterm-gui/src/gui/terminal.rs:191
 msgid "Paste"
 msgstr ""
 
@@ -791,12 +791,12 @@ msgid "Disconnect"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:59
-#: crates/gtkterm-gui/src/gui/window.rs:2092
+#: crates/gtkterm-gui/src/gui/window.rs:2093
 msgid "Toggle DTR"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:65
-#: crates/gtkterm-gui/src/gui/window.rs:2093
+#: crates/gtkterm-gui/src/gui/window.rs:2094
 msgid "Toggle RTS"
 msgstr ""
 
@@ -805,7 +805,7 @@ msgid "Send break"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:77
-#: crates/gtkterm-gui/src/gui/window.rs:2068
+#: crates/gtkterm-gui/src/gui/window.rs:2069
 msgid "Preferences"
 msgstr ""
 
@@ -876,7 +876,7 @@ msgid "Normal size"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:155
-#: crates/gtkterm-gui/src/gui/window.rs:2123
+#: crates/gtkterm-gui/src/gui/window.rs:2124
 msgid "Fullscreen"
 msgstr ""
 
@@ -894,7 +894,7 @@ msgid "About"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:168
-#: crates/gtkterm-gui/src/gui/window.rs:2155
+#: crates/gtkterm-gui/src/gui/window.rs:2156
 msgid "Quit"
 msgstr ""
 
@@ -916,7 +916,7 @@ msgstr ""
 
 #: crates/gtkterm-gui/src/gui/signals.rs:63
 #: crates/gtkterm-gui/src/gui/signals.rs:82
-#: crates/gtkterm-gui/src/gui/window.rs:2147
+#: crates/gtkterm-gui/src/gui/window.rs:2148
 msgid "Signal Monitor"
 msgstr ""
 
@@ -986,44 +986,44 @@ msgstr ""
 msgid "MCP server listening on {url}"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:73
+#: crates/gtkterm-gui/src/gui/terminal.rs:74
 msgid "Search text, regex or hex bytes"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:76
+#: crates/gtkterm-gui/src/gui/terminal.rs:77
 msgid "Case"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:77
+#: crates/gtkterm-gui/src/gui/terminal.rs:78
 msgid "Regex"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:78
+#: crates/gtkterm-gui/src/gui/terminal.rs:79
 msgid "Hex"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:80
+#: crates/gtkterm-gui/src/gui/terminal.rs:81
 msgid "Previous match"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:82
+#: crates/gtkterm-gui/src/gui/terminal.rs:83
 msgid "Next match (Enter)"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:90
+#: crates/gtkterm-gui/src/gui/terminal.rs:91
 msgid "Search options"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:175
+#: crates/gtkterm-gui/src/gui/terminal.rs:192
 msgid "Select All"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:177
-#: crates/gtkterm-gui/src/gui/window.rs:2125
+#: crates/gtkterm-gui/src/gui/terminal.rs:194
+#: crates/gtkterm-gui/src/gui/window.rs:2126
 msgid "Clear Screen"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:178
+#: crates/gtkterm-gui/src/gui/terminal.rs:195
 msgid "Search…"
 msgstr ""
 
@@ -1322,195 +1322,195 @@ msgstr ""
 msgid "MCP server could not start: {error}"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2072
+#: crates/gtkterm-gui/src/gui/window.rs:2073
 msgid "Send Hex Data…"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2073
+#: crates/gtkterm-gui/src/gui/window.rs:2074
 msgid "Send File…"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2074
+#: crates/gtkterm-gui/src/gui/window.rs:2075
 msgid "Receive File…"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2076
+#: crates/gtkterm-gui/src/gui/window.rs:2077
 msgid "Cancel File Transfer"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2079
+#: crates/gtkterm-gui/src/gui/window.rs:2080
 msgid "Save Received Data…"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2081
+#: crates/gtkterm-gui/src/gui/window.rs:2082
 msgid "Start Logging…"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2082
+#: crates/gtkterm-gui/src/gui/window.rs:2083
 msgid "Pause / Resume"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2083
+#: crates/gtkterm-gui/src/gui/window.rs:2084
 msgid "Clear Log File"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2084
+#: crates/gtkterm-gui/src/gui/window.rs:2085
 msgid "Stop Logging"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2085
+#: crates/gtkterm-gui/src/gui/window.rs:2086
 msgid "Logging"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2089
+#: crates/gtkterm-gui/src/gui/window.rs:2090
 msgid "Send Break"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2090
+#: crates/gtkterm-gui/src/gui/window.rs:2091
 msgid "Flush Buffers"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2091
+#: crates/gtkterm-gui/src/gui/window.rs:2092
 msgid "Detect Baud Rate"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2097
+#: crates/gtkterm-gui/src/gui/window.rs:2098
 msgid "Local Echo"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2098
+#: crates/gtkterm-gui/src/gui/window.rs:2099
 msgid "Auto CR (LF → CR LF)"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2099
+#: crates/gtkterm-gui/src/gui/window.rs:2100
 msgid "Auto LF (CR → CR LF)"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2101
+#: crates/gtkterm-gui/src/gui/window.rs:2102
 msgid "Show Byte Index"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2111
+#: crates/gtkterm-gui/src/gui/window.rs:2112
 msgid "View Mode"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2114
+#: crates/gtkterm-gui/src/gui/window.rs:2115
 msgid "{n} bytes"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2118
+#: crates/gtkterm-gui/src/gui/window.rs:2119
 msgid "Hex Width"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2120
+#: crates/gtkterm-gui/src/gui/window.rs:2121
 msgid "Zoom In"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2121
+#: crates/gtkterm-gui/src/gui/window.rs:2122
 msgid "Zoom Out"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2122
+#: crates/gtkterm-gui/src/gui/window.rs:2123
 msgid "Normal Size"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2124
+#: crates/gtkterm-gui/src/gui/window.rs:2125
 msgid "Zoom"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2126
+#: crates/gtkterm-gui/src/gui/window.rs:2127
 msgid "Remove All Charts"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2130
+#: crates/gtkterm-gui/src/gui/window.rs:2131
 msgid "Decoded Frames"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2139
+#: crates/gtkterm-gui/src/gui/window.rs:2140
 msgid "Record Modem Line Changes"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2142
+#: crates/gtkterm-gui/src/gui/window.rs:2143
 msgid "Clear Frames"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2146
+#: crates/gtkterm-gui/src/gui/window.rs:2147
 msgid "Scripts…"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2151
+#: crates/gtkterm-gui/src/gui/window.rs:2152
 msgid "Import Presets…"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2152
+#: crates/gtkterm-gui/src/gui/window.rs:2153
 msgid "MCP Server for AI Agents"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2153
+#: crates/gtkterm-gui/src/gui/window.rs:2154
 msgid "Keyboard Shortcuts"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2154
+#: crates/gtkterm-gui/src/gui/window.rs:2155
 msgid "About GTKTerm Sunshine"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2175
+#: crates/gtkterm-gui/src/gui/window.rs:2176
 msgid "Play"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2177
+#: crates/gtkterm-gui/src/gui/window.rs:2178
 msgid "Record"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2178
+#: crates/gtkterm-gui/src/gui/window.rs:2179
 msgid "Stop Running Macro"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2179
+#: crates/gtkterm-gui/src/gui/window.rs:2180
 msgid "Edit Macros…"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2180
+#: crates/gtkterm-gui/src/gui/window.rs:2181
 msgid "Show Macro Bar"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2206
+#: crates/gtkterm-gui/src/gui/window.rs:2207
 msgid "Control characters (Ctrl+C, Ctrl+A, …) go to the device"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2221
+#: crates/gtkterm-gui/src/gui/window.rs:2222
 msgid "An AI agent"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2223
+#: crates/gtkterm-gui/src/gui/window.rs:2224
 msgid "Allow {tool}?"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2225
+#: crates/gtkterm-gui/src/gui/window.rs:2226
 msgid ""
 "{client} wants to run {tool} with {arguments}.\n"
 "It can send data to the device, change the connection or write files."
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2236
+#: crates/gtkterm-gui/src/gui/window.rs:2237
 msgid "Deny"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2237
+#: crates/gtkterm-gui/src/gui/window.rs:2238
 msgid "Allow Once"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2238
+#: crates/gtkterm-gui/src/gui/window.rs:2239
 msgid "Allow Until the Server Stops"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2281
+#: crates/gtkterm-gui/src/gui/window.rs:2282
 msgid ""
 "Serial, TCP and UDP terminal with live Sunshine data plots and an MCP server for AI agents.\n"
 "Rust rewrite of the GTKTerm fork."
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2284
+#: crates/gtkterm-gui/src/gui/window.rs:2285
 msgid "© 2025-2026 Philipp; GTKTerm © Julien Schmitt and contributors"
 msgstr ""
 

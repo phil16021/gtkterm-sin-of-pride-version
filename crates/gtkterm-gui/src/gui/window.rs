@@ -2710,6 +2710,23 @@ mod tests {
             }
         }
 
+        // A BEL from the device flashes the terminal when the visual bell is on.
+        let mut cfg = win.term.config();
+        cfg.visual_bell = true;
+        win.term.apply_config(&cfg);
+        win.term.term.feed(b"\x07");
+        assert!(
+            pump_until(Duration::from_secs(2), || win
+                .term
+                .term
+                .has_css_class("bell-flash")),
+            "visual bell flash"
+        );
+        assert!(pump_until(Duration::from_secs(2), || !win
+            .term
+            .term
+            .has_css_class("bell-flash")));
+
         // Echo off by default, toggled on above: the TX chunk is displayed (no assertion on VTE
         // contents, but the path must not warn).
         win.term.term.feed_child(b"x");

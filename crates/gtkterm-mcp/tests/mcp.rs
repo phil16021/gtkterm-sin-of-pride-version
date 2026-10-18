@@ -852,8 +852,10 @@ async fn scripts_signals_and_port_control() {
 
 #[tokio::test]
 async fn write_tools_ask_the_approver_and_every_call_is_audited() {
-    use gtkterm_mcp::{Approval, Approver};
+    use std::os::unix::fs::PermissionsExt as _;
     use std::sync::Mutex;
+
+    use gtkterm_mcp::{Approval, Approver};
     let dir = tempfile::tempdir().unwrap();
     let audit = dir.path().join("audit.jsonl");
     let asked: Arc<Mutex<Vec<String>>> = Arc::default();
@@ -920,7 +922,6 @@ async fn write_tools_ask_the_approver_and_every_call_is_audited() {
     );
     assert_eq!(lines[2]["arguments"]["data"], "two");
     assert!(lines.iter().all(|l| l["time"].is_string() && l["ms"].is_u64()));
-    use std::os::unix::fs::PermissionsExt as _;
     assert_eq!(
         std::fs::metadata(&audit).unwrap().permissions().mode() & 0o777,
         0o600

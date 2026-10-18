@@ -1,16 +1,16 @@
 # GTKTerm Sunshine — Rust Rewrite: Implementation, Test & Debugging Plan
 
-> **Status 2026-10-18:** R0–R8 done (2.0.0-alpha.5): protocols, core I/O, sessions, Sunshine
-> store and charts, logging, MCP server (42 tools), CLI/headless/MCP modes, GTK 4 / libadwaita
-> GUI, packaging; R5 macros, presets, profile UX; R6 decoders (AT, NMEA, Modbus RTU/ASCII/TCP,
-> candump, SLCAN, EtherCAT, RS232 lines, auto-detect), frames pane, `decoder_*`/`modbus_request`
-> tools, fake devices in `sunshine-gen`; R7 XMODEM/1K/YMODEM/YMODEM-G (sans-IO, lrzsz interop
-> tests for X1–X4), ZMODEM via lrzsz, transfer dialogs and progress, `file_*` MCP tools with
-> progress notifications; R8 script runner (C syntax + labels/if/if_match/include/send_file,
-> shell-free opt-in exec), script editor, signal monitor with pulse recovery and CSV, flush,
-> break length, RS485 polarity/echo, experimental auto-baud, `script_*`/`signal_history`/`port_*`
-> tools, `--script`. Next: R9 (release). Deviation: the GUI is built from
-> plain gtk4-rs widgets in Rust instead of composite templates.
+> **Status 2026-10-18:** R0–R8 done; R9 in progress (2.0.0-rc.1). R9 so far:
+> - Feature-parity sign-off against the C inventory ([feature-parity.md](feature-parity.md)), which led to
+>   SIGUSR1/2 in the GUI, the `~/.gtktermrc` (1.x) import with macros, F11/zoom, a working visual bell
+>   and About troubleshooting info.
+> - Man page sections, gettext translations (template, German, `cargo xtask po`).
+> - MCP approval dialog and JSONL audit log.
+> - Fixes: `state.toml` (MCP token) is now written 0600; TX records are no longer lost when the log
+>   stops right after a send.
+>
+> Open: the hardware checklist, merging into master, and the optional Flatpak. Deviation: the GUI is
+> built from plain gtk4-rs widgets in Rust instead of composite templates.
 
 ## Context
 

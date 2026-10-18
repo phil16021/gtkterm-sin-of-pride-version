@@ -4,10 +4,11 @@ A Linux serial / TCP / UDP terminal with **live plotting of device data** ("Suns
 and a built-in **MCP server**, so AI agents such as Claude Code can drive your devices.
 
 This is a Rust rewrite of the GTKTerm "Sin of Pride" fork (the C version lives at tag
-`legacy-c-v1.99.1`). Status **2.0.0-alpha.5**: GTK 4 / libadwaita application, headless
-terminal, MCP server, macros, presets, protocol decoders, file transfers, automation scripts,
-port control and the signal monitor work (milestones R0–R8); R9 is the release — see
-[docs/ROADMAP.md](docs/ROADMAP.md).
+`legacy-c-v1.99.1`). Status **2.0.0-rc.1**: every feature of the C version is implemented
+(including its never-wired modules; see [docs/feature-parity.md](docs/feature-parity.md)): GTK 4 /
+libadwaita application, headless terminal, MCP server, macros, presets, protocol decoders, file
+transfers, automation scripts, port control and the signal monitor. 2.0.0 follows the hardware
+checklist; see [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Sunshine packets
 
@@ -28,7 +29,7 @@ exposes it as the resource `gtkterm://docs/sunshine-protocol`, or read
 
 ```bash
 # needs: libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev libgtksourceview-5-dev libudev-dev
-cargo xtask install                      # into ~/.local (binary, desktop entry, icons, man page, completions)
+cargo xtask install                      # into ~/.local (binary, desktop entry, icons, man page, completions, translations)
 cargo xtask install --prefix /usr --destdir pkg/   # staging for packages
 # Headless terminal + MCP server only, without GTK:
 cargo build --release -p gtkterm-gui --no-default-features
@@ -43,6 +44,9 @@ cargo build --release -p gtkterm-gui --no-default-features
   length, CSV/PNG export.
 - Status bar: profiles, endpoint, RX/TX counters, DTR/RTS toggles, CTS/DSR/DCD/RI, log and MCP state.
 - Shortcuts use Ctrl+Shift or F-keys (Ctrl+letter goes to the device); press Ctrl+? for the list.
+  F11 is fullscreen, Ctrl+plus/minus/0 zoom the terminal.
+- `kill -USR1 <pid>` opens the port, `kill -USR2 <pid>` closes it (as in GTKTerm).
+- The interface is translated with gettext; German is complete (`LANGUAGE=de gtkterm-sunshine`).
 
 ## Macros and presets
 
@@ -129,7 +133,9 @@ gtkterm-sunshine -L                                             # list profiles
 The GTKTerm options keep their names (`--port/-p`, `--baudrate/-s`, `--bits/-b`, `--parity/-a`,
 `--stopbits/-t`, `--flow_control/-w`, `--term_echo/-e on|off`, `--show_config/-V`, ...); `-h`
 is help, so auto-LF moved from `-h` to `-j`. Settings live in
-`~/.config/gtkterm-sunshine/config.toml`; an old `~/.config/.gtktermrc` is imported once.
+`~/.config/gtkterm-sunshine/config.toml`; an old `~/.config/.gtktermrc` (C GTKTerm) or
+`~/.gtktermrc` (GTKTerm 1.x, including its macros) is imported once. `man gtkterm-sunshine`
+lists every option, file and signal.
 
 ## MCP (AI agents)
 
@@ -146,7 +152,9 @@ logging, decoded frames, Modbus requests (`modbus_request` builds the frame with
 and returns the parsed registers) and file transfers with progress (`file_send`,
 `file_receive`, limited to `~/.local/share/gtkterm-sunshine/transfers` plus `--mcp-allow-dir`),
 scripts (`script_run`, `exec` only with `--mcp-allow-exec`), the signal history and auto-baud;
-`--mcp-read-only` hides everything that writes. See [docs/mcp.md](docs/mcp.md).
+`--mcp-read-only` hides everything that writes. In the window, an agent's first change waits
+for your OK (*Deny*, *Allow Once*, *Allow Until the Server Stops*), and every tool call is
+recorded in `~/.local/share/gtkterm-sunshine/mcp-audit.jsonl`. See [docs/mcp.md](docs/mcp.md).
 
 ## Development
 
@@ -157,7 +165,12 @@ cargo nextest run -p gtkterm-gui --no-default-features   # binary end-to-end tes
 cargo run -p gtkterm-testkit --bin sunshine-gen -- /tmp/ttyB --rate 50   # test data
 cargo run -p gtkterm-testkit --bin sunshine-gen -- /tmp/ttyB --device modbus-rtu   # fake slave (also at, nmea)
 cd fuzz && cargo +nightly fuzz run sunshine_scanner
+cargo xtask po                             # after changing UI strings: update po/*.pot and po/*.po
 ```
+
+Translations: mark UI strings with `gettext("…")`, `gettext_f("… {name} …", &[("name", &v)])`
+or `n_!("…")` (constant tables). To add a language, list it in `po/LINGUAS`, run
+`cargo xtask po` and translate `po/<lang>.po`.
 
 Debugging recipes: [docs/debugging.md](docs/debugging.md). Hardware checklist:
 [docs/testing/hardware.md](docs/testing/hardware.md).
