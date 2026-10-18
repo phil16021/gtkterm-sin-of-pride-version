@@ -61,6 +61,8 @@ pub struct Win {
     shortcut_ctl: RefCell<Option<gtk::ShortcutController>>,
     recorder: RefCell<Option<super::macros::Recorder>>,
     running_macro: RefCell<Option<String>>,
+    /// A raw file send in progress (cancelled by the transfer cancel button).
+    raw_send: RefCell<Option<tokio_util::sync::CancellationToken>>,
     macro_editor: RefCell<Option<Rc<super::macros::MacroEditor>>>,
     mcp_allow_dirs: RefCell<Vec<PathBuf>>,
     script_window: RefCell<Option<Rc<super::scripts::ScriptWindow>>>,
@@ -263,6 +265,7 @@ impl Win {
             shortcut_ctl: RefCell::default(),
             recorder: RefCell::default(),
             running_macro: RefCell::default(),
+            raw_send: RefCell::default(),
             macro_editor: RefCell::default(),
             mcp_allow_dirs: RefCell::new(start.mcp_allow_dirs.clone()),
             script_window: RefCell::default(),
@@ -1067,6 +1070,10 @@ impl Win {
         add(
             "cancel-transfer",
             Box::new(|w| {
+                if let Some(t) = w.raw_send.borrow().as_ref() {
+                    t.cancel();
+                    return;
+                }
                 let s = w.session.clone();
                 spawn(async move { s.cancel_transfer().await }, |_| {});
             }),
@@ -1517,23 +1524,95 @@ impl Win {
         }
     }
 
+    /// Send a file's bytes as they are: in pieces, so pacing, progress and cancel work and
+    /// memory stays small.
     fn send_raw(self: &Rc<Self>, path: PathBuf) {
+        const PIECE: usize = 4096;
+        const MAX_RAW: u64 = 256 << 20;
+        if self.raw_send.borrow().is_some() {
+            self.toast(&gettext("A file is already being sent"));
+            return;
+        }
+        let size = match std::fs::metadata(&path) {
+            Ok(m) if m.len() > MAX_RAW => {
+                self.toast(&gettext_f(
+                    "{path} is larger than 256 MiB; use a file transfer protocol",
+                    &[("path", &path.display())],
+                ));
+                return;
+            }
+            Ok(m) => m.len(),
+            Err(e) => {
+                self.toast(&format!("{}: {e}", path.display()));
+                return;
+            }
+        };
+        let token = tokio_util::sync::CancellationToken::new();
+        *self.raw_send.borrow_mut() = Some(token.clone());
+        let name = path
+            .file_name()
+            .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+        self.status.set_progress(Some((
+            &gettext_f(
+                "Sending {name}: {sent} of {size} bytes",
+                &[("name", &name), ("sent", &0), ("size", &size)],
+            ),
+            0.0,
+        )));
+        let (progress_tx, progress) = async_channel::bounded::<u64>(1);
         let s = self.session.clone();
         let ww = Rc::downgrade(self);
+        let w2 = Rc::downgrade(self);
+        let label = name.clone();
+        glib::spawn_future_local(async move {
+            while let Ok(sent) = progress.recv().await {
+                let Some(w) = w2.upgrade() else { break };
+                #[allow(clippy::cast_precision_loss)]
+                let fraction = if size == 0 { 1.0 } else { sent as f64 / size as f64 };
+                w.status.set_progress(Some((
+                    &gettext_f(
+                        "Sending {name}: {sent} of {size} bytes",
+                        &[("name", &label), ("sent", &sent), ("size", &size)],
+                    ),
+                    fraction,
+                )));
+            }
+        });
         spawn(
             async move {
-                let data = tokio::fs::read(&path)
+                use tokio::io::AsyncReadExt as _;
+                let mut file = tokio::fs::File::open(&path)
                     .await
                     .map_err(|e| format!("{}: {e}", path.display()))?;
-                let n = data.len();
-                s.send(data).await.map_err(|e| e.to_string())?;
+                let mut buf = vec![0u8; PIECE];
+                let mut sent = 0u64;
+                loop {
+                    let n = file
+                        .read(&mut buf)
+                        .await
+                        .map_err(|e| format!("{}: {e}", path.display()))?;
+                    if n == 0 {
+                        break;
+                    }
+                    tokio::select! {
+                        r = s.send(buf[..n].to_vec()) => r.map_err(|e| e.to_string())?,
+                        () = token.cancelled() => {
+                            s.discard_queued();
+                            return Err(gettext_f("Sending {name} cancelled after {sent} bytes", &[("name", &name), ("sent", &sent)]));
+                        }
+                    }
+                    sent += n as u64;
+                    let _ = progress_tx.try_send(sent);
+                }
                 Ok::<_, String>(gettext_f(
                     "Sent {path} ({n} bytes)",
-                    &[("path", &path.display()), ("n", &n)],
+                    &[("path", &path.display()), ("n", &sent)],
                 ))
             },
             move |r| {
                 if let Some(w) = ww.upgrade() {
+                    w.raw_send.borrow_mut().take();
+                    w.status.set_progress(None);
                     w.toast(&r.unwrap_or_else(|e| e));
                 }
             },
@@ -2846,6 +2925,57 @@ mod tests {
             worst < Duration::from_millis(500),
             "main loop stalled for {worst:?}"
         );
+        assert_eq!(UNEXPECTED_LOGS.load(Ordering::SeqCst), 0, "GTK warnings");
+    }
+
+    /// Send File → Raw streams the file in pieces with progress, and can be cancelled.
+    #[gtk::test]
+    fn raw_file_send_streams_and_cancels() {
+        if std::env::var_os("GTKTERM_GUI_TESTS").is_none() {
+            return;
+        }
+        let (win, mut dev, dir) = setup();
+        let data: Vec<u8> = (0..65_536u32).map(|i| (i % 251) as u8).collect();
+        let file = dir.path().join("blob.bin");
+        std::fs::write(&file, &data).unwrap();
+        win.send_raw(file);
+        let mut got = Vec::new();
+        while got.len() < data.len() {
+            let b = rt()
+                .block_on(async { tokio::time::timeout(Duration::from_secs(5), dev.recv()).await })
+                .expect("raw send stalled")
+                .unwrap();
+            got.extend_from_slice(&b);
+            pump_until(Duration::from_millis(1), || false);
+        }
+        assert_eq!(got, data);
+        assert!(pump_until(Duration::from_secs(2), || win
+            .raw_send
+            .borrow()
+            .is_none()));
+        assert!(!win.status.transfer_visible());
+
+        // Every line waits for a prompt that never comes: cancel it from the status bar.
+        let mut t = win.term.config();
+        t.wait_char = Some(b'>');
+        win.session.set_terminal(t);
+        let lines = dir.path().join("lines.txt");
+        std::fs::write(&lines, "a\n".repeat(100)).unwrap();
+        win.send_raw(lines);
+        assert!(pump_until(Duration::from_secs(3), || win
+            .status
+            .transfer_visible()));
+        gio::prelude::ActionGroupExt::activate_action(&win.window, "cancel-transfer", None);
+        assert!(
+            pump_until(Duration::from_secs(5), || win.raw_send.borrow().is_none()),
+            "cancelled"
+        );
+        assert!(!win.status.transfer_visible());
+        // The queued rest is discarded too: at most the line in flight still arrives.
+        rt().block_on(async { while !dev.drain().is_empty() {} });
+        pump_until(Duration::from_millis(2500), || false);
+        let late = dev.drain();
+        assert!(late.len() <= 2, "sent after cancel: {late:?}");
         assert_eq!(UNEXPECTED_LOGS.load(Ordering::SeqCst), 0, "GTK warnings");
     }
 

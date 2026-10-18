@@ -154,6 +154,18 @@ impl StatusBar {
         }
     }
 
+    /// Show progress of something that is not a protocol transfer (a raw file send), or hide it.
+    pub fn set_progress(&self, progress: Option<(&str, f64)>) {
+        let Some((text, fraction)) = progress else {
+            self.transfer.set_visible(false);
+            return;
+        };
+        self.transfer.set_visible(true);
+        self.transfer_label.set_text(text);
+        self.transfer_label.set_tooltip_text(Some(text));
+        self.transfer_bar.set_fraction(fraction.clamp(0.0, 1.0));
+    }
+
     /// The transfer indicator is shown.
     #[cfg(test)]
     pub fn transfer_visible(&self) -> bool {

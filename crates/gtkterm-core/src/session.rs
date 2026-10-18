@@ -427,9 +427,14 @@ impl Session {
     }
 
     /// Discard data waiting in the driver's input and output buffers (serial ports).
+    /// Discard sends that are queued or in progress (they end with `Cancelled`).
+    pub fn discard_queued(&self) {
+        self.shared.tx_epoch.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Discard what is queued for sending and, on serial ports, the driver's buffers.
     pub async fn flush(&self) -> Result<(), SessionError> {
-        self.shared.tx_epoch.fetch_add(1, Ordering::Relaxed);
+        self.discard_queued();
         match self.request(|tx| Command::Control(ControlOp::Flush, tx)).await? {
             Err(SessionError::Port(PortError::Unsupported(_))) => Ok(()),
             other => other,
