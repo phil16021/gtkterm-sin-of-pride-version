@@ -27,3 +27,5 @@ lines or RS485 direction control. Run this list on real hardware before a releas
 | 20 | Device that rings the bell (`printf '\a'` from the far side), *Visual bell* on | the terminal flashes, no beep | ☐ |
 | 21 | `-w rts` with CTS held low, send 10 kB, then close the port | close returns within a second (queued output is discarded after 250 ms, not after the kernel's 30 s `closing_wait`); reopen works | ☐ |
 | 22 | Software RS485 (adapter without kernel RS485), close the port in the middle of a long send | RTS returns to idle (logic analyser), the bus is not left driven | ☐ |
+| 23 | ESP32 or Arduino board with auto-reset, *DTR/RTS when opening* both *Off* | connecting does not reset the board (no boot banner); with *As the driver sets it* it may reset as before | ☐ |
+| 24 | USB adapter, *Reconnect automatically* on, unplug and replug while connected | the tab shows the error, then reconnects within a few seconds of replugging; a log started on connect continues in a new file | ☐ |

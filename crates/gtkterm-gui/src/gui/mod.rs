@@ -15,6 +15,7 @@ mod macros;
 mod prefs;
 mod rt;
 mod scripts;
+mod sendbar;
 mod shortcuts;
 mod signals;
 mod state;

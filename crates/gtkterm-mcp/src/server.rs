@@ -1169,10 +1169,16 @@ impl GtkTermMcp {
         let connection = session
             .connection()
             .ok_or("the session has no connection settings yet")?;
+        // Options the session does not know (auto-reconnect, log on connect) stay as saved.
+        let saved = self
+            .manager
+            .with_config(|c| c.profile(&p.name).cloned())
+            .unwrap_or_default();
         let profile = gtkterm_core::config::Profile {
             connection,
             terminal: session.terminal(),
             decoder: session.decoder_config(),
+            ..saved
         };
         profile.validate().map_err(err)?;
         self.manager

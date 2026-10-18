@@ -53,6 +53,12 @@ cargo build --release -p gtkterm-gui --no-default-features
 - Preferences cover every port and terminal setting, MCP and automation:
 
   ![Preferences](docs/screenshots/preferences.png)
+- Send bar (Ctrl+Shift+I): a line of text (escapes `\r \n \t \xHH`) or hex bytes with a
+  line ending, a history (Up/Down) and *repeat every N ms*. The red button in the header
+  captures to an auto-named log in one click.
+- Per profile: what Enter sends (CR, LF, CR LF), a delay after each byte, DTR/RTS levels when
+  the port opens (both *Off* keeps ESP32/Arduino boards from resetting), reconnect automatically
+  when the device returns, clear the terminal and start a log on connect.
 - Shortcuts use Ctrl+Shift or F-keys (Ctrl+letter goes to the device); press Ctrl+? for the list.
   F11 is fullscreen, Ctrl+plus/minus/0 zoom the terminal.
 - `kill -USR1 <pid>` opens the port, `kill -USR2 <pid>` closes it (as in GTKTerm).

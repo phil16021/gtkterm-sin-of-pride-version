@@ -671,3 +671,29 @@ async fn flush_discards_queued_sends_and_the_queue_is_bounded() {
     let _ = blocker.await.unwrap();
     s.send(&b"after\n"[..]).await.unwrap();
 }
+
+/// A character delay sends one byte at a time with the pause between them.
+#[tokio::test]
+async fn char_delay_paces_every_byte() {
+    let s = session();
+    let (port, mut dev) = loopback::pair("loop");
+    s.attach(port).await.unwrap();
+    s.set_terminal(TerminalConfig {
+        char_delay_ms: 30,
+        ..TerminalConfig::default()
+    });
+    let started = Instant::now();
+    s.send(&b"abcd"[..]).await.unwrap();
+    assert!(
+        started.elapsed() >= Duration::from_millis(110),
+        "{:?}",
+        started.elapsed()
+    );
+    let mut got = Vec::new();
+    while got.len() < 4 {
+        let b = dev.recv().await.unwrap();
+        assert_eq!(b.len(), 1, "one byte per write");
+        got.extend_from_slice(&b);
+    }
+    assert_eq!(got, b"abcd");
+}

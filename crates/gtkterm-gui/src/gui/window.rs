@@ -39,6 +39,7 @@ pub struct Win {
     toast: adw::ToastOverlay,
     banner: adw::Banner,
     term: Rc<TerminalView>,
+    send_bar: Rc<super::sendbar::SendBar>,
     panel: Rc<VizPanel>,
     paned: gtk::Paned,
     frames: Rc<FramesView>,
@@ -222,6 +223,12 @@ impl Win {
             .tooltip_text(gettext("View mode"))
             .build();
         header.pack_end(&view_drop);
+        let capture = gtk::ToggleButton::builder()
+            .icon_name("media-record-symbolic")
+            .tooltip_text(gettext("Capture to a log file (text, in the log folder)"))
+            .action_name("win.quick-log")
+            .build();
+        header.pack_end(&capture);
         header.pack_end(&icon_button(
             "edit-find-symbolic",
             &gettext("Search (Ctrl+Shift+F)"),
@@ -395,9 +402,17 @@ impl Win {
             .build();
         banner.set_action_name(Some("win.open-port"));
         let status = StatusBar::new();
+        let toast = chrome.toast.downgrade();
+        let send_bar = super::sendbar::SendBar::new(&session, &chrome.state, move |msg| {
+            if let Some(t) = toast.upgrade() {
+                t.add_toast(adw::Toast::builder().title(msg).timeout(4).build());
+            }
+        });
+        send_bar.widget.set_visible(st.send_bar);
         let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
         content.append(&banner);
         content.append(&paned);
+        content.append(&send_bar.widget);
         content.append(&status.widget);
         paned.set_vexpand(true);
         let page = chrome.tabs.view.append(&content);
@@ -408,6 +423,7 @@ impl Win {
             toast: chrome.toast.clone(),
             banner,
             term,
+            send_bar,
             panel,
             paned,
             frames,
@@ -789,6 +805,48 @@ impl Win {
             w.panel.update_footer();
             glib::ControlFlow::Continue
         });
+        let w = Rc::downgrade(self);
+        glib::timeout_add_local(Duration::from_secs(3), move || {
+            let Some(w) = w.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            w.maybe_reconnect();
+            glib::ControlFlow::Continue
+        });
+    }
+
+    /// Log to an auto-named file in the default log folder (profile option, quick capture).
+    fn start_auto_log(self: &Rc<Self>, format: LogFormat) {
+        let st = self.session.status();
+        let stamp = jiff::Zoned::now().strftime("%Y%m%d_%H%M%S").to_string();
+        let port = match &self.profile.borrow().connection {
+            Connection::Serial(s) => s.port.clone(),
+            other => other.summary(),
+        };
+        let name = session_file_name(&stamp, &port, &st.name, format);
+        let path = log_dir().join(name);
+        self.log_op(LogOp::Start {
+            path,
+            format,
+            append: false,
+            port_label: Some(self.profile.borrow().connection.summary()),
+        });
+    }
+
+    /// Reconnect after an error if the profile wants it and the device is there again.
+    fn maybe_reconnect(self: &Rc<Self>) {
+        if !self.profile.borrow().auto_reconnect
+            || !matches!(self.session.status().state, PortState::Error(_))
+        {
+            return;
+        }
+        let present = match &self.profile.borrow().connection {
+            Connection::Serial(s) => std::path::Path::new(&s.port).exists(),
+            _ => true,
+        };
+        if present {
+            self.open_port();
+        }
     }
 
     fn refresh_actions(&self) {
@@ -823,6 +881,11 @@ impl Win {
             ("log-clear", logging),
             ("log-stop", logging),
         ];
+        if let Some(a) = self.window.lookup_action("quick-log")
+            && a.state().and_then(|v| v.get::<bool>()) != Some(logging)
+        {
+            a.change_state(&logging.to_variant());
+        }
         for (name, enabled) in rules {
             if let Some(a) = self
                 .window
@@ -845,6 +908,13 @@ impl Win {
                 match state {
                     PortState::Open => {
                         let description = self.session.status().description;
+                        if self.term.config().clear_on_connect {
+                            self.term.clear(false);
+                        }
+                        let auto_log = self.profile.borrow().log_on_connect;
+                        if let Some(format) = auto_log.filter(|_| self.session.status().log.is_none()) {
+                            self.start_auto_log(format);
+                        }
                         self.term.notice(&gettext_f(
                             "connected: {description}",
                             &[("description", &description)],
@@ -860,8 +930,14 @@ impl Win {
                             }
                         }
                     }
-                    PortState::Closed => self.term.notice(&gettext("disconnected")),
-                    PortState::Error(e) => self.term.notice(&gettext_f("error: {error}", &[("error", e)])),
+                    PortState::Closed => {
+                        self.send_bar.stop_repeating();
+                        self.term.notice(&gettext("disconnected"));
+                    }
+                    PortState::Error(e) => {
+                        self.send_bar.stop_repeating();
+                        self.term.notice(&gettext_f("error: {error}", &[("error", e)]));
+                    }
                     PortState::Opening => {}
                 }
             }
@@ -902,6 +978,10 @@ impl Win {
             while rx.recv().await.is_ok() {
                 let Some(w) = w.upgrade() else { break };
                 w.refresh_header();
+                let tabs: Vec<Rc<Win>> = w.tabs.all.borrow().clone();
+                for t in tabs {
+                    t.maybe_reconnect();
+                }
             }
         });
     }
@@ -1394,6 +1474,17 @@ impl Win {
             }),
         );
         add("save-profile-as", Box::new(Self::save_profile_as));
+        let action = gio::SimpleAction::new_stateful("quick-log", None, &false.to_variant());
+        let w = self.current();
+        action.connect_activate(move |_, _| {
+            let Some(w) = w.upgrade() else { return };
+            if w.session.status().log.is_some() {
+                w.log_op(LogOp::Stop);
+            } else {
+                w.start_auto_log(LogFormat::Text);
+            }
+        });
+        self.window.add_action(&action);
         let action = gio::SimpleAction::new("new-tab", Some(glib::VariantTy::STRING));
         let w = self.current();
         action.connect_activate(move |_, param| {
@@ -1576,6 +1667,22 @@ impl Win {
             let Some(w) = w.upgrade() else { return };
             let on = !a.state().and_then(|v| v.get::<bool>()).unwrap_or(false);
             w.set_recording(on);
+        });
+        self.window.add_action(&action);
+        let visible = self.state.borrow().send_bar;
+        let action = gio::SimpleAction::new_stateful("send-bar", None, &visible.to_variant());
+        let w = self.current();
+        action.connect_activate(move |a, _| {
+            let Some(w) = w.upgrade() else { return };
+            let on = !a.state().and_then(|v| v.get::<bool>()).unwrap_or(false);
+            a.set_state(&on.to_variant());
+            w.state.borrow_mut().send_bar = on;
+            for t in w.tabs.all.borrow().iter() {
+                t.send_bar.widget.set_visible(on);
+            }
+            if on {
+                w.send_bar.focus();
+            }
         });
         self.window.add_action(&action);
         let visible = self.state.borrow().macro_bar;
@@ -2081,6 +2188,7 @@ impl Win {
             connection: self.profile.borrow().connection.clone(),
             terminal: self.term.config(),
             decoder: self.session.decoder_config(),
+            ..self.profile.borrow().clone()
         };
         let mcp = self.state.borrow().mcp.clone();
         let name = self.profile_name.borrow().clone();
@@ -2178,6 +2286,7 @@ impl Win {
             connection: self.profile.borrow().connection.clone(),
             terminal: self.term.config(),
             decoder: self.session.decoder_config(),
+            ..self.profile.borrow().clone()
         };
         let result = self
             .manager
@@ -2658,6 +2767,20 @@ impl Win {
     }
 }
 
+/// Where auto-named logs go (tests use their own folder).
+fn log_dir() -> PathBuf {
+    #[cfg(test)]
+    if let Some(dir) = TEST_LOG_DIR.with(|d| d.borrow().clone()) {
+        return dir;
+    }
+    gtkterm_mcp::default_log_dir()
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_LOG_DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
+
 /// Close `window` even while dialogs are open (closing would only close the top dialog).
 pub fn close_window(window: &adw::ApplicationWindow) {
     // Bounded: a dialog that refuses to go must not hang the quit.
@@ -3058,6 +3181,7 @@ mod tests {
         install_log_guard();
         let dir = tempfile::tempdir().unwrap();
         super::super::state::set_test_dir(dir.path());
+        super::TEST_LOG_DIR.with(|d| *d.borrow_mut() = Some(dir.path().join("logs")));
         let _guard = rt().enter();
         // `cargo test` runs all GUI tests in one process: each needs its own D-Bus object path.
         static APPS: AtomicUsize = AtomicUsize::new(0);
@@ -3614,6 +3738,81 @@ mod tests {
             .map(|i| one.tabs.view.nth_page(i).title().to_string())
             .collect();
         assert!(titles[1].starts_with("[lab]"), "{titles:?}");
+        assert_eq!(UNEXPECTED_LOGS.load(Ordering::SeqCst), 0, "GTK warnings");
+    }
+
+    /// Daily-use sending: the send bar (escapes, hex, line ending, history, repeat), Enter
+    /// mapping, coloured echo, quick capture to a log file.
+    #[gtk::test]
+    fn sending_from_the_bar_and_quick_capture() {
+        if std::env::var_os("GTKTERM_GUI_TESTS").is_none() {
+            return;
+        }
+        let (win, mut dev, dir) = setup();
+        let recv = |dev: &mut gtkterm_core::port::loopback::DeviceEnd| {
+            rt().block_on(async { tokio::time::timeout(Duration::from_secs(2), dev.recv()).await })
+                .ok()
+                .flatten()
+                .map(|b| b.to_vec())
+        };
+        gio::prelude::ActionGroupExt::activate_action(&win.window, "send-bar", None);
+        assert!(win.send_bar.widget.is_visible());
+        win.send_bar.set_line("AT+CSQ", false, 3);
+        win.send_bar.activate();
+        assert_eq!(recv(&mut dev).as_deref(), Some(&b"AT+CSQ\r\n"[..]));
+        win.send_bar.set_line("de ad 0x01", true, 0);
+        win.send_bar.activate();
+        assert_eq!(recv(&mut dev).as_deref(), Some(&[0xDE, 0xAD, 0x01][..]));
+        assert_eq!(win.state.borrow().send_history[..2], ["de ad 0x01", "AT+CSQ"]);
+        // Repeat every 50 ms until switched off.
+        win.send_bar.set_line("ping", false, 2);
+        win.send_bar.set_repeat(50.0, true);
+        pump_until(Duration::from_millis(400), || false);
+        win.send_bar.set_repeat(50.0, false);
+        let mut pings = 0;
+        while let Some(b) = recv(&mut dev) {
+            pings += b.windows(5).filter(|w| w == b"ping\n").count();
+            if pings >= 3 {
+                break;
+            }
+        }
+        assert!(pings >= 3, "repeated sends: {pings}");
+        rt().block_on(async { while !dev.drain().is_empty() {} });
+
+        // Enter sends CR LF when configured.
+        let mut t = win.term.config();
+        t.enter_sends = gtkterm_core::config::EnterSends::CrLf;
+        t.echo = true;
+        win.term.apply_config(&t);
+        win.session.set_terminal(t);
+        win.term.term.feed_child(b"x\r");
+        assert_eq!(recv(&mut dev).as_deref(), Some(&b"x\r\n"[..]));
+
+        // Quick capture: the header toggle starts an auto-named log and stops it again.
+        gio::prelude::ActionGroupExt::activate_action(&win.window, "quick-log", None);
+        assert!(pump_until(Duration::from_secs(2), || win
+            .session
+            .status()
+            .log
+            .is_some()));
+        assert!(pump_until(Duration::from_secs(1), || win
+            .window
+            .lookup_action("quick-log")
+            .and_then(|a| a.state())
+            .and_then(|v| v.get::<bool>())
+            == Some(true)));
+        rt().block_on(dev.send(&b"logged line\n"[..])).unwrap();
+        pump_until(Duration::from_millis(200), || false);
+        gio::prelude::ActionGroupExt::activate_action(&win.window, "quick-log", None);
+        assert!(pump_until(Duration::from_secs(2), || win
+            .session
+            .status()
+            .log
+            .is_none()));
+        let logs: Vec<_> = std::fs::read_dir(dir.path().join("logs")).unwrap().collect();
+        assert_eq!(logs.len(), 1);
+        let text = std::fs::read_to_string(logs[0].as_ref().unwrap().path()).unwrap();
+        assert!(text.contains("logged line"), "{text}");
         assert_eq!(UNEXPECTED_LOGS.load(Ordering::SeqCst), 0, "GTK warnings");
     }
 

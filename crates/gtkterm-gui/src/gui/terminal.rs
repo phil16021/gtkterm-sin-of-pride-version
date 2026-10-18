@@ -89,6 +89,22 @@ pub struct TerminalView {
     refused_at: std::cell::Cell<Option<std::time::Instant>>,
 }
 
+/// Replace every CR in typed or pasted input with what Enter should send.
+fn map_enter(input: &[u8], enter: &[u8]) -> Vec<u8> {
+    if enter == b"\r" {
+        return input.to_vec();
+    }
+    let mut out = Vec::with_capacity(input.len() + 8);
+    for &b in input {
+        if b == b'\r' {
+            out.extend_from_slice(enter);
+        } else {
+            out.push(b);
+        }
+    }
+    out
+}
+
 /// Why typed input cannot be sent right now, if it cannot.
 fn input_refused(session: &Session) -> Option<String> {
     use gtkterm_core::session::PortState;
@@ -218,16 +234,19 @@ impl TerminalView {
         let v = Rc::downgrade(&view);
         view.term.connect_commit(move |_, text, _| {
             let Some(v) = v.upgrade() else { return };
+            // VTE sends CR for Enter (and for line breaks in pasted text).
+            let enter = v.config.borrow().enter_sends;
+            let bytes = map_enter(text.as_bytes(), enter.bytes());
             match input_refused(&s) {
                 Some(reason) => v.refused(&reason),
                 None => {
-                    if let Err(e) = s.send_nowait(text.as_bytes().to_vec()) {
+                    if let Err(e) = s.send_nowait(bytes.clone()) {
                         v.refused(&e.to_string());
                     }
                 }
             }
             if let Some(hook) = v.on_input.borrow().as_ref() {
-                hook(text.as_bytes());
+                hook(&bytes);
             }
         });
 
@@ -374,14 +393,28 @@ impl TerminalView {
         if chunk.dir == Direction::Tx && !echo {
             return;
         }
-        let mode = self.config.borrow().view_mode;
+        let (mode, tx_color) = {
+            let c = self.config.borrow();
+            (c.view_mode, c.tx_color)
+        };
         let out = if mode == ViewMode::Ascii {
             self.transform.borrow_mut().apply(&chunk.data, chunk.ts)
         } else {
             self.update_view_settings();
             self.formatter.borrow_mut().format(&chunk.data)
         };
-        self.output(&out);
+        match tx_color.filter(|_| chunk.dir == Direction::Tx) {
+            Some(c) => {
+                // Truecolor foreground for sent data, back to the default afterwards.
+                let to8 = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+                let mut colored =
+                    format!("\x1b[38;2;{};{};{}m", to8(c.red), to8(c.green), to8(c.blue)).into_bytes();
+                colored.extend_from_slice(&out);
+                colored.extend_from_slice(b"\x1b[39m");
+                self.output(&colored);
+            }
+            None => self.output(&out),
+        }
     }
 
     /// A refused-input notice was shown.

@@ -169,6 +169,54 @@ impl FlowControl {
     }
 }
 
+/// What a modem output line does when the port opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LineAtOpen {
+    /// Whatever the driver does (usually raised).
+    #[default]
+    Keep,
+    /// Raise it.
+    On,
+    /// Lower it (e.g. DTR/RTS off so ESP32 and Arduino boards do not reset on connect).
+    Off,
+}
+
+impl LineAtOpen {
+    /// The level to set, if any.
+    pub fn level(self) -> Option<bool> {
+        match self {
+            Self::Keep => None,
+            Self::On => Some(true),
+            Self::Off => Some(false),
+        }
+    }
+}
+
+/// What the Enter key sends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EnterSends {
+    /// Carriage return (terminals, most devices).
+    #[default]
+    Cr,
+    /// Line feed.
+    Lf,
+    /// CR LF (Windows-style consoles, many AT modems accept it too).
+    CrLf,
+}
+
+impl EnterSends {
+    /// The bytes for one Enter.
+    pub fn bytes(self) -> &'static [u8] {
+        match self {
+            Self::Cr => b"\r",
+            Self::Lf => b"\n",
+            Self::CrLf => b"\r\n",
+        }
+    }
+}
+
 /// Serial port settings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -197,6 +245,10 @@ pub struct SerialConfig {
     pub rs485_rts_active_low: bool,
     /// RS485: keep receiving while transmitting (hear our own echo).
     pub rs485_rx_during_tx: bool,
+    /// DTR when the port opens.
+    pub dtr_on_open: LineAtOpen,
+    /// RTS when the port opens.
+    pub rts_on_open: LineAtOpen,
 }
 
 impl Default for SerialConfig {
@@ -214,6 +266,8 @@ impl Default for SerialConfig {
             break_ms: 250,
             rs485_rts_active_low: false,
             rs485_rx_during_tx: false,
+            dtr_on_open: LineAtOpen::Keep,
+            rts_on_open: LineAtOpen::Keep,
         }
     }
 }
@@ -445,6 +499,14 @@ pub struct TerminalConfig {
     pub wait_char: Option<u8>,
     /// Default file for "send raw file".
     pub raw_filename: Option<String>,
+    /// What the Enter key sends.
+    pub enter_sends: EnterSends,
+    /// Pause between transmitted bytes in ms (slow bootloaders; 0 = none).
+    pub char_delay_ms: u32,
+    /// Show sent data (local echo) in this colour.
+    pub tx_color: Option<Rgba>,
+    /// Clear the terminal when the connection opens.
+    pub clear_on_connect: bool,
 }
 
 impl Default for TerminalConfig {
@@ -470,12 +532,22 @@ impl Default for TerminalConfig {
             wait_delay_ms: 0,
             wait_char: None,
             raw_filename: None,
+            enter_sends: EnterSends::Cr,
+            char_delay_ms: 0,
+            tx_color: Some(Rgba::new(0.45, 0.7, 1.0, 1.0)),
+            clear_on_connect: false,
         }
     }
 }
 
 impl TerminalConfig {
     fn validate(&self) -> Result<(), ConfigError> {
+        if self.char_delay_ms > 1000 {
+            return Err(invalid(
+                "char_delay_ms",
+                format!("{} ms exceeds 1000 ms", self.char_delay_ms),
+            ));
+        }
         if self.wait_delay_ms > 500 {
             return Err(invalid(
                 "term_wait_delay",
@@ -514,6 +586,13 @@ pub struct Profile {
     pub connection: Connection,
     /// Terminal settings.
     pub terminal: TerminalConfig,
+    /// Reopen the connection when its device reappears (USB replug) or after an error.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto_reconnect: bool,
+    /// Start a log in this format (auto-named, in the log directory) whenever the
+    /// connection opens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_on_connect: Option<gtkterm_protocols::logfmt::LogFormat>,
     /// Protocol decoder.
     #[serde(skip_serializing_if = "crate::decoding::DecoderConfig::is_default")]
     pub decoder: crate::decoding::DecoderConfig,
@@ -1011,6 +1090,7 @@ mod tests {
                     ),
                     signals: true,
                 },
+                ..Default::default()
             },
         );
         let text = cfg.to_toml().unwrap();

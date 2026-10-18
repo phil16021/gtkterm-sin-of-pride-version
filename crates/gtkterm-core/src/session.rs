@@ -253,6 +253,8 @@ pub struct Session {
 struct Pacing {
     delay: Duration,
     wait_char: Option<u8>,
+    /// Pause after every byte.
+    char_delay: Duration,
 }
 
 impl Pacing {
@@ -260,11 +262,12 @@ impl Pacing {
         Self {
             delay: Duration::from_millis(t.wait_delay_ms.into()),
             wait_char: t.wait_char,
+            char_delay: Duration::from_millis(t.char_delay_ms.into()),
         }
     }
 
     fn active(self) -> bool {
-        !self.delay.is_zero() || self.wait_char.is_some()
+        !self.delay.is_zero() || self.wait_char.is_some() || !self.char_delay.is_zero()
     }
 }
 
@@ -1418,6 +1421,25 @@ async fn wait_for_byte(events: &mut broadcast::Receiver<SessionEvent>, byte: u8)
     }
 }
 
+/// Write one byte at a time with a pause after each (slow bootloaders, keyboard emulation);
+/// a flush (newer epoch) stops it between bytes.
+async fn write_slowly(
+    writer: &mut dyn PortWriter,
+    data: &[u8],
+    pause: Duration,
+    shared: &Shared,
+    epoch: u64,
+) -> Result<(), PortError> {
+    for b in data {
+        if epoch < shared.tx_epoch.load(Ordering::Relaxed) {
+            break;
+        }
+        writer.write_all(std::slice::from_ref(b)).await?;
+        tokio::time::sleep(pause).await;
+    }
+    Ok(())
+}
+
 async fn writer_loop(
     mut writer: Box<dyn PortWriter>,
     mut jobs: mpsc::UnboundedReceiver<TxJob>,
@@ -1459,7 +1481,12 @@ async fn writer_loop(
             if p.wait_char.is_some() {
                 events = events.resubscribe(); // only bytes that arrive after this line count
             }
-            if let Err(e) = writer.write_all(piece).await {
+            let sent = if p.char_delay.is_zero() {
+                writer.write_all(piece).await
+            } else {
+                write_slowly(writer.as_mut(), piece, p.char_delay, &shared, job.epoch).await
+            };
+            if let Err(e) = sent {
                 let msg = e.to_string();
                 let _ = written.send(write_error(e, false)).await;
                 result = Err(SessionError::Write(msg));

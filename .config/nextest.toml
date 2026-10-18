@@ -4,3 +4,12 @@ fail-fast = false
 
 [profile.ci]
 retries = 1
+
+# The GUI window tests each drive a real window at full speed; run them one at a time so
+# they do not starve each other (one of them measures main-loop stalls).
+[test-groups]
+gui-windows = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'package(gtkterm-gui) and test(/^gui::window::tests::/)'
+test-group = 'gui-windows'

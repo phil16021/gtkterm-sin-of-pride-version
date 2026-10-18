@@ -3,8 +3,11 @@
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gtkterm_core::config::{Connection, FlowControl, Parity, Profile, Rgba, SerialConfig, TerminalConfig};
+use gtkterm_core::config::{
+    Connection, EnterSends, FlowControl, LineAtOpen, Parity, Profile, Rgba, SerialConfig, TerminalConfig,
+};
 use gtkterm_core::presets::SerialPreset;
+use gtkterm_protocols::logfmt::LogFormat;
 use gtkterm_protocols::transform::TimestampFormat;
 use gtkterm_protocols::view::{HEX_WIDTHS, ViewMode};
 
@@ -82,6 +85,15 @@ const FLOWS: [FlowControl; 4] = [
     FlowControl::RtsCts,
     FlowControl::Rs485,
 ];
+const AT_OPEN: [LineAtOpen; 3] = [LineAtOpen::Keep, LineAtOpen::On, LineAtOpen::Off];
+const LOG_FORMATS: [LogFormat; 5] = [
+    LogFormat::Raw,
+    LogFormat::Text,
+    LogFormat::Csv,
+    LogFormat::Json,
+    LogFormat::Xml,
+];
+
 const STAMPS: [TimestampFormat; 3] = [
     TimestampFormat::LocalTime,
     TimestampFormat::Relative,
@@ -227,6 +239,25 @@ pub fn show(
         f64::from(serial.break_ms.max(1)),
     );
     break_len.set_subtitle(&gettext("Used by Send Break (Ctrl+Shift+B)"));
+    let line_choices = [n_!("As the driver sets it"), n_!("On"), n_!("Off")];
+    let at_open = |l: LineAtOpen| match l {
+        LineAtOpen::Keep => 0,
+        LineAtOpen::On => 1,
+        LineAtOpen::Off => 2,
+    };
+    let dtr_open = combo(
+        &gettext("DTR when opening"),
+        &line_choices,
+        at_open(serial.dtr_on_open),
+    );
+    dtr_open.set_subtitle(&gettext(
+        "Off for both keeps ESP32 and Arduino boards from resetting on connect",
+    ));
+    let rts_open = combo(
+        &gettext("RTS when opening"),
+        &line_choices,
+        at_open(serial.rts_on_open),
+    );
     let nolock = switch(
         &gettext("Do not lock the device"),
         &gettext("Allow other programs to open it at the same time"),
@@ -327,6 +358,8 @@ pub fn show(
             rts_low.upcast_ref(),
             rx_during_tx.upcast_ref(),
             break_len.upcast_ref(),
+            dtr_open.upcast_ref(),
+            rts_open.upcast_ref(),
             nolock.upcast_ref(),
         ],
     );
@@ -392,6 +425,34 @@ pub fn show(
             "Changes apply when the dialog is closed; an open connection is reopened.",
         ))
         .build();
+    let reconnect = switch(
+        &gettext("Reconnect automatically"),
+        &gettext("When the device is plugged in again or the connection fails"),
+        profile.auto_reconnect,
+    );
+    let clear_on_connect = switch(
+        &gettext("Clear the terminal"),
+        "",
+        profile.terminal.clear_on_connect,
+    );
+    let log_formats = [n_!("Off"), "raw", "text", "csv", "json", "xml"];
+    let log_on_connect = combo(
+        &gettext("Start a log"),
+        &log_formats,
+        profile.log_on_connect.map_or(0, |f| {
+            LOG_FORMATS.iter().position(|x| *x == f).map_or(0, |i| i + 1)
+        }),
+    );
+    log_on_connect.set_subtitle(&gettext("Named after date, port and profile, in the log folder"));
+    let on_connect = group(
+        &gettext("When connecting"),
+        &[
+            reconnect.upcast_ref(),
+            clear_on_connect.upcast_ref(),
+            log_on_connect.upcast_ref(),
+        ],
+    );
+    conn_page.add(&on_connect);
     conn_page.add(&note);
     dialog.add(&conn_page);
 
@@ -517,9 +578,41 @@ pub fn show(
             stamp_fmt.upcast_ref(),
         ],
     ));
+    let enter = combo(
+        &gettext("Enter sends"),
+        &["CR", "LF", "CR LF"],
+        match t.enter_sends {
+            EnterSends::Cr => 0,
+            EnterSends::Lf => 1,
+            EnterSends::CrLf => 2,
+        },
+    );
+    let char_delay = spin(
+        &gettext("Delay after each byte (ms)"),
+        0.0,
+        1000.0,
+        f64::from(t.char_delay_ms),
+    );
+    char_delay.set_subtitle(&gettext("For slow receivers such as bootloaders"));
+    let tx_button = gtk::ColorDialogButton::new(Some(gtk::ColorDialog::new()));
+    tx_button.set_rgba(&to_rgba(t.tx_color.unwrap_or(Rgba::new(0.45, 0.7, 1.0, 1.0))));
+    tx_button.set_valign(gtk::Align::Center);
+    let tx_colored = switch(
+        &gettext("Colour sent data"),
+        &gettext("Echoed data in its own colour"),
+        t.tx_color.is_some(),
+    );
+    tx_colored.add_suffix(&tx_button);
     term_page.add(&group(
         &gettext("Sent data"),
-        &[echo.upcast_ref(), delay.upcast_ref(), wait_char.upcast_ref()],
+        &[
+            echo.upcast_ref(),
+            tx_colored.upcast_ref(),
+            enter.upcast_ref(),
+            delay.upcast_ref(),
+            char_delay.upcast_ref(),
+            wait_char.upcast_ref(),
+        ],
     ));
     dialog.add(&term_page);
 
@@ -664,6 +757,8 @@ pub fn show(
                 break_ms: break_len.value() as u32,
                 rs485_rts_active_low: rts_low.is_active(),
                 rs485_rx_during_tx: rx_during_tx.is_active(),
+                dtr_on_open: AT_OPEN[(dtr_open.selected() as usize).min(2)],
+                rts_on_open: AT_OPEN[(rts_open.selected() as usize).min(2)],
             }),
         };
         p.terminal = TerminalConfig {
@@ -686,8 +781,17 @@ pub fn show(
             view_mode: ViewMode::ALL[(mode.selected() as usize).min(ViewMode::ALL.len() - 1)],
             show_index: index.is_active(),
             hex_chars: HEX_WIDTHS[(hex.selected() as usize).min(HEX_WIDTHS.len() - 1)] as u8,
+            enter_sends: [EnterSends::Cr, EnterSends::Lf, EnterSends::CrLf]
+                [(enter.selected() as usize).min(2)],
+            char_delay_ms: char_delay.value() as u32,
+            tx_color: tx_colored.is_active().then(|| from_rgba(&tx_button.rgba())),
+            clear_on_connect: clear_on_connect.is_active(),
             ..p.terminal.clone()
         };
+        p.auto_reconnect = reconnect.is_active();
+        p.log_on_connect = (log_on_connect.selected() as usize)
+            .checked_sub(1)
+            .and_then(|i| LOG_FORMATS.get(i).copied());
         let m = McpSettings {
             enabled: mcp_enabled.is_active(),
             port: mcp_port.value() as u16,

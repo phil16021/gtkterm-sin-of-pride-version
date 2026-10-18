@@ -74,6 +74,14 @@ pub struct UiState {
     pub script_path: Option<PathBuf>,
     /// Profiles open in tabs at the last exit, in tab order.
     pub open_tabs: Vec<String>,
+    /// Show the send bar.
+    pub send_bar: bool,
+    /// Lines sent from the send bar, newest first.
+    pub send_history: Vec<String>,
+    /// Line ending of the send bar (0 none, 1 CR, 2 LF, 3 CR LF).
+    pub send_ending: u32,
+    /// Repeat interval of the send bar in ms.
+    pub send_every_ms: u32,
 }
 
 impl Default for UiState {
@@ -96,6 +104,10 @@ impl Default for UiState {
             script_allow_exec: false,
             script_path: None,
             open_tabs: Vec::new(),
+            send_bar: false,
+            send_history: Vec::new(),
+            send_ending: 1,
+            send_every_ms: 1000,
         }
     }
 }

@@ -92,6 +92,12 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str)] = &[
     ),
     (
         crate::n_!("Data"),
+        crate::n_!("Send bar"),
+        "win.send-bar",
+        "<Control><Shift>i",
+    ),
+    (
+        crate::n_!("Data"),
         crate::n_!("Send hex data"),
         "win.send-hex",
         "<Control><Shift>h",

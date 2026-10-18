@@ -50,6 +50,12 @@ pub(crate) fn tiocmget(fd: BorrowedFd<'_>) -> io::Result<libc::c_int> {
     Ok(bits)
 }
 
+/// `TIOCMSET`: set all modem line bits at once.
+pub(crate) fn tiocmset(fd: BorrowedFd<'_>, bits: libc::c_int) -> io::Result<()> {
+    // SAFETY: fd is open; TIOCMSET reads one c_int.
+    check(unsafe { libc::ioctl(fd.as_raw_fd(), libc::TIOCMSET, &raw const bits) })
+}
+
 /// `TIOCMBIS` / `TIOCMBIC`: set or clear modem line bits.
 pub(crate) fn tiocm_set(fd: BorrowedFd<'_>, bits: libc::c_int, on: bool) -> io::Result<()> {
     let request = if on { libc::TIOCMBIS } else { libc::TIOCMBIC };

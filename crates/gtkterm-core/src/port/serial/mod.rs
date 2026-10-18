@@ -100,6 +100,36 @@ impl Drop for Device {
     }
 }
 
+/// Set DTR/RTS as configured for the moment the port opens. Both change in one `TIOCMSET`:
+/// the usual ESP32/Arduino auto-reset circuit resets the board while DTR and RTS differ, so
+/// changing them one after the other would reset it on connect.
+fn apply_lines_at_open(fd: std::os::fd::BorrowedFd<'_>, cfg: &SerialConfig) {
+    if cfg.dtr_on_open.level().is_none() && cfg.rts_on_open.level().is_none() {
+        return;
+    }
+    let Ok(bits) = sys::tiocmget(fd) else {
+        return; // no modem lines (e.g. a pseudo terminal)
+    };
+    if let Err(e) = sys::tiocmset(fd, lines_at_open(bits, cfg)) {
+        debug!(error = %e, "cannot set DTR/RTS at open");
+    }
+}
+
+/// Modem line bits with DTR/RTS set as configured for opening.
+fn lines_at_open(mut bits: libc::c_int, cfg: &SerialConfig) -> libc::c_int {
+    for (line, level) in [
+        (libc::TIOCM_DTR, cfg.dtr_on_open.level()),
+        (libc::TIOCM_RTS, cfg.rts_on_open.level()),
+    ] {
+        match level {
+            Some(true) => bits |= line,
+            Some(false) => bits &= !line,
+            None => {}
+        }
+    }
+    bits
+}
+
 /// Open and configure a serial device. Must run inside a tokio runtime.
 pub(crate) fn open(cfg: &SerialConfig) -> Result<OpenPort, PortError> {
     let path = cfg.port.clone();
@@ -123,6 +153,7 @@ pub(crate) fn open(cfg: &SerialConfig) -> Result<OpenPort, PortError> {
     let mut termios = original;
     configure_termios(&mut termios, cfg);
     sys::tcsets2(fd.as_fd(), &termios).map_err(|e| PortError::io(format!("cannot configure {path}"), e))?;
+    apply_lines_at_open(fd.as_fd(), cfg);
     let _ = tcflush(&fd, FlushArg::TCIOFLUSH);
 
     let rs485_soft = if cfg.flow_control == FlowControl::Rs485 {
@@ -407,6 +438,28 @@ pub fn read_termios(fd: impl AsFd) -> std::io::Result<TermiosSnapshot> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lines_at_open_change_both_at_once() {
+        use crate::config::LineAtOpen;
+        let both = libc::TIOCM_DTR | libc::TIOCM_RTS | libc::TIOCM_CTS;
+        let off = SerialConfig {
+            dtr_on_open: LineAtOpen::Off,
+            rts_on_open: LineAtOpen::Off,
+            ..SerialConfig::default()
+        };
+        assert_eq!(lines_at_open(both, &off), libc::TIOCM_CTS, "other bits untouched");
+        let mixed = SerialConfig {
+            dtr_on_open: LineAtOpen::On,
+            rts_on_open: LineAtOpen::Keep,
+            ..SerialConfig::default()
+        };
+        assert_eq!(lines_at_open(0, &mixed), libc::TIOCM_DTR);
+        assert_eq!(
+            lines_at_open(libc::TIOCM_RTS, &mixed),
+            libc::TIOCM_DTR | libc::TIOCM_RTS
+        );
+    }
 
     fn cooked() -> sys::Termios2 {
         // A typical cooked tty with leftover flags from an earlier 7O2 RTS/CTS setup.
