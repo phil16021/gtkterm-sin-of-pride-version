@@ -171,7 +171,15 @@ pub async fn run_headless(cli: Cli, r: Resolved) -> Result<()> {
             let mut log = manager.subscribe();
             tokio::spawn(async move {
                 let printer = tokio::spawn(async move {
-                    while let Ok(ev) = log.recv().await {
+                    loop {
+                        let ev = match log.recv().await {
+                            Ok(ev) => ev,
+                            Err(RecvError::Lagged(n)) => {
+                                eprintln!("[{n} script events lost]");
+                                continue;
+                            }
+                            Err(RecvError::Closed) => break,
+                        };
                         match ev {
                             ManagerEvent::ScriptLog { message, .. } => eprintln!("[script] {message}"),
                             ManagerEvent::ScriptFinished { .. } => break,
@@ -216,7 +224,8 @@ pub async fn run_headless(cli: Cli, r: Resolved) -> Result<()> {
                 Ok(SessionEvent::Info(msg)) => eprintln!("[{msg}]"),
                 Ok(SessionEvent::State(PortState::Error(e))) => break Err(anyhow::anyhow!("port error: {e}")),
                 Ok(SessionEvent::State(PortState::Closed)) => eprintln!("[port closed; SIGUSR1 reopens]"),
-                Ok(_) | Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Lagged(n)) => eprintln!("[{n} events lost: output was too slow]"),
+                Ok(_) => {}
                 Err(RecvError::Closed) => bail!("session ended"),
             }
         }

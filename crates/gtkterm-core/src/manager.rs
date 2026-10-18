@@ -135,7 +135,7 @@ impl SessionManager {
         Arc::new(Self {
             sessions: Mutex::default(),
             next_id: AtomicU32::new(1),
-            events: broadcast::channel(64).0,
+            events: broadcast::channel(1024).0,
             config: Mutex::new(config),
             config_path,
             macros: Mutex::default(),

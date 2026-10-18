@@ -280,3 +280,24 @@ async fn dropping_a_running_script_frees_the_slot() {
     let report = m.run_script(&s, &quick, &ScriptOptions::default()).await.unwrap();
     assert_eq!(report.log, ["hi"]);
 }
+
+/// `log` in a long loop keeps only the newest lines in the report.
+#[tokio::test]
+async fn the_report_log_is_bounded() {
+    let (port, _dev) = loopback::pair("loop");
+    let s = session_on(port).await;
+    let text = "set n 0\ntop:\nlog line ${n}\nset n ${n}x\nif ${n} != 0xxxxxxxxxxxxxx goto top\n";
+    let script = Script::parse("loop", text, None).unwrap();
+    let report = run(&s, &script, &ScriptOptions::default()).await.unwrap();
+    assert_eq!(report.log.len(), 14);
+    let many = format!("{}log end\n", "log x\n".repeat(10_500));
+    let report = run(
+        &s,
+        &Script::parse("many", &many, None).unwrap(),
+        &ScriptOptions::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(report.log.len(), 10_000);
+    assert_eq!(report.log.last().unwrap(), "end");
+}

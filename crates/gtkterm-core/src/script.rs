@@ -41,6 +41,9 @@ use tokio_util::sync::CancellationToken;
 use crate::session::{Session, SessionError};
 use crate::transfer::{TransferProtocol, TransferRequest, TransferState};
 
+/// `log` lines kept in a [`ScriptReport`] (the oldest are dropped beyond this).
+const MAX_LOG_LINES: usize = 10_000;
+
 /// Default `expect` timeout.
 pub const DEFAULT_TIMEOUT_MS: u64 = 5_000;
 /// Deepest `include` nesting.
@@ -856,6 +859,10 @@ impl Runner<'_> {
                 .map_err(|e| e.to_string())?,
             Stmt::Log(text) => {
                 let msg = expand(text, &self.vars);
+                // A `log` in a long loop must not grow the report without bound.
+                if self.report.log.len() >= MAX_LOG_LINES {
+                    self.report.log.remove(0);
+                }
                 self.report.log.push(msg);
             }
             Stmt::Exec(argv) => self.exec(argv).await?,
