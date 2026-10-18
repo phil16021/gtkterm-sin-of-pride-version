@@ -621,6 +621,13 @@ impl Session {
         f(&mut lock(&self.shared.sunshine))
     }
 
+    /// Set the RX/TX byte counters back to zero (the history and cursors are kept).
+    pub fn reset_counters(&self) {
+        let mut st = lock(&self.shared.status);
+        st.rx_bytes = 0;
+        st.tx_bytes = 0;
+    }
+
     /// Rename the session (the profile it runs changed).
     pub fn set_name(&self, name: &str) {
         name.clone_into(&mut lock(&self.shared.status).name);

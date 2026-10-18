@@ -25,7 +25,7 @@ the exceptions in the last section.
 | Log to file / Resume / Stop / Clear (partial: nothing was written) | Start, Pause/Resume, Stop, Clear; raw/text/CSV/JSON/XML | `session_log_records_rx_and_tx`, logfmt snapshots (L1) |
 | Prefer dark theme (wired, not saved) | follows the desktop (libadwaita); charts and editors adapt | — |
 | Port configuration dialog (wired) | Preferences → Connection, every field including RS485 timing, lock and break | GUI test |
-| Main window configuration (stub) | Preferences → Terminal: font, colours, scrollback, cursor, bell, rows/cols | GUI test |
+| Main window configuration (stub) | Preferences → Terminal: font, colours, scrollback, cursor, bell; the window size is remembered (`term_rows`/`term_columns` are kept in the config for compatibility but not applied) | GUI test |
 | Local echo, CR LF auto, timestamps (partial: buffer bug) | Local echo, Auto CR, Auto LF, timestamps in three formats | transform matrix (B3), `headless_terminal_on_pty` |
 | Macros dialog (wired; recording and shortcuts were stubs) | editor with recording, shortcuts and a macro bar | `macros` tests, GUI test |
 | Load / save / delete configuration (stub) | profile popover in the status bar | GUI test, `cli` config-ops tests (C1) |

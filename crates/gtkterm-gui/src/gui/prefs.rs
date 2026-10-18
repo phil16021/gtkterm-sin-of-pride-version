@@ -128,7 +128,17 @@ fn show_wait_char(c: Option<u8>) -> String {
     }
 }
 
-/// Show the dialog; `apply` gets the edited profile and MCP settings when it is closed.
+/// Application-wide settings edited in Preferences.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AppSettings {
+    /// Scripts run from the window may use `exec`.
+    pub script_allow_exec: bool,
+    /// Connect when the application starts.
+    pub connect_at_start: bool,
+}
+
+/// Show the dialog; `apply` gets the edited profile, MCP and application settings when it
+/// is closed.
 #[allow(clippy::too_many_arguments)]
 pub fn show(
     parent: &impl IsA<gtk::Widget>,
@@ -136,11 +146,12 @@ pub fn show(
     profile: &Profile,
     mcp: &McpSettings,
     mcp_url: Option<String>,
-    script_allow_exec: bool,
+    app: AppSettings,
     presets: Vec<(String, SerialPreset)>,
     save_preset: impl Fn(String, SerialPreset) + 'static,
-    apply: impl Fn(Profile, McpSettings, bool) + 'static,
+    apply: impl Fn(Profile, McpSettings, AppSettings) + 'static,
 ) {
+    let script_allow_exec = app.script_allow_exec;
     let dialog = adw::PreferencesDialog::builder()
         .title(gettext_f(
             "Preferences — [{profile}]",
@@ -444,9 +455,15 @@ pub fn show(
         }),
     );
     log_on_connect.set_subtitle(&gettext("Named after date, port and profile, in the log folder"));
+    let at_start = switch(
+        &gettext("Connect when GTKTerm Sunshine starts"),
+        &gettext("Off: open the port yourself (F5)"),
+        app.connect_at_start,
+    );
     let on_connect = group(
         &gettext("When connecting"),
         &[
+            at_start.upcast_ref(),
             reconnect.upcast_ref(),
             clear_on_connect.upcast_ref(),
             log_on_connect.upcast_ref(),
@@ -800,7 +817,14 @@ pub fn show(
             allow_exec: mcp_exec.is_active(),
             confirm_writes: mcp_confirm.is_active(),
         };
-        apply(p, m, local_exec.is_active());
+        apply(
+            p,
+            m,
+            AppSettings {
+                script_allow_exec: local_exec.is_active(),
+                connect_at_start: at_start.is_active(),
+            },
+        );
     });
     dialog.present(Some(parent));
 }

@@ -76,6 +76,10 @@ pub struct UiState {
     pub open_tabs: Vec<String>,
     /// Show the send bar.
     pub send_bar: bool,
+    /// Connect when the application starts (and when restoring tabs).
+    pub connect_at_start: bool,
+    /// Paste large or multi-line text without asking.
+    pub paste_without_asking: bool,
     /// Lines sent from the send bar, newest first.
     pub send_history: Vec<String>,
     /// Line ending of the send bar (0 none, 1 CR, 2 LF, 3 CR LF).
@@ -105,6 +109,8 @@ impl Default for UiState {
             script_path: None,
             open_tabs: Vec::new(),
             send_bar: false,
+            connect_at_start: true,
+            paste_without_asking: false,
             send_history: Vec::new(),
             send_ending: 1,
             send_every_ms: 1000,

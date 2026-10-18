@@ -518,11 +518,6 @@ impl TerminalView {
         self.term.copy_clipboard_format(vte::Format::Text);
     }
 
-    /// Paste into the terminal (sent to the device).
-    pub fn paste(&self) {
-        self.term.paste_clipboard();
-    }
-
     /// Select everything.
     pub fn select_all(&self) {
         self.term.select_all();

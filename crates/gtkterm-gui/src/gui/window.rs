@@ -356,7 +356,7 @@ impl Win {
         if mcp_settings.enabled {
             win.start_mcp(start.mcp_addr);
         }
-        if start.open_at_start {
+        if start.open_at_start && win.state.borrow().connect_at_start {
             win.open_port();
         }
         win
@@ -813,6 +813,56 @@ impl Win {
             w.maybe_reconnect();
             glib::ControlFlow::Continue
         });
+    }
+
+    /// Paste, asking first when a lot (over 4 KiB or several lines) would go to the device.
+    fn paste_checked(self: &Rc<Self>) {
+        let w = Rc::downgrade(self);
+        self.window
+            .clipboard()
+            .read_text_async(gio::Cancellable::NONE, move |r| {
+                let (Some(w), Ok(Some(text))) = (w.upgrade(), r) else {
+                    return;
+                };
+                let lines = text.lines().count();
+                if !w.is_open() || w.state.borrow().paste_without_asking || (text.len() <= 4096 && lines <= 1)
+                {
+                    w.term.term.paste_text(&text);
+                    return;
+                }
+                w.confirm_paste(text.to_string(), lines);
+            });
+    }
+
+    fn confirm_paste(self: &Rc<Self>, text: String, lines: usize) {
+        let dialog = adw::AlertDialog::builder()
+            .heading(gettext("Paste to the device?"))
+            .body(ngettext_f(
+                "{n} line ({bytes} bytes) will be sent to the device.",
+                "{n} lines ({bytes} bytes) will be sent to the device.",
+                u32::try_from(lines).unwrap_or(u32::MAX),
+                &[("bytes", &text.len())],
+            ))
+            .close_response("cancel")
+            .default_response("paste")
+            .build();
+        dialog.add_responses(&[
+            ("cancel", gettext("Cancel").as_str()),
+            ("always", gettext("Always Paste").as_str()),
+            ("paste", gettext("Paste").as_str()),
+        ]);
+        dialog.set_response_appearance("paste", adw::ResponseAppearance::Suggested);
+        let w = Rc::downgrade(self);
+        dialog.connect_response(None, move |_, resp| {
+            let Some(w) = w.upgrade() else { return };
+            if resp == "always" {
+                w.state.borrow_mut().paste_without_asking = true;
+            }
+            if resp == "paste" || resp == "always" {
+                w.term.term.paste_text(&text);
+            }
+        });
+        dialog.present(Some(&self.window));
     }
 
     /// Log to an auto-named file in the default log folder (profile option, quick capture).
@@ -1338,7 +1388,8 @@ impl Win {
             self.window.add_action(&action);
         };
         add("copy", Box::new(|w| w.term.copy()));
-        add("paste", Box::new(|w| w.term.paste()));
+        add("paste", Box::new(Self::paste_checked));
+        add("reset-counters", Box::new(|w| w.session.reset_counters()));
         add("select-all", Box::new(|w| w.term.select_all()));
         add("search", Box::new(|w| w.term.start_search()));
         add("clear-screen", Box::new(|w| w.term.clear(false)));
@@ -1911,6 +1962,11 @@ impl Win {
             })
             .modal(true)
             .build();
+        if matches!(choice, Choice::Raw)
+            && let Some(f) = self.term.config().raw_filename
+        {
+            dialog.set_initial_file(Some(&gio::File::for_path(f)));
+        }
         let w = Rc::downgrade(self);
         let done = move |paths: Vec<PathBuf>| {
             let Some(w) = w.upgrade() else { return };
@@ -2249,12 +2305,19 @@ impl Win {
             &profile,
             &mcp,
             self.mcp_url.borrow().clone(),
-            self.state.borrow().script_allow_exec,
+            prefs::AppSettings {
+                script_allow_exec: self.state.borrow().script_allow_exec,
+                connect_at_start: self.state.borrow().connect_at_start,
+            },
             presets,
             save_preset,
-            move |p, m, exec| {
+            move |p, m, app| {
                 if let Some(w) = w.upgrade() {
-                    w.state.borrow_mut().script_allow_exec = exec;
+                    {
+                        let mut st = w.state.borrow_mut();
+                        st.script_allow_exec = app.script_allow_exec;
+                        st.connect_at_start = app.connect_at_start;
+                    }
                     w.apply_settings(p, m);
                 }
             },
@@ -2730,8 +2793,9 @@ impl Win {
     pub fn restore_tabs(self: &Rc<Self>) {
         let names = self.state.borrow().open_tabs.clone();
         let known: Vec<String> = self.manager.with_config(|c| c.profiles.keys().cloned().collect());
+        let connect = self.state.borrow().connect_at_start;
         for name in names.iter().skip(1).filter(|n| known.contains(n)) {
-            self.open_tab(name, true);
+            self.open_tab(name, connect);
         }
         self.tabs.view.set_selected_page(&self.page);
     }
@@ -2873,6 +2937,7 @@ fn main_menu() -> gio::Menu {
         Some(&gettext("Save Terminal Text…")),
         Some("win.save-terminal-text"),
     );
+    data.append(Some(&gettext("Reset Counters")), Some("win.reset-counters"));
     let log = gio::Menu::new();
     log.append(Some(&gettext("Start Logging…")), Some("win.log-start"));
     log.append(Some(&gettext("Pause / Resume")), Some("win.log-pause"));
@@ -3866,6 +3931,25 @@ mod tests {
         win.session.set_terminal(t);
         win.term.term.feed_child(b"x\r");
         assert_eq!(recv(&mut dev).as_deref(), Some(&b"x\r\n"[..]));
+
+        // A multi-line paste asks first; confirmed, it goes to the device (Enter mapping applies).
+        win.window.clipboard().set_text("line1\nline2\n");
+        gio::prelude::ActionGroupExt::activate_action(&win.window, "paste", None);
+        assert!(pump_until(Duration::from_secs(2), || win.window.visible_dialog().is_some()), "asked");
+        let dialog = win.window.visible_dialog().and_downcast::<adw::AlertDialog>().unwrap();
+        dialog.emit_by_name::<()>("response", &[&"paste"]);
+        let mut pasted = Vec::new();
+        while pasted.len() < 14 {
+            match recv(&mut dev) {
+                Some(b) => pasted.extend_from_slice(&b),
+                None => break,
+            }
+        }
+        assert_eq!(pasted, b"line1\r\nline2\r\n");
+        // Counters can be reset.
+        assert!(win.session.status().tx_bytes > 0);
+        gio::prelude::ActionGroupExt::activate_action(&win.window, "reset-counters", None);
+        assert_eq!((win.session.status().rx_bytes, win.session.status().tx_bytes), (0, 0));
 
         // Quick capture: the header toggle starts an auto-named log and stops it again.
         gio::prelude::ActionGroupExt::activate_action(&win.window, "quick-log", None);
