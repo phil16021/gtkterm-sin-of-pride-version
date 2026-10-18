@@ -132,7 +132,7 @@ transition counters. Export as CSV (`Timestamp,DTR,RTS,CTS,DSR,DCD,RI,Changed Si
 ![Signal monitor with modem line changes and RI pulses](docs/screenshots/signal-monitor.png)
 
 Preferences → Connection has the break length, RS485 RTS polarity and "receive while sending";
-the menu has *Flush Buffers* and *Detect Baud Rate* (experimental: tries common rates and picks
+the menu has *Flush Buffers* (discards queued sends and the driver's buffers) and *Detect Baud Rate* (experimental: tries common rates and picks
 the one where the device's output reads as text without framing errors).
 
 ## Use

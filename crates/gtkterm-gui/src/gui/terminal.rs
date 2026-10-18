@@ -85,6 +85,25 @@ pub struct TerminalView {
     formatter: RefCell<ViewFormatter>,
     transform: RefCell<Transform>,
     pending: Rc<Pending>,
+    /// When the last "input not sent" notice was shown (one per burst of typing).
+    refused_at: std::cell::Cell<Option<std::time::Instant>>,
+}
+
+/// Why typed input cannot be sent right now, if it cannot.
+fn input_refused(session: &Session) -> Option<String> {
+    use gtkterm_core::session::PortState;
+    use gtkterm_core::transfer::TransferState;
+    let st = session.status();
+    if !matches!(st.state, PortState::Open) {
+        return Some(gettext("Not connected: typed input is not sent (F5 connects)"));
+    }
+    if session
+        .transfer_status()
+        .is_some_and(|t| t.state == TransferState::Running)
+    {
+        return Some(gettext("A file transfer is running: typed input is not sent"));
+    }
+    None
 }
 
 fn rgba(c: gtkterm_core::config::Rgba) -> gtk::gdk::RGBA {
@@ -175,6 +194,7 @@ impl TerminalView {
             formatter: RefCell::new(ViewFormatter::default()),
             transform: RefCell::new(transform_for(config)),
             pending: Rc::default(),
+            refused_at: std::cell::Cell::new(None),
         });
         view.apply_config(config);
 
@@ -197,10 +217,16 @@ impl TerminalView {
         let s = session.clone();
         let v = Rc::downgrade(&view);
         view.term.connect_commit(move |_, text, _| {
-            let _ = s.send_nowait(text.as_bytes().to_vec());
-            if let Some(v) = v.upgrade()
-                && let Some(hook) = v.on_input.borrow().as_ref()
-            {
+            let Some(v) = v.upgrade() else { return };
+            match input_refused(&s) {
+                Some(reason) => v.refused(&reason),
+                None => {
+                    if let Err(e) = s.send_nowait(text.as_bytes().to_vec()) {
+                        v.refused(&e.to_string());
+                    }
+                }
+            }
+            if let Some(hook) = v.on_input.borrow().as_ref() {
                 hook(text.as_bytes());
             }
         });
@@ -356,6 +382,26 @@ impl TerminalView {
             self.formatter.borrow_mut().format(&chunk.data)
         };
         self.output(&out);
+    }
+
+    /// A refused-input notice was shown.
+    #[cfg(test)]
+    pub fn input_was_refused(&self) -> bool {
+        self.refused_at.get().is_some()
+    }
+
+    /// Typed input was not sent: say so, at most every 3 seconds.
+    fn refused(&self, reason: &str) {
+        let now = std::time::Instant::now();
+        if self
+            .refused_at
+            .get()
+            .is_some_and(|t| now.duration_since(t) < std::time::Duration::from_secs(3))
+        {
+            return;
+        }
+        self.refused_at.set(Some(now));
+        self.notice(reason);
     }
 
     /// Write an informational line in a distinct style.

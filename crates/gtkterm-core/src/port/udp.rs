@@ -119,4 +119,8 @@ impl PortWriter for UdpWriter {
         }
         Ok(())
     }
+
+    fn is_stream(&self) -> bool {
+        false
+    }
 }

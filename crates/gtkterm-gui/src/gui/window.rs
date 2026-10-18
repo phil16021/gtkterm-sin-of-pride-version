@@ -2760,6 +2760,10 @@ mod tests {
             pump_until(Duration::from_secs(5), || !win.is_open()),
             "SIGUSR2 closes"
         );
+        // Typing while disconnected says that the input is not sent.
+        assert!(!win.term.input_was_refused());
+        win.term.term.feed_child(b"lost");
+        assert!(win.term.input_was_refused());
 
         win.window.close();
         pump_until(Duration::from_millis(200), || false);

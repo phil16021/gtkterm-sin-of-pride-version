@@ -622,3 +622,45 @@ async fn close_overtakes_a_slow_connect_and_breaks_run_aside() {
         started.elapsed()
     );
 }
+
+/// Flush Buffers discards sends that pacing or flow control holds back, and a queue that
+/// grows past its limit refuses further sends.
+#[tokio::test]
+async fn flush_discards_queued_sends_and_the_queue_is_bounded() {
+    let s = session();
+    let (port, mut dev) = loopback::pair("loop");
+    s.attach(port).await.unwrap();
+    // Every line waits up to 2 s for a '>' prompt that never comes.
+    s.set_terminal(TerminalConfig {
+        wait_char: Some(b'>'),
+        ..TerminalConfig::default()
+    });
+    let sender = {
+        let s = s.clone();
+        tokio::spawn(async move { s.send(&b"one\ntwo\nthree\nfour\n"[..]).await })
+    };
+    assert_eq!(&dev.recv().await.unwrap()[..], b"one\n");
+    let started = Instant::now();
+    s.flush().await.unwrap();
+    let r = sender.await.unwrap();
+    assert!(matches!(r, Err(SessionError::Cancelled)), "{r:?}");
+    assert!(started.elapsed() < Duration::from_secs(3));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(300), dev.recv())
+            .await
+            .is_err(),
+        "nothing after the flush"
+    );
+
+    // Hold the writer with a pending line, then overfill the queue.
+    let blocker = {
+        let s = s.clone();
+        tokio::spawn(async move { s.send(&b"hold\nhold\n"[..]).await })
+    };
+    let _ = dev.recv().await;
+    let big = vec![b'x'; 17 << 20];
+    assert!(matches!(s.send(big).await, Err(SessionError::Full)));
+    s.flush().await.unwrap();
+    let _ = blocker.await.unwrap();
+    s.send(&b"after\n"[..]).await.unwrap();
+}

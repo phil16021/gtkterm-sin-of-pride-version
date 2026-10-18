@@ -8,7 +8,7 @@
 //! Transmission runs in a separate writer task so a slow device (CTS low, line pacing) never
 //! blocks reception. Bytes are recorded as TX chunks only after they were written.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -41,6 +41,10 @@ pub type SessionId = u32;
 const EXPECT_OVERLAP: usize = 64 * 1024;
 /// Longest break; longer requests (a typo in `break_ms` or a script) are shortened.
 const MAX_BREAK: Duration = Duration::from_secs(5);
+/// Unpaced sends are written in pieces of this size (a flush takes effect between pieces).
+const WRITE_PIECE: usize = 4096;
+/// Most bytes waiting to be sent (behind flow control or pacing) before sends are refused.
+const MAX_TX_QUEUE: usize = 16 * 1024 * 1024;
 /// How long closing the log or the port waits for queued sends to be reported.
 const SETTLE_TIMEOUT: Duration = Duration::from_millis(500);
 /// How long the writer waits for the configured "wait char" before sending the next line.
@@ -133,6 +137,9 @@ pub enum SessionError {
     /// No port is open.
     #[error("port is not open")]
     NotOpen,
+    /// Too much data is waiting to be sent (flow control holds it back).
+    #[error("the send queue is full; discard it with Flush Buffers")]
+    Full,
     /// The request was overtaken (e.g. Close while still connecting).
     #[error("cancelled")]
     Cancelled,
@@ -223,6 +230,10 @@ struct Shared {
     transfer: Mutex<Option<TransferStatus>>,
     signals: Mutex<SignalHistory>,
     tx_queue: AtomicUsize,
+    /// Bytes in queued (not yet written) send jobs.
+    tx_queued_bytes: AtomicUsize,
+    /// Bumped by `flush`: queued jobs from an older epoch are discarded.
+    tx_epoch: AtomicU64,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -286,6 +297,8 @@ impl Session {
             transfer: Mutex::new(None),
             signals: Mutex::default(),
             tx_queue: AtomicUsize::new(0),
+            tx_queued_bytes: AtomicUsize::new(0),
+            tx_epoch: AtomicU64::new(0),
         });
         let (cmd, cmd_rx) = mpsc::channel(64);
         let (events, _) = broadcast::channel(EVENT_CAPACITY);
@@ -380,7 +393,10 @@ impl Session {
     pub fn send_nowait(&self, data: impl Into<Bytes>) -> Result<(), SessionError> {
         self.cmd
             .try_send(Command::Send(data.into(), None))
-            .map_err(|_| SessionError::Shutdown)
+            .map_err(|e| match e {
+                mpsc::error::TrySendError::Full(_) => SessionError::Full,
+                mpsc::error::TrySendError::Closed(_) => SessionError::Shutdown,
+            })
     }
 
     /// Set DTR.
@@ -411,8 +427,13 @@ impl Session {
     }
 
     /// Discard data waiting in the driver's input and output buffers (serial ports).
+    /// Discard what is queued for sending and, on serial ports, the driver's buffers.
     pub async fn flush(&self) -> Result<(), SessionError> {
-        self.request(|tx| Command::Control(ControlOp::Flush, tx)).await?
+        self.shared.tx_epoch.fetch_add(1, Ordering::Relaxed);
+        match self.request(|tx| Command::Control(ControlOp::Flush, tx)).await? {
+            Err(SessionError::Port(PortError::Unsupported(_))) => Ok(()),
+            other => other,
+        }
     }
 
     /// Control the session log; returns the log status afterwards (`Stop` returns the final one).
@@ -660,8 +681,10 @@ struct ActivePort {
 struct TxJob {
     data: Bytes,
     done: Option<oneshot::Sender<Result<(), SessionError>>>,
-    /// File transfer data: no pacing, not recorded as a chunk.
+    /// File transfer data: no pacing, not recorded as a chunk, not discarded by `flush`.
     raw: bool,
+    /// `tx_epoch` when queued.
+    epoch: u64,
 }
 
 enum WriterEvent {
@@ -804,14 +827,28 @@ impl Actor {
                 }
             }
             Command::Send(data, done) => match &self.port {
+                Some(_)
+                    if self.shared.tx_queued_bytes.load(Ordering::Relaxed) + data.len() > MAX_TX_QUEUE =>
+                {
+                    if let Some(done) = done {
+                        let _ = done.send(Err(SessionError::Full));
+                    }
+                    self.emit(SessionEvent::Info(SessionError::Full.to_string()));
+                }
                 Some(p) => {
                     self.shared.tx_queue.fetch_add(1, Ordering::Relaxed);
+                    self.shared
+                        .tx_queued_bytes
+                        .fetch_add(data.len(), Ordering::Relaxed);
+                    let len = data.len();
                     if let Err(e) = p.jobs.send(TxJob {
                         data,
                         done,
                         raw: false,
+                        epoch: self.shared.tx_epoch.load(Ordering::Relaxed),
                     }) {
                         self.shared.tx_queue.fetch_sub(1, Ordering::Relaxed);
+                        self.shared.tx_queued_bytes.fetch_sub(len, Ordering::Relaxed);
                         if let Some(done) = e.0.done {
                             let _ = done.send(Err(SessionError::NotOpen));
                         }
@@ -1006,6 +1043,7 @@ impl Actor {
         let _ = writer_task.await;
         closer.close().await;
         self.shared.tx_queue.store(0, Ordering::Relaxed);
+        self.shared.tx_queued_bytes.store(0, Ordering::Relaxed);
         let updates = lock(&self.shared.sunshine).flush(Timestamp::now());
         for u in updates {
             self.emit(SessionEvent::Sunshine(u));
@@ -1160,6 +1198,7 @@ impl Actor {
                     data: Bytes::from(step.write),
                     done: None,
                     raw: true,
+                    epoch: 0,
                 };
                 if p.jobs.send(job).is_ok() {
                     self.transfer_writes += 1;
@@ -1386,13 +1425,21 @@ async fn writer_loop(
             continue;
         }
         let p = *pacing.borrow();
-        let pieces = if p.active() {
+        // Unpaced data goes out in pieces too, so a flush can stop a large send that flow
+        // control is holding back.
+        let pieces: Vec<&[u8]> = if p.active() {
             split_lines(&job.data)
+        } else if writer.is_stream() {
+            job.data.chunks(WRITE_PIECE).collect()
         } else {
             vec![&job.data[..]]
         };
         let mut result = Ok(());
         for piece in pieces {
+            if job.epoch < shared.tx_epoch.load(Ordering::Relaxed) {
+                result = Err(SessionError::Cancelled);
+                break;
+            }
             if p.wait_char.is_some() {
                 events = events.resubscribe(); // only bytes that arrive after this line count
             }
@@ -1415,6 +1462,9 @@ async fn writer_loop(
             }
         }
         shared.tx_queue.fetch_sub(1, Ordering::Relaxed);
+        shared
+            .tx_queued_bytes
+            .fetch_sub(job.data.len(), Ordering::Relaxed);
         if let Some(done) = job.done {
             let _ = done.send(result);
         }

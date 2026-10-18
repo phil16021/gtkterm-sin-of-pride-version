@@ -760,12 +760,12 @@ msgid "Failed at {at}: {message}"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:11
-#: crates/gtkterm-gui/src/gui/terminal.rs:242
+#: crates/gtkterm-gui/src/gui/terminal.rs:268
 msgid "Copy"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:17
-#: crates/gtkterm-gui/src/gui/terminal.rs:243
+#: crates/gtkterm-gui/src/gui/terminal.rs:269
 msgid "Paste"
 msgstr ""
 
@@ -994,44 +994,52 @@ msgstr ""
 msgid "{bytes} bytes not shown: the display could not keep up"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:125
+#: crates/gtkterm-gui/src/gui/terminal.rs:98
+msgid "Not connected: typed input is not sent (F5 connects)"
+msgstr ""
+
+#: crates/gtkterm-gui/src/gui/terminal.rs:104
+msgid "A file transfer is running: typed input is not sent"
+msgstr ""
+
+#: crates/gtkterm-gui/src/gui/terminal.rs:144
 msgid "Search text, regex or hex bytes"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:128
+#: crates/gtkterm-gui/src/gui/terminal.rs:147
 msgid "Case"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:129
+#: crates/gtkterm-gui/src/gui/terminal.rs:148
 msgid "Regex"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:130
+#: crates/gtkterm-gui/src/gui/terminal.rs:149
 msgid "Hex"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:132
+#: crates/gtkterm-gui/src/gui/terminal.rs:151
 msgid "Previous match"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:134
+#: crates/gtkterm-gui/src/gui/terminal.rs:153
 msgid "Next match (Enter)"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:142
+#: crates/gtkterm-gui/src/gui/terminal.rs:161
 msgid "Search options"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:244
+#: crates/gtkterm-gui/src/gui/terminal.rs:270
 msgid "Select All"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:246
+#: crates/gtkterm-gui/src/gui/terminal.rs:272
 #: crates/gtkterm-gui/src/gui/window.rs:2126
 msgid "Clear Screen"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:247
+#: crates/gtkterm-gui/src/gui/terminal.rs:273
 msgid "Search…"
 msgstr ""
 

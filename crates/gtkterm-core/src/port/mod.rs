@@ -121,6 +121,12 @@ pub enum PortRx {
 pub trait PortWriter: Send + fmt::Debug {
     /// Write all bytes (partial writes are retried until done).
     async fn write_all(&mut self, data: &[u8]) -> Result<(), PortError>;
+
+    /// True for byte streams (serial, TCP): large sends may be written in pieces. Datagram
+    /// ports keep one send in one write, since piece boundaries would become datagrams.
+    fn is_stream(&self) -> bool {
+        true
+    }
 }
 
 /// Modem control and status lines.
