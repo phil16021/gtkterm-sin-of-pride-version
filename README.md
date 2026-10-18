@@ -193,7 +193,9 @@ call, and all calls are recorded in `~/.local/share/gtkterm-sunshine/mcp-audit.j
 ## Development
 
 ```bash
-cargo xtask check                          # fmt, clippy, all tests (GUI tests run in Xvfb)
+cargo xtask check                          # what CI runs: fmt, clippy, all tests (GUI in Xvfb), deny/audit/machete, MCP Inspector
+cargo xtask cov                            # line coverage (minimums: protocols/charts 85 %, core/MCP 70 %)
+cargo xtask bench-pipeline                 # receive throughput; criterion benches: cargo bench -p gtkterm-protocols
 cargo nextest run                          # core, protocols, MCP
 cargo nextest run -p gtkterm-gui --no-default-features   # binary end-to-end tests
 cargo run -p gtkterm-testkit --bin sunshine-gen -- /tmp/ttyB --rate 50   # test data
@@ -206,6 +208,8 @@ Translations: mark UI strings with `gettext("…")`, `gettext_f("… {name} …"
 or `n_!("…")` (constant tables). To add a language, list it in `po/LINGUAS`, run
 `cargo xtask po` and translate `po/<lang>.po`.
 
+Regression guards for every defect of the C version:
+[crates/gtkterm-core/tests/regressions/README.md](crates/gtkterm-core/tests/regressions/README.md).
 Debugging recipes: [docs/debugging.md](docs/debugging.md). Hardware checklist:
 [docs/testing/hardware.md](docs/testing/hardware.md).
 

@@ -20,6 +20,16 @@
 > `rx?since=` and `log` resources, a per-client write rate limit, the Agent Activity pane,
 > `--mcp-dump-schema` with a generated tool reference. Not done on purpose: the logging capability
 > (deprecated in MCP 2026-07-28, SEP-2577) and pagination (the lists are short).
+> R14 engineering and QA is **done**: the remaining §8 guards (B4, P1, P2, P4, P5, S3, C2, I1)
+> with a table of all guards (`crates/gtkterm-core/tests/regressions/README.md`); snapshots of
+> the view formatter, log formats and tool schemas; chart reference images; `cargo xtask check`
+> as CI (nextest, doctests, GUI with fatal criticals, cargo deny/audit/machete, MCP Inspector);
+> `cargo xtask cov` (protocols 91 %, charts 94 %, core 87 %, MCP 84 %); criterion benches and
+> `xtask bench-pipeline` (28–40 MiB/s, 75 MiB RSS); dump views 4–5× faster; tracing spans and
+> `--trace-file`; a `console` feature; fuzz targets for presets and MCP arguments; TCP data
+> tagged by client; configurable UDP datagram size. The Inspector found 18 tools that clients
+> dropped (output schema without `type: object`) and nullable parameters; both fixed. Not done:
+> UUCP lock files and TIOCMIWAIT (reasons in docs/debugging.md).
 
 ## Context
 
@@ -115,7 +125,7 @@ trait Port: Send {
 }
 ```
 
-  `SerialControl` covers set_dtr/rts, break(ms), modem_lines(), wait_modem_change() (TIOCMIWAIT with a poll fallback), icounts() (TIOCGICOUNT), rs485 config and flush.
+  `SerialControl` covers set_dtr/rts, break(ms), modem_lines(), counters() (TIOCGICOUNT), rs485 config and flush; modem lines are polled (TIOCMIWAIT cannot be cancelled cleanly, see docs/debugging.md).
 - **Serial backend** (`core/src/port/serial/`): nix + `tokio::io::unix::AsyncFd`, Linux only, so we keep full control.
   - `open(O_RDWR|O_NOCTTY|O_NONBLOCK|O_CLOEXEC)`
   - `flock(LOCK_EX|LOCK_NB)` plus an optional UUCP lock in `/run/lock`
@@ -382,7 +392,7 @@ Each milestone lands on the `rust-rewrite` branch with CI green. **Rule:** tests
 ### R8 — Automation, port control, signal monitor (M)
 - **Script runner:** an iterative interpreter with a cancellation token. `exec` uses argv-based `tokio::process` and is never fed device data unquoted; it stays opt-in. Script editor with the shipped `.lang` highlighting.
 - **Port control:** advanced serial settings in Preferences (mark/space, VMIN/VTIME, flush, break duration, RS485 flags) and an experimental auto-baud (tries the rate list and scores printable ratio plus TIOCGICOUNT framing errors).
-- **Signal monitor pane:** a 300 s timeline of DTR/RTS/CTS/DSR/DCD/RI from TIOCMIWAIT events, with CSV export.
+- **Signal monitor pane:** a 300 s timeline of DTR/RTS/CTS/DSR/DCD/RI polled every 50 ms with the kernel line counters (TIOCGICOUNT) for short pulses, with CSV export.
 - MCP: `script_run`, `script_stop`, `signal_history`.
 
 ### R9 — Release `2.0.0` (S–M)
