@@ -656,7 +656,10 @@ pub fn import_keyfile_macros(text: &str) -> MacroStore {
             })
             .collect()
     } else {
-        values.first().map(|v| split_keyfile_macros(v)).unwrap_or_default()
+        values
+            .first()
+            .map(|v| split_keyfile_macros(v))
+            .unwrap_or_default()
     };
     let mut store = MacroStore::default();
     for (shortcut, action) in pairs {
