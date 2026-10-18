@@ -382,6 +382,12 @@ impl FramesView {
         self.count.set_text(&text);
     }
 
+    /// Select the `index`th visible frame (shows its details).
+    #[cfg(test)]
+    pub fn select(&self, index: u32) {
+        self.selection.set_selected(index);
+    }
+
     /// Number of frames shown (after filtering).
     #[cfg(test)]
     pub fn len(&self) -> u32 {

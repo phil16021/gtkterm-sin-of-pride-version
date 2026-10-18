@@ -22,6 +22,19 @@ const TEMPLATE: &str = "# GTKTerm script — see the help button for all command
                         expect OK\n\
                         log Device answered\n";
 
+/// `path` with the home directory shown as `~`.
+fn home_relative(path: &std::path::Path) -> String {
+    let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
+    match std::env::var_os("HOME").map(std::path::PathBuf::from) {
+        Some(home) if !home.as_os_str().is_empty() => match path.strip_prefix(&home) {
+            Ok(rest) if rest.as_os_str().is_empty() => "~".to_owned(),
+            Ok(rest) => format!("~/{}", rest.display()),
+            Err(_) => path.display().to_string(),
+        },
+        _ => path.display().to_string(),
+    }
+}
+
 /// The script editor window.
 pub struct ScriptWindow {
     /// The window.
@@ -301,7 +314,7 @@ impl ScriptWindow {
             .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
         self.title.set_title(&name);
         self.title
-            .set_subtitle(&path.parent().map(|p| p.display().to_string()).unwrap_or_default());
+            .set_subtitle(&path.parent().map(home_relative).unwrap_or_default());
         (self.remember)(path.clone());
         *self.path.borrow_mut() = Some(path);
     }
@@ -493,5 +506,20 @@ impl ScriptWindow {
     #[cfg(test)]
     pub fn status_text(&self) -> String {
         self.status.text().into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paths_below_home_use_a_tilde() {
+        let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
+            return;
+        };
+        assert_eq!(home_relative(&home.join("no-such-dir/x")), "~/no-such-dir/x");
+        assert_eq!(home_relative(&home), "~");
+        assert_eq!(home_relative(std::path::Path::new("/usr/share")), "/usr/share");
     }
 }

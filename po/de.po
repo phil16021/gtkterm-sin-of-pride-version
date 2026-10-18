@@ -31,7 +31,7 @@ msgid "Samples kept per series"
 msgstr "Gespeicherte Werte je Reihe"
 
 #: crates/gtkterm-gui/src/gui/charts.rs:66
-#: crates/gtkterm-gui/src/gui/signals.rs:59
+#: crates/gtkterm-gui/src/gui/signals.rs:61
 msgid "Export CSV"
 msgstr "Als CSV exportieren"
 
@@ -52,12 +52,12 @@ msgid "Export"
 msgstr "Exportieren"
 
 #: crates/gtkterm-gui/src/gui/charts.rs:373
-#: crates/gtkterm-gui/src/gui/scripts.rs:349
+#: crates/gtkterm-gui/src/gui/scripts.rs:362
 msgid "Saved {path}"
 msgstr "{path} gespeichert"
 
 #: crates/gtkterm-gui/src/gui/charts.rs:377
-#: crates/gtkterm-gui/src/gui/scripts.rs:351
+#: crates/gtkterm-gui/src/gui/scripts.rs:364
 msgid "Cannot save {path}: {error}"
 msgstr "{path} kann nicht gespeichert werden: {error}"
 
@@ -284,7 +284,7 @@ msgstr ""
 "Escapes: \\r \\n \\t \\0 \\e \\\\ \\xHH — expect erwartet einen regulären Ausdruck"
 
 #: crates/gtkterm-gui/src/gui/macros.rs:224
-#: crates/gtkterm-gui/src/gui/scripts.rs:141
+#: crates/gtkterm-gui/src/gui/scripts.rs:154
 msgid "Run"
 msgstr "Ausführen"
 
@@ -293,7 +293,7 @@ msgid "Save and run on the current connection"
 msgstr "Speichern und auf der aktuellen Verbindung ausführen"
 
 #: crates/gtkterm-gui/src/gui/macros.rs:227
-#: crates/gtkterm-gui/src/gui/scripts.rs:146
+#: crates/gtkterm-gui/src/gui/scripts.rs:159
 msgid "Stop"
 msgstr "Stopp"
 
@@ -696,64 +696,64 @@ msgstr "Skripte"
 msgid "Scripts: menu → Scripts… (Ctrl+Shift+J). The language reference is in the editor's help."
 msgstr "Skripte: Menü → Skripte … (Strg+Umschalt+J). Die Sprachreferenz steht in der Hilfe des Editors."
 
-#: crates/gtkterm-gui/src/gui/scripts.rs:122
+#: crates/gtkterm-gui/src/gui/scripts.rs:135
 msgid "Ready"
 msgstr "Bereit"
 
-#: crates/gtkterm-gui/src/gui/scripts.rs:126
-#: crates/gtkterm-gui/src/gui/scripts.rs:182
+#: crates/gtkterm-gui/src/gui/scripts.rs:139
+#: crates/gtkterm-gui/src/gui/scripts.rs:195
 msgid "Script"
 msgstr "Skript"
 
-#: crates/gtkterm-gui/src/gui/scripts.rs:126
+#: crates/gtkterm-gui/src/gui/scripts.rs:139
 msgid "unsaved"
 msgstr "ungespeichert"
 
-#: crates/gtkterm-gui/src/gui/scripts.rs:130
+#: crates/gtkterm-gui/src/gui/scripts.rs:143
 msgid "Open script…"
 msgstr "Skript öffnen …"
 
-#: crates/gtkterm-gui/src/gui/scripts.rs:134
+#: crates/gtkterm-gui/src/gui/scripts.rs:147
 msgid "Save (Ctrl+S)"
 msgstr "Speichern (Strg+S)"
 
-#: crates/gtkterm-gui/src/gui/scripts.rs:138
+#: crates/gtkterm-gui/src/gui/scripts.rs:151
 msgid "Save as…"
 msgstr "Speichern unter …"
 
-#: crates/gtkterm-gui/src/gui/scripts.rs:142
+#: crates/gtkterm-gui/src/gui/scripts.rs:155
 msgid "Run on this window's port (Ctrl+Return)"
 msgstr "Auf der Verbindung dieses Fensters ausführen (Strg+Eingabe)"
 
-#: crates/gtkterm-gui/src/gui/scripts.rs:165
+#: crates/gtkterm-gui/src/gui/scripts.rs:178
 msgid "Language reference"
 msgstr "Sprachreferenz"
 
-#: crates/gtkterm-gui/src/gui/scripts.rs:294
+#: crates/gtkterm-gui/src/gui/scripts.rs:307
 msgid "Opened {path}"
 msgstr "{path} geöffnet"
 
-#: crates/gtkterm-gui/src/gui/scripts.rs:322
+#: crates/gtkterm-gui/src/gui/scripts.rs:335
 msgid "GTKTerm scripts"
 msgstr "GTKTerm-Skripte"
 
-#: crates/gtkterm-gui/src/gui/scripts.rs:326
+#: crates/gtkterm-gui/src/gui/scripts.rs:339
 msgid "Open script"
 msgstr "Skript öffnen"
 
-#: crates/gtkterm-gui/src/gui/scripts.rs:358
+#: crates/gtkterm-gui/src/gui/scripts.rs:371
 msgid "Save script"
 msgstr "Skript speichern"
 
-#: crates/gtkterm-gui/src/gui/scripts.rs:430
+#: crates/gtkterm-gui/src/gui/scripts.rs:443
 msgid "Running {name}…"
 msgstr "{name} läuft …"
 
-#: crates/gtkterm-gui/src/gui/scripts.rs:443
+#: crates/gtkterm-gui/src/gui/scripts.rs:456
 msgid "Finished: {steps} steps in {seconds} s"
 msgstr "Fertig: {steps} Schritte in {seconds} s"
 
-#: crates/gtkterm-gui/src/gui/scripts.rs:455
+#: crates/gtkterm-gui/src/gui/scripts.rs:468
 msgid "Failed at {at}: {message}"
 msgstr "Fehler bei {at}: {message}"
 
@@ -900,33 +900,33 @@ msgstr "Info"
 msgid "Quit"
 msgstr "Beenden"
 
-#: crates/gtkterm-gui/src/gui/signals.rs:41
+#: crates/gtkterm-gui/src/gui/signals.rs:43
 msgid "{seconds} s"
 msgstr "{seconds} s"
 
-#: crates/gtkterm-gui/src/gui/signals.rs:47
+#: crates/gtkterm-gui/src/gui/signals.rs:49
 msgid "Time window"
 msgstr "Zeitfenster"
 
-#: crates/gtkterm-gui/src/gui/signals.rs:51
+#: crates/gtkterm-gui/src/gui/signals.rs:53
 msgid "Freeze the view (recording continues)"
 msgstr "Ansicht einfrieren (Aufzeichnung läuft weiter)"
 
-#: crates/gtkterm-gui/src/gui/signals.rs:55
+#: crates/gtkterm-gui/src/gui/signals.rs:57
 msgid "Clear the history"
 msgstr "Verlauf löschen"
 
-#: crates/gtkterm-gui/src/gui/signals.rs:63
-#: crates/gtkterm-gui/src/gui/signals.rs:82
+#: crates/gtkterm-gui/src/gui/signals.rs:65
+#: crates/gtkterm-gui/src/gui/signals.rs:84
 #: crates/gtkterm-gui/src/gui/window.rs:2148
 msgid "Signal Monitor"
 msgstr "Signalmonitor"
 
-#: crates/gtkterm-gui/src/gui/signals.rs:64
+#: crates/gtkterm-gui/src/gui/signals.rs:66
 msgid "polled every 50 ms; short pulses from the driver's counters"
 msgstr "alle 50 ms abgefragt; kurze Impulse aus den Zählern des Treibers"
 
-#: crates/gtkterm-gui/src/gui/signals.rs:219
+#: crates/gtkterm-gui/src/gui/signals.rs:230
 msgid "No modem lines (open a serial port with modem lines)"
 msgstr "Keine Modemleitungen (eine serielle Schnittstelle mit Modemleitungen öffnen)"
 

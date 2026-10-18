@@ -25,6 +25,8 @@ pub struct SignalMonitor {
     span: Cell<i64>,
     frozen: Cell<Option<Timestamp>>,
     toast: adw::ToastOverlay,
+    #[cfg_attr(not(test), allow(dead_code))]
+    span_drop: gtk::DropDown,
 }
 
 impl SignalMonitor {
@@ -93,6 +95,7 @@ impl SignalMonitor {
             span: Cell::new(SPANS[1]),
             frozen: Cell::new(None),
             toast,
+            span_drop: span_drop.clone(),
         });
 
         let w = Rc::downgrade(&this);
@@ -150,6 +153,14 @@ impl SignalMonitor {
             }
         });
         this
+    }
+
+    /// Choose the time window (one of 10, 30, 60, 300 s).
+    #[cfg(test)]
+    pub fn set_span(&self, seconds: i64) {
+        if let Some(i) = SPANS.iter().position(|s| *s == seconds) {
+            self.span_drop.set_selected(i as u32);
+        }
     }
 
     /// Show the window.

@@ -551,6 +551,14 @@ impl VizPanel {
         }
     }
 
+    /// Show the `index`th chart tab.
+    #[cfg(test)]
+    pub fn select(&self, index: i32) {
+        if index < self.tab_view.n_pages() {
+            self.tab_view.set_selected_page(&self.tab_view.nth_page(index));
+        }
+    }
+
     /// Number of chart tabs.
     pub fn len(&self) -> usize {
         self.tabs.borrow().len()

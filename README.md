@@ -3,6 +3,8 @@
 A Linux serial / TCP / UDP terminal with **live plotting of device data** ("Sunshine" packets)
 and a built-in **MCP server**, so AI agents such as Claude Code can drive your devices.
 
+![Firmware output with live Sunshine charts](docs/screenshots/main.png)
+
 This is a Rust rewrite of the GTKTerm "Sin of Pride" fork (the C version lives at tag
 `legacy-c-v1.99.1`). Status **2.0.0-rc.1**: every feature of the C version is implemented
 (including its never-wired modules; see [docs/feature-parity.md](docs/feature-parity.md)): GTK 4 /
@@ -20,6 +22,8 @@ Print lines like these from your firmware and they are plotted, one chart per ID
 {B:levels|Red|10|Green|20}        chart prefixes: L: line (default), B: bar, P: pie, S: scatter
 {S:xy|path|1.0 2.5}               two values = an X/Y point
 ```
+
+![Bar, pie and scatter charts](docs/screenshots/charts.png)
 
 Colours (`R,G,B`) are optional, decimals use `.`. Full spec: `gtkterm-sunshine --mcp-stdio`
 exposes it as the resource `gtkterm://docs/sunshine-protocol`, or read
@@ -43,6 +47,9 @@ cargo build --release -p gtkterm-gui --no-default-features
   legend entry to hide a series, hover for values; pause, time axis, chart type, history
   length, CSV/PNG export.
 - Status bar: profiles, endpoint, RX/TX counters, DTR/RTS toggles, CTS/DSR/DCD/RI, log and MCP state.
+- Preferences cover every port and terminal setting, MCP and automation:
+
+  ![Preferences](docs/screenshots/preferences.png)
 - Shortcuts use Ctrl+Shift or F-keys (Ctrl+letter goes to the device); press Ctrl+? for the list.
   F11 is fullscreen, Ctrl+plus/minus/0 zoom the terminal.
 - `kill -USR1 <pid>` opens the port, `kill -USR2 <pid>` closes it (as in GTKTerm).
@@ -77,6 +84,8 @@ failures marked. *Record Modem Line Changes* adds a frame whenever DTR/RTS/CTS/D
 change (the *RS232 signals* decoder records only those). Frames are reassembled across reads,
 Modbus RTU frames by CRC and the 3.5-character gap. The decoder is saved with the profile.
 
+![Modbus RTU requests and responses in the frames pane](docs/screenshots/modbus-frames.png)
+
 ## File transfers
 
 Menu → *Send File…* (Ctrl+Shift+R) and *Receive File…* (Ctrl+Shift+E): XMODEM (CRC, falls
@@ -92,7 +101,11 @@ are never overwritten (`name (1).ext`), and names from the device cannot leave t
 Menu → *Scripts…* (Ctrl+Shift+J) opens an editor for `.script` files: run (Ctrl+Return), stop,
 watch the running line and the `log` output. Scripts written for the C GTKTerm run unchanged
 (`data/examples/*.script`); new are labels, `goto`, `if … goto`, `if_match … goto`, `timeout`,
-`set`, `include`, `send_hex`, `send_file`/`receive_file`, `exit` and `fail`:
+`set`, `include`, `send_hex`, `send_file`/`receive_file`, `exit` and `fail`.
+
+![The script editor after running the modem example](docs/screenshots/script-editor.png)
+
+For example:
 
 ```
 send AT+CSQ\r
@@ -115,6 +128,9 @@ or the editor's help button. Headless, for test benches and CI:
 *Signal Monitor* (Ctrl+Shift+M) draws DTR, RTS, CTS, DSR, DCD and RI over the last 10–300 s;
 lines are polled every 50 ms and pulses shorter than that are recovered from the driver's
 transition counters. Export as CSV (`Timestamp,DTR,RTS,CTS,DSR,DCD,RI,Changed Signals`).
+
+![Signal monitor with modem line changes and RI pulses](docs/screenshots/signal-monitor.png)
+
 Preferences → Connection has the break length, RS485 RTS polarity and "receive while sending";
 the menu has *Flush Buffers* and *Detect Baud Rate* (experimental: tries common rates and picks
 the one where the device's output reads as text without framing errors).
@@ -155,6 +171,8 @@ scripts (`script_run`, `exec` only with `--mcp-allow-exec`), the signal history 
 `--mcp-read-only` hides everything that writes. In the window, an agent's first change waits
 for your OK (*Deny*, *Allow Once*, *Allow Until the Server Stops*), and every tool call is
 recorded in `~/.local/share/gtkterm-sunshine/mcp-audit.jsonl`. See [docs/mcp.md](docs/mcp.md).
+
+![An agent asks before sending to the device](docs/screenshots/mcp-approval.png)
 
 ## Development
 

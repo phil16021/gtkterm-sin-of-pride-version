@@ -2373,6 +2373,11 @@ mod tests {
     }
 
     fn snapshot(widget: &impl IsA<gtk::Widget>, name: &str) {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/gui-screenshots");
+        snapshot_to(widget, &dir, name);
+    }
+
+    fn snapshot_to(widget: &impl IsA<gtk::Widget>, dir: &std::path::Path, name: &str) {
         let paintable = gtk::WidgetPaintable::new(Some(widget));
         let (w, h) = (widget.width().max(1), widget.height().max(1));
         let snapshot = gtk::Snapshot::new();
@@ -2382,8 +2387,7 @@ mod tests {
             return;
         };
         let texture = renderer.render_texture(node, None);
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/gui-screenshots");
-        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::create_dir_all(dir);
         let _ = texture.save_to_png(dir.join(format!("{name}.png")));
     }
 
@@ -2710,18 +2714,24 @@ mod tests {
             }
         }
 
-        // A BEL from the device flashes the terminal when the visual bell is on.
+        // A BEL from the device flashes the terminal when the visual bell is on. Checked from a
+        // bell handler (it runs after the view's own), since the flash lasts only 150 ms.
         let mut cfg = win.term.config();
         cfg.visual_bell = true;
         win.term.apply_config(&cfg);
+        let flashed = Rc::new(Cell::new(None));
+        let f = Rc::clone(&flashed);
+        let handler = win
+            .term
+            .term
+            .connect_bell(move |t| f.set(Some(t.has_css_class("bell-flash"))));
         win.term.term.feed(b"\x07");
         assert!(
-            pump_until(Duration::from_secs(2), || win
-                .term
-                .term
-                .has_css_class("bell-flash")),
-            "visual bell flash"
+            pump_until(Duration::from_secs(5), || flashed.get().is_some()),
+            "no bell"
         );
+        assert_eq!(flashed.get(), Some(true), "visual bell flash");
+        win.term.term.disconnect(handler);
         assert!(pump_until(Duration::from_secs(2), || !win
             .term
             .term
@@ -2783,5 +2793,203 @@ mod tests {
             0,
             "GTK reported warnings or criticals"
         );
+    }
+
+    /// The README screenshots: realistic scenes rendered from the real window.
+    /// `GTKTERM_SCREENSHOTS=docs/screenshots GSK_RENDERER=cairo xvfb-run -a cargo test -p gtkterm-gui readme_screenshots`,
+    /// then in docs/screenshots: `for f in chart-*.png; do convert $f -crop 566x620+0+34 +repage $f; done;
+    /// convert chart-bar.png chart-pie.png chart-scatter.png +append -strip charts.png; rm chart-*.png`
+    #[gtk::test]
+    fn readme_screenshots() {
+        use std::fmt::Write as _;
+
+        use gtkterm_core::port::loopback::InputLines;
+        use gtkterm_protocols::decode::modbus;
+        let Some(out) = std::env::var_os("GTKTERM_SCREENSHOTS").map(PathBuf::from) else {
+            eprintln!(
+                "skipped: set GTKTERM_SCREENSHOTS=DIR (inside xvfb-run) to render the README screenshots"
+            );
+            return;
+        };
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join(out);
+        let (win, mut dev, _dir) = setup();
+        win.window.set_default_size(1280, 780);
+        let wait = |ms: u64| {
+            pump_until(Duration::from_millis(ms), || false);
+        };
+
+        // 1. Firmware output with Sunshine packets: line, bar, pie and scatter charts.
+        rt().block_on(async {
+            let boot = "ESP32-S3 sensor node v1.4.2 (build 2026-10-12)\r\n\
+                        I2C: BME280 @0x76, MPU6050 @0x68\r\n\
+                        WiFi: connected to lab-net, RSSI -58 dBm\r\n\
+                        Sunshine telemetry at 20 Hz\r\n";
+            dev.send(boot.as_bytes().to_vec()).await.unwrap();
+            for i in 0..240u32 {
+                let t = f64::from(i);
+                let roll = 25.0 * (t / 12.0).sin();
+                let pitch = 15.0 * (t / 7.0 + 1.0).sin();
+                let yaw = 40.0 * (t / 30.0).sin() + 10.0 * (t / 5.0).cos();
+                let temp = 23.0 + 1.5 * (t / 40.0).sin();
+                let hum = 41.0 + 3.0 * (t / 55.0).cos();
+                let cpu = 35.0 + 20.0 * (t / 9.0).sin().abs();
+                let (x, y) = (10.0 * (t / 20.0).cos() * (1.0 + t / 240.0), 10.0 * (t / 20.0).sin() * (1.0 + t / 240.0));
+                let mut text = format!(
+                    "{{imu|Roll|231,76,60|{roll:.2}|Pitch|46,204,113|{pitch:.2}|Yaw|52,152,219|{yaw:.2}}}\r\n\
+                     {{env|Temperature|230,126,34|{temp:.2}|Humidity|52,152,219|{hum:.1}}}\r\n\
+                     {{B:load|CPU|155,89,182|{cpu:.0}|RAM|52,152,219|62|Flash|46,204,113|38|Queue|230,126,34|{q}}}\r\n\
+                     {{P:power|Radio|231,76,60|41|Sensors|46,204,113|23|CPU|52,152,219|27|Display|241,196,15|9}}\r\n\
+                     {{S:track|Path|26,188,156|{x:.2} {y:.2}}}\r\n",
+                    q = 5 + i % 7
+                );
+                if i % 40 == 39 {
+                    let _ = write!(text, "[{:8.3}] heap free {} kB, uptime ok\r\n", t / 20.0, 182 - i % 9);
+                }
+                dev.send(text.into_bytes()).await.unwrap();
+            }
+        });
+        assert!(pump_until(Duration::from_secs(5), || win.panel.len() == 5));
+        win.panel.select(0);
+        wait(500);
+        snapshot_to(&win.window, &out, "main");
+        for (i, name) in [(2, "chart-bar"), (3, "chart-pie"), (4, "chart-scatter")] {
+            win.panel.select(i);
+            wait(300);
+            snapshot_to(&win.panel.widget, &out, name);
+        }
+
+        // 2. Modbus RTU session in the frames pane, terminal in hex + ASCII.
+        gio::prelude::ActionGroupExt::activate_action(&win.window, "visualization", None);
+        gio::prelude::ActionGroupExt::activate_action(&win.window, "clear-scrollback", None);
+        gio::prelude::ActionGroupExt::activate_action(&win.window, "view-mode", Some(&"mixed".to_variant()));
+        gio::prelude::ActionGroupExt::activate_action(
+            &win.window,
+            "decoder",
+            Some(&"modbus_rtu".to_variant()),
+        );
+        wait(200);
+        let exchanges: [(&[u8], &[u8]); 5] = [
+            (
+                &[0x03, 0x00, 0x00, 0x00, 0x04],
+                &[0x03, 0x08, 0x00, 0xE6, 0x01, 0x9F, 0x00, 0x2A, 0x13, 0x88],
+            ),
+            (&[0x01, 0x00, 0x10, 0x00, 0x08], &[0x01, 0x01, 0xA5]),
+            (&[0x06, 0x00, 0x20, 0x01, 0xF4], &[0x06, 0x00, 0x20, 0x01, 0xF4]),
+            (
+                &[0x04, 0x00, 0x00, 0x00, 0x02],
+                &[0x04, 0x04, 0x41, 0xB8, 0x00, 0x00],
+            ),
+            (&[0x03, 0x01, 0x00, 0x00, 0x01], &[0x83, 0x02]),
+        ];
+        for (req, resp) in exchanges {
+            win.session.send_nowait(modbus::rtu_frame(1, req)).unwrap();
+            rt().block_on(async {
+                let _ = tokio::time::timeout(Duration::from_secs(1), dev.recv()).await;
+                tokio::time::sleep(Duration::from_millis(30)).await;
+                dev.send(modbus::rtu_frame(1, resp)).await.unwrap();
+            });
+            wait(120);
+        }
+        assert!(pump_until(Duration::from_secs(2), || win.frames.len() == 10));
+        win.term_paned.set_position(170);
+        win.frames.select(1);
+        wait(300);
+        snapshot_to(&win.window, &out, "modbus-frames");
+        gio::prelude::ActionGroupExt::activate_action(&win.window, "decoder", Some(&"off".to_variant()));
+        gio::prelude::ActionGroupExt::activate_action(&win.window, "frames", None);
+        gio::prelude::ActionGroupExt::activate_action(&win.window, "view-mode", Some(&"ascii".to_variant()));
+        rt().block_on(async { while !dev.drain().is_empty() {} });
+
+        // 3. The modem example script against a fake modem.
+        {
+            let sw = win.script_window();
+            // The installed copy reads better in the title (~/.local/share/...) than the checkout.
+            let installed = std::env::var_os("HOME")
+                .map(|h| PathBuf::from(h).join(".local/share/gtkterm-sunshine/examples/example_modem.script"))
+                .filter(|p| p.is_file());
+            let example = installed.unwrap_or_else(|| {
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../data/examples/example_modem.script")
+            });
+            sw.load(&example).unwrap();
+            sw.window.set_default_size(980, 700);
+            sw.present();
+            let modem = rt().spawn(async move {
+                let mut buf = String::new();
+                while let Ok(Some(b)) = tokio::time::timeout(Duration::from_secs(2), dev.recv()).await {
+                    buf.push_str(&String::from_utf8_lossy(&b));
+                    while let Some(i) = buf.find('\r') {
+                        let cmd: String = buf.drain(..=i).collect();
+                        let reply = match cmd.trim() {
+                            "AT" => "\r\nOK\r\n",
+                            "AT+CGMI" => "\r\nQuectel\r\nOK\r\n",
+                            "AT+CGMM" => "\r\nEG25-G\r\nOK\r\n",
+                            "AT+CSQ" => "\r\n+CSQ: 23,99\r\n\r\nOK\r\n",
+                            "AT+CGSN" => "\r\n867698041234567\r\n\r\nOK\r\n",
+                            _ => "\r\nERROR\r\n",
+                        };
+                        tokio::time::sleep(Duration::from_millis(40)).await;
+                        dev.send(reply.as_bytes().to_vec()).await.unwrap();
+                    }
+                }
+                dev
+            });
+            sw.start();
+            assert!(
+                pump_until(Duration::from_secs(20), || sw
+                    .status_text()
+                    .starts_with("Finished")),
+                "{}",
+                sw.status_text()
+            );
+            wait(300);
+            snapshot_to(&sw.window, &out, "script-editor");
+            sw.window.close();
+            dev = rt().block_on(modem).unwrap();
+        }
+
+        // 4. Modem lines over a few seconds in the signal monitor.
+        {
+            gio::prelude::ActionGroupExt::activate_action(&win.window, "signal-monitor", None);
+            let m = win.signal_window.borrow().clone().unwrap();
+            m.set_span(10);
+            m.window.set_default_size(900, 330);
+            let mut lines = InputLines::default();
+            for step in 0..32u32 {
+                match step {
+                    2 => gio::prelude::ActionGroupExt::activate_action(&win.window, "dtr", None),
+                    3 => lines.dsr = true,
+                    5 | 13 | 21 => gio::prelude::ActionGroupExt::activate_action(&win.window, "rts", None),
+                    6 | 14 | 22 => lines.cts = !lines.cts,
+                    9 => lines.dcd = true,
+                    17 | 25 => dev.pulse_ri(),
+                    28 => lines.dcd = false,
+                    _ => {}
+                }
+                dev.set_inputs(lines);
+                wait(250);
+            }
+            wait(300);
+            snapshot_to(&m.window, &out, "signal-monitor");
+            m.window.close();
+        }
+
+        // 5. An agent asks to send: the approval dialog.
+        let dialog = approval_dialog(&ApprovalRequest {
+            tool: "send".into(),
+            arguments: r#"{"data":"AT+CFUN=1,1","line_ending":"cr"}"#.into(),
+            client: Some("claude-code".into()),
+        });
+        dialog.present(Some(&win.window));
+        wait(400);
+        snapshot_to(&win.window, &out, "mcp-approval");
+        dialog.force_close();
+        wait(100);
+
+        gio::prelude::ActionGroupExt::activate_action(&win.window, "preferences", None);
+        wait(400);
+        snapshot_to(&win.window, &out, "preferences");
     }
 }
