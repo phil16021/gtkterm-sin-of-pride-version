@@ -307,8 +307,28 @@ impl MacroEditor {
             let Some(name) = me.selected.borrow().clone() else {
                 return;
             };
-            let _ = me.manager.update_macros(|s| Ok(s.remove(&name)));
-            me.reload_list(None);
+            let confirm = adw::AlertDialog::builder()
+                .heading(gettext_f("Delete macro “{name}”?", &[("name", &name)]))
+                .close_response("cancel")
+                .default_response("cancel")
+                .build();
+            confirm.add_responses(&[
+                ("cancel", gettext("Cancel").as_str()),
+                ("delete", gettext("Delete").as_str()),
+            ]);
+            confirm.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+            let w = Rc::downgrade(&me);
+            confirm.connect_response(None, move |_, resp| {
+                let Some(me) = w.upgrade() else { return };
+                if resp != "delete" {
+                    return;
+                }
+                match me.manager.update_macros(|s| Ok(s.remove(&name))) {
+                    Ok(_) => me.reload_list(None),
+                    Err(e) => me.error.set_text(&e.to_string()),
+                }
+            });
+            confirm.present(Some(&me.dialog));
         });
         let w = Rc::downgrade(&me);
         me.buffer.connect_changed(move |_| {

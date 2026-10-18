@@ -259,7 +259,7 @@ msgid "Name"
 msgstr "Name"
 
 #: crates/gtkterm-gui/src/gui/macros.rs:175
-#: crates/gtkterm-gui/src/gui/macros.rs:450
+#: crates/gtkterm-gui/src/gui/macros.rs:470
 #: crates/gtkterm-gui/src/gui/prefs.rs:183
 #: crates/gtkterm-gui/src/gui/prefs.rs:194
 msgid "None"
@@ -304,7 +304,25 @@ msgstr "Speichern"
 msgid "Macros"
 msgstr "Makros"
 
-#: crates/gtkterm-gui/src/gui/macros.rs:337
+#: crates/gtkterm-gui/src/gui/macros.rs:311
+msgid "Delete macro “{name}”?"
+msgstr "Makro „{name}“ löschen?"
+
+#: crates/gtkterm-gui/src/gui/macros.rs:316
+#: crates/gtkterm-gui/src/gui/prefs.rs:300
+#: crates/gtkterm-gui/src/gui/transfer.rs:98
+#: crates/gtkterm-gui/src/gui/window.rs:1433
+#: crates/gtkterm-gui/src/gui/window.rs:1908
+#: crates/gtkterm-gui/src/gui/window.rs:1942
+msgid "Cancel"
+msgstr "Abbrechen"
+
+#: crates/gtkterm-gui/src/gui/macros.rs:317
+#: crates/gtkterm-gui/src/gui/window.rs:1943
+msgid "Delete"
+msgstr "Löschen"
+
+#: crates/gtkterm-gui/src/gui/macros.rs:357
 msgid "Press keys…"
 msgstr "Tasten drücken …"
 
@@ -443,14 +461,6 @@ msgstr "Name der Voreinstellung"
 #: crates/gtkterm-gui/src/gui/prefs.rs:294
 msgid "Save preset"
 msgstr "Voreinstellung speichern"
-
-#: crates/gtkterm-gui/src/gui/prefs.rs:300
-#: crates/gtkterm-gui/src/gui/transfer.rs:98
-#: crates/gtkterm-gui/src/gui/window.rs:1433
-#: crates/gtkterm-gui/src/gui/window.rs:1908
-#: crates/gtkterm-gui/src/gui/window.rs:1942
-msgid "Cancel"
-msgstr "Abbrechen"
 
 #: crates/gtkterm-gui/src/gui/prefs.rs:334
 msgid "Host"
@@ -1336,10 +1346,6 @@ msgstr "Das Standardprofil wird auf die Standardeinstellungen zurückgesetzt."
 #: crates/gtkterm-gui/src/gui/window.rs:1937
 msgid "The profile is removed from the configuration file."
 msgstr "Das Profil wird aus der Konfigurationsdatei entfernt."
-
-#: crates/gtkterm-gui/src/gui/window.rs:1943
-msgid "Delete"
-msgstr "Löschen"
 
 #: crates/gtkterm-gui/src/gui/window.rs:2010
 msgid "MCP server on {url}"

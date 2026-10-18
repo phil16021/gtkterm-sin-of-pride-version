@@ -117,37 +117,31 @@ fn path() -> PathBuf {
 }
 
 impl UiState {
-    /// Load, falling back to defaults.
+    /// Load, falling back to defaults. A file that cannot be read as state is kept as
+    /// `state.toml.bad` (it holds the MCP token) instead of being overwritten by the next save.
     pub fn load() -> Self {
-        std::fs::read_to_string(path())
-            .ok()
-            .and_then(|t| toml::from_str(&t).ok())
-            .unwrap_or_default()
+        let p = path();
+        let Ok(text) = std::fs::read_to_string(&p) else {
+            return Self::default();
+        };
+        match toml::from_str(&text) {
+            Ok(st) => st,
+            Err(e) => {
+                let bad = p.with_extension("toml.bad");
+                tracing::warn!(path = %p.display(), error = %e, backup = %bad.display(), "UI state unreadable, using defaults");
+                let _ = std::fs::rename(&p, &bad);
+                Self::default()
+            }
+        }
     }
 
     /// Save atomically and readable only by the user: the file holds the MCP token.
     /// Errors are logged, not fatal.
     pub fn save(&self) {
-        use std::io::Write as _;
-        use std::os::unix::fs::OpenOptionsExt as _;
         let p = path();
         let result = toml::to_string_pretty(self)
             .map_err(std::io::Error::other)
-            .and_then(|t| {
-                if let Some(d) = p.parent() {
-                    std::fs::create_dir_all(d)?;
-                }
-                let tmp = p.with_extension("toml.tmp");
-                let _ = std::fs::remove_file(&tmp);
-                let mut f = std::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .mode(0o600)
-                    .open(&tmp)?;
-                f.write_all(t.as_bytes())?;
-                f.sync_all()?;
-                std::fs::rename(&tmp, &p)
-            });
+            .and_then(|t| gtkterm_core::fsutil::write_atomic(&p, t.as_bytes(), Some(0o600)));
         if let Err(e) = result {
             tracing::warn!(path = %p.display(), error = %e, "cannot save UI state");
         }
@@ -197,5 +191,19 @@ mod tests {
         let mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "the MCP token must not be world-readable");
         assert_eq!(UiState::load().mcp.token.as_deref(), Some("secret"));
+    }
+
+    #[test]
+    fn unreadable_state_is_kept_aside() {
+        let dir = tempfile::tempdir().unwrap();
+        set_test_dir(dir.path());
+        std::fs::write(
+            dir.path().join("state.toml"),
+            "width = \"wide\"\n[mcp]\ntoken = \"keep\"\n",
+        )
+        .unwrap();
+        assert_eq!(UiState::load(), UiState::default());
+        let bad = std::fs::read_to_string(dir.path().join("state.toml.bad")).unwrap();
+        assert!(bad.contains("keep"));
     }
 }

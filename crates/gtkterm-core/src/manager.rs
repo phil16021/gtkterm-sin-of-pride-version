@@ -161,14 +161,18 @@ impl SessionManager {
         &self,
         f: impl FnOnce(&mut MacroStore) -> Result<R, MacroError>,
     ) -> Result<R, MacroError> {
-        let (result, snapshot) = {
+        // Saved under the lock: concurrent changes (GUI and MCP) cannot write an older
+        // snapshot last, and a failed save leaves memory unchanged.
+        let result = {
             let mut store = lock(&self.macros);
-            let r = f(&mut store)?;
-            (r, store.clone())
+            let mut changed = store.clone();
+            let r = f(&mut changed)?;
+            if let Some(path) = lock(&self.macros_path).clone() {
+                changed.save(&path)?;
+            }
+            *store = changed;
+            r
         };
-        if let Some(path) = lock(&self.macros_path).clone() {
-            snapshot.save(&path)?;
-        }
         let _ = self.events.send(ManagerEvent::MacrosChanged);
         Ok(result)
     }

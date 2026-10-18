@@ -257,12 +257,7 @@ impl MacroStore {
             path: path.to_owned(),
             source,
         };
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).map_err(io)?;
-        }
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, self.to_json()).map_err(io)?;
-        std::fs::rename(&tmp, path).map_err(io)
+        crate::fsutil::write_atomic(path, self.to_json().as_bytes(), None).map_err(io)
     }
 
     /// Macros in order.

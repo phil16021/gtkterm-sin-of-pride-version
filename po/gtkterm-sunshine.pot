@@ -261,7 +261,7 @@ msgid "Name"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/macros.rs:175
-#: crates/gtkterm-gui/src/gui/macros.rs:450
+#: crates/gtkterm-gui/src/gui/macros.rs:470
 #: crates/gtkterm-gui/src/gui/prefs.rs:183
 #: crates/gtkterm-gui/src/gui/prefs.rs:194
 msgid "None"
@@ -306,7 +306,25 @@ msgstr ""
 msgid "Macros"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/macros.rs:337
+#: crates/gtkterm-gui/src/gui/macros.rs:311
+msgid "Delete macro “{name}”?"
+msgstr ""
+
+#: crates/gtkterm-gui/src/gui/macros.rs:316
+#: crates/gtkterm-gui/src/gui/prefs.rs:300
+#: crates/gtkterm-gui/src/gui/transfer.rs:98
+#: crates/gtkterm-gui/src/gui/window.rs:1433
+#: crates/gtkterm-gui/src/gui/window.rs:1908
+#: crates/gtkterm-gui/src/gui/window.rs:1942
+msgid "Cancel"
+msgstr ""
+
+#: crates/gtkterm-gui/src/gui/macros.rs:317
+#: crates/gtkterm-gui/src/gui/window.rs:1943
+msgid "Delete"
+msgstr ""
+
+#: crates/gtkterm-gui/src/gui/macros.rs:357
 msgid "Press keys…"
 msgstr ""
 
@@ -444,14 +462,6 @@ msgstr ""
 
 #: crates/gtkterm-gui/src/gui/prefs.rs:294
 msgid "Save preset"
-msgstr ""
-
-#: crates/gtkterm-gui/src/gui/prefs.rs:300
-#: crates/gtkterm-gui/src/gui/transfer.rs:98
-#: crates/gtkterm-gui/src/gui/window.rs:1433
-#: crates/gtkterm-gui/src/gui/window.rs:1908
-#: crates/gtkterm-gui/src/gui/window.rs:1942
-msgid "Cancel"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/prefs.rs:334
@@ -1337,10 +1347,6 @@ msgstr ""
 
 #: crates/gtkterm-gui/src/gui/window.rs:1937
 msgid "The profile is removed from the configuration file."
-msgstr ""
-
-#: crates/gtkterm-gui/src/gui/window.rs:1943
-msgid "Delete"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/window.rs:2010

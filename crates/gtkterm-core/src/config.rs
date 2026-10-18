@@ -650,12 +650,7 @@ impl Config {
             path: path.to_owned(),
             source,
         };
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).map_err(io)?;
-        }
-        let tmp = path.with_extension("toml.tmp");
-        std::fs::write(&tmp, self.to_toml()?).map_err(io)?;
-        std::fs::rename(&tmp, path).map_err(io)
+        crate::fsutil::write_atomic(path, self.to_toml()?.as_bytes(), None).map_err(io)
     }
 
     /// Profile by name.
