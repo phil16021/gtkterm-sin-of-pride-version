@@ -8,6 +8,7 @@
     clippy::similar_names
 )]
 
+mod activity;
 mod charts;
 mod frames;
 pub mod i18n;
@@ -79,6 +80,7 @@ pub fn run(cli: Cli, resolved: Resolved) -> ExitCode {
         mcp_addr: cli.mcp_http,
         mcp_token: cli.mcp_token.clone(),
         mcp_read_only: cli.mcp_read_only,
+        mcp_rate: cli.mcp_rate,
         mcp_allow_dirs: cli.mcp_allow_dir.clone(),
         script: cli.script.clone(),
         allow_exec: cli.allow_exec,

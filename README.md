@@ -179,10 +179,14 @@ Temperature series"*. Tools cover ports, send/read/expect, modem lines, Sunshine
 logging, decoded frames, Modbus requests (`modbus_request` builds the frame with its CRC
 and returns the parsed registers) and file transfers with progress (`file_send`,
 `file_receive`, limited to `~/.local/share/gtkterm-sunshine/transfers` plus `--mcp-allow-dir`),
-scripts (`script_run`, `exec` only with `--mcp-allow-exec`), the signal history and auto-baud;
-`--mcp-read-only` hides everything that writes. In the window, an agent's first change waits
-for your OK (*Deny*, *Allow Once*, *Allow Until the Server Stops*), and every tool call is
-recorded in `~/.local/share/gtkterm-sunshine/mcp-audit.jsonl`. See [docs/mcp.md](docs/mcp.md).
+scripts (`script_run`, `exec` only with `--mcp-allow-exec`), the signal history, line settings
+(`configure_port`) and auto-baud. Agents can subscribe to resources (received data, status,
+charts, frames) instead of polling, with MCP 2026-07-28 `subscriptions/listen` or the older
+`resources/subscribe`. `--mcp-read-only` hides everything that writes, and write calls are limited
+to 20 per second per agent (`--mcp-rate`). In the window, an agent's first change waits for your
+OK (*Deny*, *Allow Once*, *Allow Until the Server Stops*), menu → *Agent Activity* lists every
+call, and all calls are recorded in `~/.local/share/gtkterm-sunshine/mcp-audit.jsonl`. See
+[docs/mcp.md](docs/mcp.md); `gtkterm-sunshine --mcp-dump-schema` prints all tool schemas.
 
 ![An agent asks before sending to the device](docs/screenshots/mcp-approval.png)
 

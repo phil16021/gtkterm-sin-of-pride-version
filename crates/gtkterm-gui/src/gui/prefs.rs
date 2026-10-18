@@ -655,6 +655,13 @@ pub fn show(
         &gettext("Sending, opening ports, transfers and scripts need your OK first"),
         mcp.confirm_writes,
     );
+    let mcp_rate = spin(
+        &gettext("Write calls per second"),
+        0.0,
+        1000.0,
+        f64::from(mcp.max_writes_per_second),
+    );
+    mcp_rate.set_subtitle(&gettext("Per agent, bursts of twice that; 0: no limit"));
     let token = mcp.token.clone().unwrap_or_default();
     let token_row = adw::ActionRow::builder()
         .title(gettext("Bearer token"))
@@ -693,6 +700,7 @@ pub fn show(
             mcp_port.upcast_ref(),
             mcp_ro.upcast_ref(),
             mcp_confirm.upcast_ref(),
+            mcp_rate.upcast_ref(),
             token_row.upcast_ref(),
         ],
     );
@@ -816,6 +824,7 @@ pub fn show(
             token: original_mcp.token.clone(),
             allow_exec: mcp_exec.is_active(),
             confirm_writes: mcp_confirm.is_active(),
+            max_writes_per_second: mcp_rate.value() as u32,
         };
         apply(
             p,

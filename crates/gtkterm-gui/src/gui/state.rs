@@ -21,6 +21,8 @@ pub struct McpSettings {
     pub allow_exec: bool,
     /// Ask the user before an agent runs a write tool.
     pub confirm_writes: bool,
+    /// Write tool calls per second and client; 0: no limit.
+    pub max_writes_per_second: u32,
 }
 
 impl Default for McpSettings {
@@ -32,6 +34,7 @@ impl Default for McpSettings {
             token: None,
             allow_exec: false,
             confirm_writes: true,
+            max_writes_per_second: gtkterm_mcp::DEFAULT_WRITES_PER_SECOND,
         }
     }
 }

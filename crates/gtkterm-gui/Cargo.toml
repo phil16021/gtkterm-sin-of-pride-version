@@ -48,12 +48,12 @@ nix.workspace = true
 serde.workspace = true
 toml.workspace = true
 regex.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 gtkterm-core = { workspace = true, features = ["testing"] }
 assert_cmd.workspace = true
 tempfile.workspace = true
-serde_json.workspace = true
 rmcp = { workspace = true, features = ["client", "transport-child-process"] }
 
 [build-dependencies]

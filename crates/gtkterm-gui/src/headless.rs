@@ -49,6 +49,7 @@ fn mcp_options(cli: &Cli) -> ServerOptions {
         allowed_dirs: cli.mcp_allow_dir.clone(),
         allow_exec: cli.mcp_allow_exec,
         audit: Some(gtkterm_mcp::default_audit_path()),
+        max_writes_per_second: cli.mcp_rate.unwrap_or(gtkterm_mcp::DEFAULT_WRITES_PER_SECOND),
         ..ServerOptions::default()
     }
 }

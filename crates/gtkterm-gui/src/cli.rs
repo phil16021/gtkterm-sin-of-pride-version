@@ -260,6 +260,9 @@ pub struct Cli {
     /// Let MCP `file_send` read files from DIR as well as the transfer directory (repeatable).
     #[arg(long = "mcp-allow-dir", value_name = "DIR", help_heading = "MCP")]
     pub mcp_allow_dir: Vec<PathBuf>,
+    /// Write tool calls an agent may make per second (bursts of twice that); 0: no limit.
+    #[arg(long = "mcp-rate", value_name = "N", help_heading = "MCP")]
+    pub mcp_rate: Option<u32>,
     /// Bearer token for --mcp-http (default: random, printed at start).
     #[arg(long = "mcp-token", env = "GTKTERM_MCP_TOKEN", help_heading = "MCP")]
     pub mcp_token: Option<String>,
@@ -278,6 +281,9 @@ pub struct Cli {
     /// Write the man page into DIR and exit (packaging).
     #[arg(long = "generate-man", hide = true, value_name = "DIR")]
     pub generate_man: Option<PathBuf>,
+    /// Print the MCP tools, prompts and resources with their JSON schemas and exit.
+    #[arg(long = "mcp-dump-schema", help_heading = "MCP")]
+    pub mcp_dump_schema: bool,
     /// Print shell completions (bash, zsh, fish, elvish, powershell) and exit (packaging).
     #[arg(long = "generate-completions", hide = true, value_name = "SHELL")]
     pub generate_completions: Option<clap_complete::Shell>,
@@ -365,6 +371,14 @@ pub fn packaging(cli: &Cli) -> std::io::Result<bool> {
         man.render(&mut buf)?;
         buf.extend_from_slice(MAN_EXTRA.as_bytes());
         std::fs::write(dir.join("gtkterm-sunshine.1"), buf)?;
+        return Ok(true);
+    }
+    if cli.mcp_dump_schema {
+        let manager =
+            gtkterm_core::manager::SessionManager::new(gtkterm_core::config::Config::default(), None);
+        let server = gtkterm_mcp::GtkTermMcp::new(manager, gtkterm_mcp::ServerOptions::default());
+        let json = serde_json::to_string_pretty(&server.schema()).map_err(std::io::Error::other)?;
+        println!("{json}");
         return Ok(true);
     }
     if let Some(shell) = cli.generate_completions {

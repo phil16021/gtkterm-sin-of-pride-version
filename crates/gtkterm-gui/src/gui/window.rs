@@ -59,6 +59,8 @@ pub struct Win {
     state: Rc<RefCell<UiState>>,
     mcp: Rc<RefCell<Option<HttpHandle>>>,
     mcp_url: Rc<RefCell<Option<String>>>,
+    /// Tool calls of the embedded MCP server.
+    activity: Rc<super::activity::Activity>,
     updating: Rc<Cell<bool>>,
     watcher: RefCell<Option<PortWatcher>>,
     macro_bar: gtk::FlowBox,
@@ -115,6 +117,8 @@ struct Chrome {
     state: Rc<RefCell<UiState>>,
     mcp: Rc<RefCell<Option<HttpHandle>>>,
     mcp_url: Rc<RefCell<Option<String>>>,
+    /// Tool calls of the embedded MCP server.
+    activity: Rc<super::activity::Activity>,
     updating: Rc<Cell<bool>>,
     macro_bar: gtk::FlowBox,
     shortcut_ctl: Rc<RefCell<Option<gtk::ShortcutController>>>,
@@ -134,6 +138,8 @@ pub struct StartOptions {
     pub mcp_token: Option<String>,
     /// `--mcp-read-only`.
     pub mcp_read_only: bool,
+    /// `--mcp-rate`.
+    pub mcp_rate: Option<u32>,
     /// `--mcp-allow-dir`.
     pub mcp_allow_dirs: Vec<PathBuf>,
     /// `--script`: run once the port is open.
@@ -277,6 +283,7 @@ impl Win {
             state: Rc::new(RefCell::new(state)),
             mcp: Rc::default(),
             mcp_url: Rc::default(),
+            activity: super::activity::Activity::new(),
             updating: Rc::default(),
             macro_bar,
             shortcut_ctl: Rc::default(),
@@ -350,6 +357,9 @@ impl Win {
             }
             if let Some(t) = start.mcp_token {
                 st.mcp.token = Some(t);
+            }
+            if let Some(r) = start.mcp_rate {
+                st.mcp.max_writes_per_second = r;
             }
             st.mcp.clone()
         };
@@ -443,6 +453,7 @@ impl Win {
             state: Rc::clone(&chrome.state),
             mcp: Rc::clone(&chrome.mcp),
             mcp_url: Rc::clone(&chrome.mcp_url),
+            activity: Rc::clone(&chrome.activity),
             updating: Rc::clone(&chrome.updating),
             watcher: RefCell::default(),
             macro_bar: chrome.macro_bar.clone(),
@@ -488,6 +499,7 @@ impl Win {
             state: Rc::clone(&self.state),
             mcp: Rc::clone(&self.mcp),
             mcp_url: Rc::clone(&self.mcp_url),
+            activity: Rc::clone(&self.activity),
             updating: Rc::clone(&self.updating),
             macro_bar: self.macro_bar.clone(),
             shortcut_ctl: Rc::clone(&self.shortcut_ctl),
@@ -1728,6 +1740,7 @@ impl Win {
         });
         self.window.add_action(&action);
 
+        add("agent-activity", Box::new(|w| w.activity.present(&w.window)));
         add("edit-macros", Box::new(|w| w.open_macro_editor(None)));
         add(
             "stop-macro",
@@ -2532,9 +2545,11 @@ impl Win {
                 allow_exec: self.state.borrow().mcp.allow_exec,
                 audit: Some(gtkterm_mcp::default_audit_path()),
                 approver: (settings.confirm_writes && !settings.read_only).then(|| self.approver()),
+                max_writes_per_second: settings.max_writes_per_second,
                 ..ServerOptions::default()
             },
         );
+        self.activity.follow(server.activity());
         let security = HttpSecurity {
             token: settings.token.clone(),
             ..HttpSecurity::default()
@@ -2667,6 +2682,7 @@ impl Win {
             st.save();
         }
         self.stop_mcp();
+        self.activity.close();
         self.watcher.borrow_mut().take();
         for t in &tabs {
             t.close_tab_resources();
@@ -3023,6 +3039,7 @@ fn main_menu() -> gio::Menu {
     let app = gio::Menu::new();
     app.append(Some(&gettext("Import Presets…")), Some("win.import-presets"));
     app.append(Some(&gettext("MCP Server for AI Agents")), Some("win.mcp"));
+    app.append(Some(&gettext("Agent Activity")), Some("win.agent-activity"));
     let help = gio::Menu::new();
     for (label, topic) in [
         (gettext("Sunshine Packet Format"), "sunshine"),
@@ -3174,7 +3191,9 @@ Safety:
 • Read-only mode lets agents read data but not send, open or close.
 • 'Ask before agents change anything' (on by default) shows a dialog before an agent's first
   change: Deny, Allow Once, or Allow Until the Server Stops.
-• Every tool call is written to ~/.local/share/gtkterm-sunshine/mcp-audit.jsonl.
+• Every tool call is written to ~/.local/share/gtkterm-sunshine/mcp-audit.jsonl and listed in
+  the menu under Agent Activity.
+• An agent may make 20 changing calls per second (Preferences → MCP); more are refused.
 • Scripts started by agents may run programs (exec) only when allowed in Preferences → MCP.
 • Agents can send files only from the transfer folder or folders given with --mcp-allow-dir."
 );
@@ -3385,6 +3404,7 @@ mod tests {
             mcp_addr: None,
             mcp_token: None,
             mcp_read_only: false,
+            mcp_rate: None,
             mcp_allow_dirs: Vec::new(),
             script: None,
             allow_exec: false,
@@ -3969,6 +3989,57 @@ mod tests {
             .unwrap();
         assert_eq!(kind, gtkterm_protocols::sunshine::ChartKind::Bar);
         assert_eq!(cap, 50);
+        assert_eq!(UNEXPECTED_LOGS.load(Ordering::SeqCst), 0, "GTK warnings");
+    }
+
+    /// The activity pane lists the embedded server's tool calls, filters them and clears.
+    #[gtk::test]
+    fn agent_activity_lists_and_filters_calls() {
+        use rmcp::ServiceExt as _;
+        if std::env::var_os("GTKTERM_GUI_TESTS").is_none() {
+            return;
+        }
+        let (win, _dev, _dir) = setup();
+        let server = GtkTermMcp::new(
+            Arc::clone(&win.manager),
+            ServerOptions {
+                max_writes_per_second: 1,
+                ..ServerOptions::default()
+            },
+        );
+        win.activity.follow(server.activity());
+        win.activity.present(&win.window);
+        rt().block_on(async move {
+            let (server_io, client_io) = tokio::io::duplex(1 << 16);
+            tokio::spawn(async move {
+                if let Ok(running) = server.serve(server_io).await {
+                    let _ = running.waiting().await;
+                }
+            });
+            let client = ().serve(client_io).await.unwrap();
+            let call = |name: &str, args: serde_json::Value| {
+                rmcp::model::CallToolRequestParams::new(name.to_owned())
+                    .with_arguments(args.as_object().cloned().unwrap_or_default())
+            };
+            client
+                .call_tool(call("get_status", serde_json::json!({})))
+                .await
+                .unwrap();
+            for data in ["a", "b", "c"] {
+                client
+                    .call_tool(call("send", serde_json::json!({ "data": data })))
+                    .await
+                    .unwrap();
+            }
+        });
+        assert!(pump_until(Duration::from_secs(3), || win.activity.visible_rows() == 4));
+        win.activity.set_filter("", true);
+        assert!(pump_until(Duration::from_secs(1), || win.activity.visible_rows() == 1));
+        win.activity.set_filter("get_status", false);
+        assert!(pump_until(Duration::from_secs(1), || win.activity.visible_rows() == 1));
+        win.activity.clear();
+        assert_eq!(win.activity.visible_rows(), 0);
+        win.activity.window().unwrap().close();
         assert_eq!(UNEXPECTED_LOGS.load(Ordering::SeqCst), 0, "GTK warnings");
     }
 

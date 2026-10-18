@@ -14,6 +14,12 @@
 > script editor unsaved state, accessible indicators. Deferred to R13/R14: async udev hotplug
 > watcher, TX/RX direction markers in dump views, MCP `send.char_delay_ms`, and applying
 > `term_rows`/`term_columns` (the window keeps its own size). Next: the hardware checklist, then 2.0.0.
+> R13 MCP completeness is **done** (for 2.1): resource subscriptions (`subscriptions/listen` and
+> legacy `resources/subscribe`, ≤ 10 Hz per URI, `list_changed`), completions, `configure_port`,
+> `profile_delete`, `send.char_delay_ms`, byte patterns for `expect`, `last_seconds` for series,
+> `rx?since=` and `log` resources, a per-client write rate limit, the Agent Activity pane,
+> `--mcp-dump-schema` with a generated tool reference. Not done on purpose: the logging capability
+> (deprecated in MCP 2026-07-28, SEP-2577) and pagination (the lists are short).
 
 ## Context
 
