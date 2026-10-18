@@ -134,22 +134,15 @@ pub async fn serve_http(
     })
 }
 
-/// Generate a random bearer token (128 bits, hex).
-pub fn random_token() -> String {
+/// Generate a random bearer token (128 bits, hex). Fails rather than falling back to a
+/// guessable value when the system's random source cannot be read.
+pub fn random_token() -> std::io::Result<String> {
     use std::fmt::Write as _;
     use std::io::Read as _;
     let mut buf = [0u8; 16];
-    if std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut buf))
-        .is_err()
-    {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_nanos());
-        buf = nanos.to_le_bytes();
-    }
-    buf.iter().fold(String::with_capacity(32), |mut s, b| {
+    std::fs::File::open("/dev/urandom")?.read_exact(&mut buf)?;
+    Ok(buf.iter().fold(String::with_capacity(32), |mut s, b| {
         let _ = write!(s, "{b:02x}");
         s
-    })
+    }))
 }

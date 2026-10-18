@@ -227,6 +227,8 @@ async fn non_serial_ports_reject_control_lines() {
 
 #[tokio::test]
 async fn session_log_records_rx_and_tx() {
+    use std::os::unix::fs::PermissionsExt as _;
+
     use gtkterm_core::session::LogOp;
     use gtkterm_protocols::logfmt::LogFormat;
     let dir = tempfile::tempdir().unwrap();
@@ -261,6 +263,11 @@ async fn session_log_records_rx_and_tx() {
     .await;
     let done = s.log(LogOp::Stop).await.unwrap().unwrap();
     assert_eq!(done.bytes, 9 + 5);
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600,
+        "logs are private"
+    );
     let text = std::fs::read_to_string(&path).unwrap();
     let lines: Vec<_> = text.lines().collect();
     assert_eq!(lines[0], "Timestamp,Direction,Length,Data_Hex,Data_ASCII");

@@ -2,6 +2,7 @@
 
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
+use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::{Path, PathBuf};
 
 use gtkterm_protocols::logfmt::{self, LogFormat, LogMeta, LogRecord};
@@ -50,11 +51,14 @@ impl LogWriter {
             std::fs::create_dir_all(dir)?;
         }
         let append = append && matches!(format, LogFormat::Raw | LogFormat::Text);
+        // Logs can hold what was typed into a device console (passwords): readable only by
+        // the user, like the MCP audit log and the UI state.
         let file = OpenOptions::new()
             .create(true)
             .write(true)
             .append(append)
             .truncate(!append)
+            .mode(0o600)
             .open(path)?;
         let mut out = BufWriter::new(file);
         out.write_all(logfmt::header(format, &meta).as_bytes())?;

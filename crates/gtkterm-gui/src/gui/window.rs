@@ -2080,7 +2080,17 @@ impl Win {
         let settings = {
             let mut st = self.state.borrow_mut();
             if st.mcp.token.is_none() {
-                st.mcp.token = Some(random_token());
+                match random_token() {
+                    Ok(t) => st.mcp.token = Some(t),
+                    Err(e) => {
+                        drop(st);
+                        self.toast(&gettext_f(
+                            "MCP server could not start: {error}",
+                            &[("error", &e)],
+                        ));
+                        return;
+                    }
+                }
             }
             st.save();
             st.mcp.clone()
@@ -3046,8 +3056,9 @@ mod tests {
         );
         let _dev = rt().block_on(sender).unwrap();
         pump_until(Duration::from_millis(200), || false);
-        win.term.flush_output();
+        // Measured while streaming; the final flush below feeds the rest in one go on purpose.
         tick.remove();
+        win.term.flush_output();
         let ticks = ticks.borrow();
         let worst = ticks.windows(2).map(|w| w[1] - w[0]).max().unwrap_or_default();
         eprintln!("high-rate: {} ticks, worst gap {worst:?}", ticks.len());

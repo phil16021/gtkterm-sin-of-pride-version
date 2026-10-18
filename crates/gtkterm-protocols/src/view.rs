@@ -195,7 +195,7 @@ impl ViewFormatter {
         for &byte in data {
             if self.line.is_empty() && self.settings.show_index {
                 use std::io::Write as _;
-                let _ = write!(out, "{:08X}: ", self.byte_index as u32);
+                let _ = write!(out, "{:08X}: ", self.byte_index);
             }
             self.line.push(byte);
             radix.push(&mut out, byte);

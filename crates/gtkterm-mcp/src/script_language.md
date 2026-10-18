@@ -20,7 +20,7 @@ stay as written). Files written for the C GTKTerm run unchanged.
 | `set_dtr 0/1`, `set_rts on/off` | Modem output lines (`true/false`, `high/low` also work). |
 | `break [MS]` | Send a break (default 250 ms). |
 | `log TEXT` | Report a message. |
-| `exec PROGRAM ARGS…` | Run a program (only when exec is allowed). No shell: arguments are split first (quotes `'…'` `"…"` and `\` work), then `${}` is expanded inside each argument, so received data can never add arguments. Sets `${EXEC_OUTPUT}` (stdout without the final newline) and `${EXEC_STATUS}`. 60 s limit. |
+| `exec PROGRAM ARGS…` | Run a program (only when exec is allowed). No shell: arguments are split first (quotes `'…'` `"…"` and `\` work), then `${}` is expanded inside each argument, so received data can never add arguments. Sets `${EXEC_OUTPUT}` (stdout without the final newline) and `${EXEC_STATUS}`. 60 s limit. A program given as a path (`./flash.sh`) is relative to the script's folder; plain names are looked up in `PATH`. |
 | `send_file PROTOCOL FILE…` | Upload with `xmodem`, `xmodem_1k`, `ymodem`, `ymodem_g` or `zmodem`. Sets `${TRANSFER_BYTES}`. |
 | `receive_file PROTOCOL [DIR]` | Download into DIR (default: the script's directory). Sets `${TRANSFER_FILE}`. |
 | `include FILE` | Insert another script (paths relative to the including file). |

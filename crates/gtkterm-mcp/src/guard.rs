@@ -11,7 +11,7 @@ use jiff::Timestamp;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-/// Audit files larger than this are moved to `<name>.1` when the server starts writing.
+/// Audit files larger than this are moved to `<name>.1` before the next write.
 const AUDIT_ROTATE: u64 = 8 << 20;
 /// Arguments longer than this (as JSON) are cut in the audit log.
 const AUDIT_MAX_ARGS: usize = 4096;
@@ -105,14 +105,15 @@ pub(crate) fn audit_arguments(args: Option<&Map<String, Value>>) -> Value {
 #[derive(Debug)]
 pub(crate) struct AuditLog {
     path: PathBuf,
-    rotated: Mutex<bool>,
+    /// Serialises writes (and the size check before each one).
+    writing: Mutex<()>,
 }
 
 impl AuditLog {
     pub(crate) fn new(path: PathBuf) -> Self {
         Self {
             path,
-            rotated: Mutex::new(false),
+            writing: Mutex::new(()),
         }
     }
 
@@ -123,21 +124,19 @@ impl AuditLog {
     /// Append `entry`; failures are logged, never returned (auditing must not break tools).
     pub(crate) fn write(&self, entry: &AuditEntry<'_>) {
         use std::os::unix::fs::OpenOptionsExt as _;
-        let mut rotated = self
-            .rotated
+        let _writing = self
+            .writing
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let result = (|| -> std::io::Result<()> {
             if let Some(dir) = self.path.parent() {
                 std::fs::create_dir_all(dir)?;
             }
-            if !*rotated {
-                *rotated = true;
-                if std::fs::metadata(&self.path).is_ok_and(|m| m.len() > AUDIT_ROTATE) {
-                    let mut old = self.path.clone().into_os_string();
-                    old.push(".1");
-                    std::fs::rename(&self.path, old)?;
-                }
+            // Checked at every write: a long-running window must not grow the file forever.
+            if std::fs::metadata(&self.path).is_ok_and(|m| m.len() > AUDIT_ROTATE) {
+                let mut old = self.path.clone().into_os_string();
+                old.push(".1");
+                std::fs::rename(&self.path, old)?;
             }
             let mut f = std::fs::OpenOptions::new()
                 .create(true)

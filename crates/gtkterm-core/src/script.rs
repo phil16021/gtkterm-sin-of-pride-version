@@ -746,7 +746,7 @@ impl Runner<'_> {
         )
     }
 
-    async fn exec(&mut self, argv: &[String]) -> Result<(), String> {
+    async fn exec(&mut self, l: &Line, argv: &[String]) -> Result<(), String> {
         if !self.opts.allow_exec {
             return Err(
                 "exec is disabled (enable it in Preferences → Scripts, or --allow-exec / --mcp-allow-exec)"
@@ -755,7 +755,15 @@ impl Runner<'_> {
         }
         let argv: Vec<String> = argv.iter().map(|a| expand(a, &self.vars)).collect();
         let (prog, arguments) = argv.split_first().ok_or("exec needs a command")?;
-        let mut cmd = tokio::process::Command::new(prog);
+        // A program given as a path (`./flash.sh`, `tools/x`) is relative to the script's
+        // folder, not to wherever the application was started, and must be inside the allowed
+        // folders when they are restricted (MCP). Plain names are looked up in PATH.
+        let program = if prog.contains('/') {
+            self.path(l, prog)?
+        } else {
+            PathBuf::from(prog)
+        };
+        let mut cmd = tokio::process::Command::new(&program);
         cmd.args(arguments)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
@@ -865,7 +873,7 @@ impl Runner<'_> {
                 }
                 self.report.log.push(msg);
             }
-            Stmt::Exec(argv) => self.exec(argv).await?,
+            Stmt::Exec(argv) => self.exec(l, argv).await?,
             Stmt::Set(var, value) => {
                 let v = expand(value, &self.vars);
                 self.vars.insert(var.clone(), v);

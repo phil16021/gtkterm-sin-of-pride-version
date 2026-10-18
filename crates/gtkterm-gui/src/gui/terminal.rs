@@ -21,7 +21,7 @@ const PCRE2_MULTILINE: u32 = 0x0000_0400;
 /// How often queued output is handed to VTE.
 const FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
 /// Bytes fed to VTE per flush; the rest waits for the next one.
-const FEED_BUDGET: usize = 256 * 1024;
+const FEED_BUDGET: usize = 64 * 1024;
 /// Queued output beyond this is dropped (oldest first) with a notice: the display cannot keep
 /// up, but the session history, logs and MCP still have every byte.
 const MAX_PENDING: usize = 4 * 1024 * 1024;

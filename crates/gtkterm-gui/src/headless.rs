@@ -72,7 +72,10 @@ async fn start_http(
     manager: &Arc<SessionManager>,
 ) -> Result<Option<gtkterm_mcp::transport::HttpHandle>> {
     let Some(addr) = cli.mcp_http else { return Ok(None) };
-    let token = cli.mcp_token.clone().unwrap_or_else(random_token);
+    let token = match cli.mcp_token.clone() {
+        Some(t) => t,
+        None => random_token().context("cannot generate an MCP token")?,
+    };
     let security = HttpSecurity {
         token: Some(token.clone()),
         ..HttpSecurity::default()

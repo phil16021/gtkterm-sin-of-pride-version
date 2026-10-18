@@ -48,6 +48,12 @@ fn main() -> ExitCode {
         }
     }
     init_tracing(cli.verbose);
+    if let Some(addr) = cli.mcp_http.filter(|a| !a.ip().is_loopback()) {
+        eprintln!(
+            "gtkterm-sunshine: warning: the MCP endpoint listens on {addr}; anyone on the network who \
+             learns the token can drive the device, and the token travels unencrypted"
+        );
+    }
     let resolved = match cli.resolve() {
         Ok(r) => r,
         Err(e) => {

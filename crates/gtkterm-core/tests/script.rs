@@ -301,3 +301,30 @@ async fn the_report_log_is_bounded() {
     assert_eq!(report.log.len(), 10_000);
     assert_eq!(report.log.last().unwrap(), "end");
 }
+
+/// `exec ./tool` runs the program next to the script, wherever the application was started;
+/// under restricted folders (MCP) a program path outside them is refused.
+#[tokio::test]
+async fn exec_paths_are_relative_to_the_script() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let (port, _dev) = loopback::pair("loop");
+    let s = session_on(port).await;
+    let dir = tempfile::tempdir().unwrap();
+    let tool = dir.path().join("tool.sh");
+    std::fs::write(&tool, "#!/bin/sh\necho ran $1\n").unwrap();
+    std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let script = Script::parse("x", "exec ./tool.sh ok\nlog ${EXEC_OUTPUT}\n", Some(dir.path())).unwrap();
+    let opts = ScriptOptions {
+        allow_exec: true,
+        ..ScriptOptions::default()
+    };
+    assert_eq!(run(&s, &script, &opts).await.unwrap().log, ["ran ok"]);
+    let elsewhere = tempfile::tempdir().unwrap();
+    let restricted = ScriptOptions {
+        allow_exec: true,
+        allowed_dirs: Some(vec![elsewhere.path().to_owned()]),
+        ..ScriptOptions::default()
+    };
+    let err = run(&s, &script, &restricted).await.unwrap_err();
+    assert!(err.to_string().contains("outside the allowed"), "{err}");
+}
