@@ -5,7 +5,7 @@ Guidance for Claude Code in this repository.
 ## Project
 
 GTKTerm Sunshine: a Linux serial/TCP/UDP terminal with live data visualization ("Sunshine" packets)
-and a built-in MCP server. It is being **rewritten in Rust** on the `rust-rewrite` branch; the
+and a built-in MCP server, **rewritten in Rust** (on `master` since 2.0.0-rc.1); the
 original C/GTK4 code is preserved at tag `legacy-c-v1.99.1` (use `git show legacy-c-v1.99.1:src/...`
 to consult it). The plan, compatibility contract and C-defect regression list are in `docs/ROADMAP.md`.
 
