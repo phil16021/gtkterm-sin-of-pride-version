@@ -13,3 +13,9 @@ gui-windows = { max-threads = 1 }
 [[profile.default.overrides]]
 filter = 'package(gtkterm-gui) and test(/^gui::window::tests::/)'
 test-group = 'gui-windows'
+
+# lrzsz interop runs real sx/rx/sz/rz with their own timeouts; on a loaded machine they retry
+# a lot (each retry waits seconds), so allow more time before terminating.
+[[profile.default.overrides]]
+filter = 'package(gtkterm-core) and binary(transfer)'
+slow-timeout = { period = "60s", terminate-after = 5 }
