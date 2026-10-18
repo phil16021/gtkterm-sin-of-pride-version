@@ -3319,6 +3319,8 @@ fn about_dialog() -> adw::AboutDialog {
         .comments(gettext(
             "Serial, TCP and UDP terminal with live Sunshine data plots and an MCP server for AI agents.\nRust rewrite of the GTKTerm fork.",
         ))
+        .website("https://github.com/phil16021/gtkterm-sin-of-pride-version")
+        .issue_url("https://github.com/phil16021/gtkterm-sin-of-pride-version/issues")
         .copyright(gettext("© 2025-2026 Philipp; GTKTerm © Julien Schmitt and contributors"))
         .build()
 }

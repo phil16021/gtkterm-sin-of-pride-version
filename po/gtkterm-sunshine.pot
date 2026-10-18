@@ -2024,7 +2024,7 @@ msgid ""
 "Rust rewrite of the GTKTerm fork."
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:3322
+#: crates/gtkterm-gui/src/gui/window.rs:3324
 msgid "© 2025-2026 Philipp; GTKTerm © Julien Schmitt and contributors"
 msgstr ""
 

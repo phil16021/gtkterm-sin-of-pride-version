@@ -284,8 +284,10 @@ async fn tcp_server_drops_a_client_that_stops_reading() {
             .await
             .unwrap_or_else(|_| panic!("write {i} blocked on the stalled client"))
             .unwrap();
+        // Let the reading clients run (on a loaded machine yielding alone can starve them,
+        // and a client whose queue fills up is dropped like the stalled one).
         if i % 16 == 0 {
-            tokio::task::yield_now().await;
+            tokio::time::sleep(Duration::from_millis(2)).await;
         }
     }
     for r in readers {

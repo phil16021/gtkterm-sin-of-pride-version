@@ -24,7 +24,7 @@ version = "2.0.0-rc.3"
 edition = "2024"
 rust-version = "1.92"
 license = "GPL-3.0-or-later"
-repository = "http://192.168.1.100:8460/philipp/gtkterm-sin-of-pride-version"
+repository = "https://github.com/phil16021/gtkterm-sin-of-pride-version"
 authors = ["Philipp"]
 
 [workspace.dependencies]
