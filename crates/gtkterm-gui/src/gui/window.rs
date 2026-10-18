@@ -2600,6 +2600,12 @@ mod tests {
         // Charts were removed by clear-charts; new data brings them back.
         rt().block_on(dev.send(&b"{env|T|1}\n"[..])).unwrap();
         assert!(pump_until(Duration::from_secs(2), || win.panel.len() == 1));
+        // An agent clearing all charts (MCP sunshine_clear) removes the tabs too.
+        win.session
+            .with_sunshine_mut(gtkterm_core::sunshine::SunshineStore::clear);
+        win.session
+            .notify_sunshine(gtkterm_core::sunshine::SunshineUpdate::ChartsChanged);
+        assert!(pump_until(Duration::from_secs(2), || win.panel.len() == 0));
 
         // Macros: a stored macro with a shortcut is bound and plays via its action.
         win.manager

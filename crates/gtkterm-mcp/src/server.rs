@@ -959,6 +959,7 @@ impl GtkTermMcp {
             .find(|k| kind_name(*k) == p.kind.to_lowercase())
             .ok_or_else(|| format!("unknown chart type {:?}; use line, bar, pie or scatter", p.kind))?;
         session.with_sunshine_mut(|s| s.set_kind(&p.id, kind));
+        session.notify_sunshine(gtkterm_core::sunshine::SunshineUpdate::ChartUpdated(p.id.clone()));
         Ok(Self::done(
             &session,
             format!("chart {} is now {}", p.id, kind_name(kind)),
@@ -1587,6 +1588,7 @@ impl GtkTermMcp {
         if !found {
             return Err(format!("no chart {:?}", p.id));
         }
+        session.notify_sunshine(gtkterm_core::sunshine::SunshineUpdate::ChartUpdated(p.id.clone()));
         Ok(Self::done(
             &session,
             format!("chart {} {}", p.id, if p.paused { "paused" } else { "resumed" }),
@@ -1600,14 +1602,15 @@ impl GtkTermMcp {
         Parameters(p): Parameters<ClearChartParams>,
     ) -> Result<Json<Done>, String> {
         let session = self.session(p.session)?;
-        match &p.id {
-            Some(id) => {
-                let found = session.with_sunshine_mut(|s| s.chart_mut(id).map(ChartData::clear).is_some());
-                if !found {
-                    return Err(format!("no chart {id:?}"));
-                }
+        if let Some(id) = &p.id {
+            let found = session.with_sunshine_mut(|s| s.chart_mut(id).map(ChartData::clear).is_some());
+            if !found {
+                return Err(format!("no chart {id:?}"));
             }
-            None => session.with_sunshine_mut(gtkterm_core::sunshine::SunshineStore::clear),
+            session.notify_sunshine(gtkterm_core::sunshine::SunshineUpdate::ChartUpdated(id.clone()));
+        } else {
+            session.with_sunshine_mut(gtkterm_core::sunshine::SunshineStore::clear);
+            session.notify_sunshine(gtkterm_core::sunshine::SunshineUpdate::ChartsChanged);
         }
         Ok(Self::done(&session, "cleared"))
     }

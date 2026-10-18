@@ -612,9 +612,15 @@ impl Session {
         f(&lock(&self.shared.sunshine))
     }
 
-    /// Run `f` with mutable access to the Sunshine store.
+    /// Run `f` with mutable access to the Sunshine store. Call [`Session::notify_sunshine`]
+    /// afterwards so that views (the window) follow the change.
     pub fn with_sunshine_mut<R>(&self, f: impl FnOnce(&mut SunshineStore) -> R) -> R {
         f(&mut lock(&self.shared.sunshine))
+    }
+
+    /// Tell subscribers that charts changed outside the data path.
+    pub fn notify_sunshine(&self, update: SunshineUpdate) {
+        let _ = self.events.send(SessionEvent::Sunshine(update));
     }
 
     /// Wait until received data starting at `cursor` matches `re`.

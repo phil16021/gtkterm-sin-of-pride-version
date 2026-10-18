@@ -351,10 +351,16 @@ impl ChartView {
     }
 
     fn refresh(&self) {
-        if let Some(kind) = self.session.with_sunshine(|s| s.chart(&self.id).map(|c| c.kind)) {
+        if let Some((kind, paused)) = self
+            .session
+            .with_sunshine(|s| s.chart(&self.id).map(|c| (c.kind, c.paused)))
+        {
             let idx = ChartKind::ALL.iter().position(|k| *k == kind).unwrap_or(0) as u32;
             if self.kind.selected() != idx {
                 self.kind.set_selected(idx);
+            }
+            if self.pause.is_active() != paused {
+                self.pause.set_active(paused);
             }
         }
         if self.area.is_mapped() {
@@ -544,6 +550,14 @@ impl VizPanel {
                 false
             }
             SunshineUpdate::Rejected { .. } => {
+                self.update_footer();
+                false
+            }
+            SunshineUpdate::ChartsChanged => {
+                self.sync();
+                for (_, view) in self.tabs.borrow().values() {
+                    view.refresh();
+                }
                 self.update_footer();
                 false
             }

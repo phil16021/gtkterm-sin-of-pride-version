@@ -213,8 +213,10 @@ pub struct SunshineStats {
 pub enum SunshineUpdate {
     /// A new chart was created.
     ChartAdded(String),
-    /// New data for an existing chart.
+    /// New data or settings (type, pause) for an existing chart.
     ChartUpdated(String),
+    /// Charts were removed or cleared from outside the window (e.g. by an agent): resync.
+    ChartsChanged,
     /// A packet line was rejected.
     Rejected {
         /// The offending line (truncated).
