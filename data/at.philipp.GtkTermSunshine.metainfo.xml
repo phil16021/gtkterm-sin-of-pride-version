@@ -13,10 +13,13 @@
       {temp|Inside|21.5} are plotted live as line, bar, pie or scatter charts. A built-in
       Model Context Protocol server lets AI agents read and drive connected devices.</p>
   </description>
-  <url type="homepage">http://192.168.1.100:8460/philipp/gtkterm-sin-of-pride-version</url>
   <launchable type="desktop-id">at.philipp.GtkTermSunshine.desktop</launchable>
+  <provides>
+    <mediatype>text/x-gtkterm-script</mediatype>
+  </provides>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="2.0.0~rc3" date="2026-10-18"/>
     <release version="2.0.0~rc2" date="2026-10-18"/>
     <release version="2.0.0~rc1" date="2026-10-18"/>
     <release version="2.0.0~alpha5" date="2026-10-18"/>

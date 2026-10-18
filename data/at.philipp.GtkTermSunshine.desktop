@@ -3,9 +3,15 @@ Type=Application
 Name=GTKTerm Sunshine
 GenericName=Serial Terminal
 Comment=Serial, TCP and UDP terminal with live data plots and an MCP server
-Exec=gtkterm-sunshine
+Exec=gtkterm-sunshine %F
 Icon=at.philipp.GtkTermSunshine
 Terminal=false
 Categories=GTK;Development;Electronics;
 Keywords=serial;uart;rs232;rs485;tty;plot;mcp;
 StartupNotify=true
+MimeType=text/x-gtkterm-script;
+Actions=new-tab;
+
+[Desktop Action new-tab]
+Name=New Tab
+Exec=gtkterm-sunshine --new-tab

@@ -6,12 +6,15 @@ and a built-in **MCP server**, so AI agents such as Claude Code can drive your d
 ![Firmware output with live Sunshine charts](docs/screenshots/main.png)
 
 This is a Rust rewrite of the GTKTerm "Sin of Pride" fork (the C version lives at tag
-`legacy-c-v1.99.1`). Status **2.0.0-rc.2**: every feature of the C version is implemented
+`legacy-c-v1.99.1`). Status **2.0.0-rc.3**: every feature of the C version is implemented
 (including its never-wired modules; see [docs/feature-parity.md](docs/feature-parity.md)): GTK 4 /
 libadwaita application, headless terminal, MCP server, macros, presets, protocol decoders, file
 transfers, automation scripts, port control and the signal monitor. rc.2 adds tabs (one connection
 each), a send bar, DTR/RTS at open, auto-reconnect, quick capture, chart controls and many
-robustness fixes. 2.0.0 follows the hardware checklist; see [docs/ROADMAP.md](docs/ROADMAP.md).
+robustness fixes; rc.3 completes the MCP server (subscriptions, completions, rate limit,
+activity pane), the QA tooling and the desktop integration (one instance, script files, new-tab
+action, translated core messages). 2.0.0 follows the hardware checklist; see
+[docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Sunshine packets
 
@@ -156,7 +159,15 @@ gtkterm-sunshine --headless --hexdump --tcp 192.168.1.50:23     # hex dump of a 
 gtkterm-sunshine --headless --udp '9000->10.0.0.7:9001' --log-file run.csv
 gtkterm-sunshine -U bench -p /dev/ttyACM0 -s 921600 -S          # save a profile
 gtkterm-sunshine -L                                             # list profiles
+gtkterm-sunshine --new-tab -p /dev/ttyUSB1 -s 9600              # with the window open: a new tab
+gtkterm-sunshine probe.script                                   # open a script in the editor
 ```
+
+One window serves every launch: a second `gtkterm-sunshine` with a port, `--tcp`/`--udp`,
+`-U profile` or `--new-tab` adds a tab to the running window (and `--script` runs there);
+without them it only brings the window to the front. `.script` files open in the script
+editor, also from the file manager, and the launcher's *New Tab* action opens a tab.
+`--config FILE` starts a separate instance with that configuration.
 
 The GTKTerm options keep their names (`--port/-p`, `--baudrate/-s`, `--bits/-b`, `--parity/-a`,
 `--stopbits/-t`, `--flow_control/-w`, `--term_echo/-e on|off`, `--show_config/-V`, ...); `-h`

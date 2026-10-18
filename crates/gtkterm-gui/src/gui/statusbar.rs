@@ -185,7 +185,10 @@ impl StatusBar {
             PortState::Open => (gettext("Connected"), Some("state-open")),
             PortState::Opening => (gettext("Connecting…"), None),
             PortState::Closed => (gettext("Disconnected"), None),
-            PortState::Error(e) => (gettext_f("Error: {error}", &[("error", e)]), Some("state-error")),
+            PortState::Error(e) => (
+                gettext_f("Error: {error}", &[("error", &super::i18n::core(e))]),
+                Some("state-error"),
+            ),
         };
         self.state.set_text(&text);
         self.state.set_tooltip_text(Some(&text));

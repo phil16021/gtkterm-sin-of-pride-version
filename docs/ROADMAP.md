@@ -30,6 +30,11 @@
 > tagged by client; configurable UDP datagram size. The Inspector found 18 tools that clients
 > dropped (output schema without `type: object`) and nullable parameters; both fixed. Not done:
 > UUCP lock files and TIOCMIWAIT (reasons in docs/debugging.md).
+> R15 is **done** without the Flatpak (decision 2026-10-18: skipped; the user's choice, no SDK
+> installed): one instance per user (a second launch hands its command line to the window and
+> adds a tab), `.script` MIME type and `%F` (files open in the script editor), a *New Tab*
+> desktop action, core error and event messages translated at the GUI boundary, and no
+> homepage URL (removed until a public one exists). 2.0.0-rc.3.
 
 ## Context
 

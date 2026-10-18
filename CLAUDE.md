@@ -32,7 +32,7 @@ cargo test --workspace                  # everything (needs libgtk-4-dev, libadw
 cargo clippy --workspace --all-targets -- -D warnings
 cargo xtask check                       # fmt + clippy + all tests (GUI under xvfb-run when GTK dev libs exist)
 cargo xtask install --destdir $SCRATCH/stage   # packaging check
-GTKTERM_GUI_TESTS=1 GSK_RENDERER=cairo xvfb-run -a cargo test -p gtkterm-gui
+GTKTERM_GUI_TESTS=1 GSK_RENDERER=cairo GTK_A11Y=none xvfb-run -a cargo nextest run -p gtkterm-gui
 cargo +nightly fuzz run <target>        # fuzz/ (cargo-fuzz)
 ```
 

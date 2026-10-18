@@ -342,6 +342,17 @@ impl ScriptWindow {
         self.buffer.set_text(text);
     }
 
+    /// Open `path` (from the command line or the file manager), asking first if the current
+    /// script has unsaved changes.
+    pub fn open_path(self: &Rc<Self>, path: PathBuf) {
+        self.unless_unsaved(move |w: &Rc<Self>| {
+            if let Err(e) = w.load(&path) {
+                w.set_status(&e, true);
+            }
+            w.present();
+        });
+    }
+
     /// Load a file into the editor.
     pub fn load(&self, path: &std::path::Path) -> Result<(), String> {
         let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;

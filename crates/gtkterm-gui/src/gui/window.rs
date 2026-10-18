@@ -524,7 +524,9 @@ impl Win {
             .is_some_and(|c| std::ptr::eq(Rc::as_ptr(&c), self))
     }
 
+    /// Show a short message; texts from the core (errors) are translated here.
     fn toast(&self, text: &str) {
+        let text = &super::i18n::core(text);
         #[cfg(test)]
         TOASTS.with(|t| t.borrow_mut().push(text.to_owned()));
         self.toast
@@ -684,8 +686,10 @@ impl Win {
         );
         match state {
             PortState::Error(e) => {
-                self.banner
-                    .set_title(&gettext_f("Connection error: {error}", &[("error", e)]));
+                self.banner.set_title(&gettext_f(
+                    "Connection error: {error}",
+                    &[("error", &super::i18n::core(e))],
+                ));
                 self.banner.set_revealed(true);
             }
             _ => self.banner.set_revealed(false),
@@ -1000,12 +1004,13 @@ impl Win {
                     }
                     PortState::Error(e) => {
                         self.send_bar.stop_repeating();
-                        self.term.notice(&gettext_f("error: {error}", &[("error", e)]));
+                        self.term
+                            .notice(&gettext_f("error: {error}", &[("error", &super::i18n::core(e))]));
                     }
                     PortState::Opening => {}
                 }
             }
-            SessionEvent::Info(msg) => self.term.notice(msg),
+            SessionEvent::Info(msg) => self.term.notice(&super::i18n::core(msg)),
             SessionEvent::Modem(m) => self.status.set_modem(Some(*m)),
             SessionEvent::Sunshine(u) => {
                 // Show the panel before the first tab is added, so the tab bar never lays out at zero width.
@@ -2162,6 +2167,42 @@ impl Win {
         });
     }
 
+    /// Open script files in this tab's editor (from the command line or the file manager).
+    /// The editor holds one script; with several, the first is opened.
+    pub fn open_scripts(self: &Rc<Self>, paths: &[PathBuf]) {
+        let Some(first) = paths.first() else { return };
+        if paths.len() > 1 {
+            self.toast(&gettext(
+                "Only one script can be open at a time; opened the first.",
+            ));
+        }
+        self.script_window().open_path(first.clone());
+    }
+
+    /// Run `path` once this tab's port is open (`--script` of a second launch).
+    pub fn run_script_when_connected(&self, path: PathBuf, allow_exec: bool) {
+        if allow_exec {
+            self.cli_allow_exec.set(true);
+        }
+        *self.pending_script.borrow_mut() = Some(path);
+    }
+
+    /// The profiles as saved (for resolving a second launch's command line).
+    pub fn manager_config(&self) -> gtkterm_core::config::Config {
+        self.manager.with_config(Clone::clone)
+    }
+
+    /// Whether new tabs connect right away (Preferences → start connected).
+    pub fn connects_at_start(&self) -> bool {
+        self.state.borrow().connect_at_start
+    }
+
+    /// Bring the window to the front with this tab selected.
+    pub fn present_tab(&self) {
+        self.tabs.view.set_selected_page(&self.page);
+        self.window.present();
+    }
+
     fn script_window(self: &Rc<Self>) -> Rc<super::scripts::ScriptWindow> {
         if let Some(w) = self.script_window.borrow().as_ref() {
             return Rc::clone(w);
@@ -2835,6 +2876,11 @@ impl Win {
             .manager
             .with_config(|c| c.profile(name).cloned())
             .unwrap_or_default();
+        self.open_tab_with(name, profile, connect)
+    }
+
+    /// Open a new tab for profile `name` with these settings (command line overrides applied).
+    pub fn open_tab_with(&self, name: &str, profile: Profile, connect: bool) -> Rc<Self> {
         // The session's actor runs on the I/O runtime.
         let session = {
             let _rt = rt().enter();
@@ -3273,7 +3319,6 @@ fn about_dialog() -> adw::AboutDialog {
         .comments(gettext(
             "Serial, TCP and UDP terminal with live Sunshine data plots and an MCP server for AI agents.\nRust rewrite of the GTKTerm fork.",
         ))
-        .website("http://192.168.1.100:8460/philipp/gtkterm-sin-of-pride-version")
         .copyright(gettext("© 2025-2026 Philipp; GTKTerm © Julien Schmitt and contributors"))
         .build()
 }
@@ -4057,6 +4102,39 @@ mod tests {
         assert_eq!(UNEXPECTED_LOGS.load(Ordering::SeqCst), 0, "GTK warnings");
     }
 
+    /// What a second launch does: a tab with the command line's profile, and script files in
+    /// the editor (the first of several, with a note).
+    #[gtk::test]
+    fn command_line_tabs_and_scripts() {
+        if std::env::var_os("GTKTERM_GUI_TESTS").is_none() {
+            return;
+        }
+        let (win, _dev, dir) = setup();
+        let script = dir.path().join("probe.script");
+        std::fs::write(&script, "send AT\\r\nexpect OK\n").unwrap();
+        TOASTS.with(|t| t.borrow_mut().clear());
+        win.open_scripts(&[script.clone(), dir.path().join("second.script")]);
+        let sw = win.script_window.borrow().clone().expect("editor opened");
+        assert!(pump_until(Duration::from_secs(2), || sw
+            .text()
+            .contains("expect OK")));
+        assert!(TOASTS.with(|t| t.borrow().iter().any(|m| m.contains("one script"))));
+
+        let mut profile = Profile::default();
+        if let Connection::Serial(s) = &mut profile.connection {
+            s.port = "/dev/ttyS9".into();
+            s.baudrate = 57_600;
+        }
+        let tab = win.open_tab_with("lab", profile, false);
+        tab.present_tab();
+        assert_eq!(win.tabs.view.n_pages(), 2);
+        assert!(tab.is_current());
+        assert_eq!(*tab.profile_name.borrow(), "lab");
+        assert_eq!(tab.profile.borrow().connection.serial().unwrap().baudrate, 57_600);
+        sw.window.close();
+        assert_eq!(UNEXPECTED_LOGS.load(Ordering::SeqCst), 0, "GTK warnings");
+    }
+
     /// The activity pane lists the embedded server's tool calls, filters them and clears.
     #[gtk::test]
     fn agent_activity_lists_and_filters_calls() {
@@ -4340,7 +4418,7 @@ mod tests {
     }
 
     /// The README screenshots: realistic scenes rendered from the real window.
-    /// `GTKTERM_SCREENSHOTS=docs/screenshots GSK_RENDERER=cairo xvfb-run -a cargo test -p gtkterm-gui readme_screenshots`,
+    /// `GTKTERM_SCREENSHOTS=docs/screenshots GSK_RENDERER=cairo GTK_A11Y=none xvfb-run -a cargo test -p gtkterm-gui readme_screenshots`,
     /// then in docs/screenshots (drop the tab bar and the toolbar of each chart):
     /// `for f in chart-*.png; do convert $f -chop 0x34 -gravity south -chop 0x46 +repage $f; done;
     /// convert chart-bar.png chart-pie.png chart-scatter.png +append -strip charts.png; rm chart-*.png`

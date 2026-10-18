@@ -29,3 +29,5 @@ lines or RS485 direction control. Run this list on real hardware before a releas
 | 22 | Software RS485 (adapter without kernel RS485), close the port in the middle of a long send | RTS returns to idle (logic analyser), the bus is not left driven | ☐ |
 | 23 | ESP32 or Arduino board with auto-reset, *DTR/RTS when opening* both *Off* | connecting does not reset the board (no boot banner); with *As the driver sets it* it may reset as before | ☐ |
 | 24 | USB adapter, *Reconnect automatically* on, unplug and replug while connected | the tab shows the error, then reconnects within a few seconds of replugging; a log started on connect continues in a new file | ☐ |
+| 25 | Desktop session after `cargo xtask install` (no device needed) | double-clicking a `.script` in Nautilus opens it in the running window's script editor; the launcher's *New Tab* adds a tab; `gtkterm-sunshine -p /dev/ttyUSB0` while open adds a tab instead of a second window | ☐ |
+| 26 | `LANGUAGE=de`, open a port that is in use by another program | the banner reads „… wird von einem anderen Programm benutzt“ (core messages translated) | ☐ |

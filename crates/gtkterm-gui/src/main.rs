@@ -110,6 +110,12 @@ fn main() -> ExitCode {
         #[cfg(feature = "gui")]
         return gui::run(cli, resolved);
     }
+    if !cli.files.is_empty() {
+        eprintln!(
+            "gtkterm-sunshine: script files open in the window's editor; use --script FILE without a window"
+        );
+        return ExitCode::from(2);
+    }
     if !cli.mcp_stdio && !cli.headless && cli.mcp_http.is_none() {
         eprintln!("gtkterm-sunshine was built without the GUI; use --headless, --mcp-stdio or --mcp-http");
         return ExitCode::from(2);

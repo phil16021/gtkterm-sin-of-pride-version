@@ -5,6 +5,7 @@
 -->
 <language id="gtkterm-script" name="GTKTerm Script" version="2.0" _section="Scripts">
   <metadata>
+    <property name="mimetypes">text/x-gtkterm-script</property>
     <property name="globs">*.script</property>
     <property name="line-comment-start">#</property>
   </metadata>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- GTKTerm Sunshine automation scripts; the file manager opens them in the script editor. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="text/x-gtkterm-script">
+    <comment>GTKTerm automation script</comment>
+    <sub-class-of type="text/plain"/>
+    <glob pattern="*.script"/>
+    <icon name="at.philipp.GtkTermSunshine"/>
+  </mime-type>
+</mime-info>

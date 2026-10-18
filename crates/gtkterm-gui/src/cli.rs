@@ -258,6 +258,13 @@ pub struct Cli {
     /// Allow `exec` in scripts started from the command line or the window.
     #[arg(long = "allow-exec", help_heading = "Automation")]
     pub allow_exec: bool,
+    /// Automation scripts to open in the script editor (the file manager passes them here).
+    #[arg(value_name = "SCRIPT")]
+    pub files: Vec<PathBuf>,
+    /// With a window already open: add a tab (for the default or the --profile profile)
+    /// instead of only bringing the window to the front.
+    #[arg(long = "new-tab", help_heading = "Modes")]
+    pub new_tab: bool,
     /// Let MCP `file_send` read files from DIR as well as the transfer directory (repeatable).
     #[arg(long = "mcp-allow-dir", value_name = "DIR", help_heading = "MCP")]
     pub mcp_allow_dir: Vec<PathBuf>,
@@ -500,6 +507,22 @@ impl Cli {
         if let Some(m) = macro_message {
             import_message = Some(import_message.map_or(m.clone(), |prev| format!("{prev}\n{m}")));
         }
+        let (profile_name, profile, explicit_connection) = self.resolve_profile(&config)?;
+        Ok(Resolved {
+            config,
+            config_path,
+            import_message,
+            profile_name,
+            profile,
+            explicit_connection,
+            op: self.config_op(),
+            macros: (macro_store, macros_path),
+        })
+    }
+
+    /// The profile the command line selects in `config`, with its overrides applied, and
+    /// whether it chose a connection explicitly.
+    pub fn resolve_profile(&self, config: &Config) -> Result<(String, Profile, bool), String> {
         let profile_name = self
             .use_config
             .clone()
@@ -537,16 +560,61 @@ impl Cli {
             explicit_connection = true;
         }
         profile.validate().map_err(|e| e.to_string())?;
-        Ok(Resolved {
-            config,
-            config_path,
-            import_message,
-            profile_name,
-            profile,
-            explicit_connection,
-            op: self.config_op(),
-            macros: (macro_store, macros_path),
-        })
+        Ok((profile_name, profile, explicit_connection))
+    }
+
+    /// True if a second launch should add a tab to the running window: it names a
+    /// connection or a profile, or asks for one.
+    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
+    pub fn wants_tab(&self) -> bool {
+        self.new_tab
+            || self.use_config.is_some()
+            || self.port.is_some()
+            || self.tcp.is_some()
+            || self.tcp_listen.is_some()
+            || self.udp.is_some()
+    }
+
+    /// Options a running window cannot take from a second launch.
+    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
+    pub fn ignored_by_running_window(&self) -> Vec<&'static str> {
+        let mut v = Vec::new();
+        if self.mcp_http.is_some() {
+            v.push("--mcp-http");
+        }
+        if self.mcp_token.is_some() {
+            v.push("--mcp-token");
+        }
+        if self.mcp_read_only {
+            v.push("--mcp-read-only");
+        }
+        if self.mcp_rate.is_some() {
+            v.push("--mcp-rate");
+        }
+        if !self.mcp_allow_dir.is_empty() {
+            v.push("--mcp-allow-dir");
+        }
+        if self.log_file.is_some() {
+            v.push("--log-file");
+        }
+        v
+    }
+
+    /// Resolve relative paths against `cwd` (a second launch runs in another directory).
+    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
+    pub fn absolutize(&mut self, cwd: &std::path::Path) {
+        let fix = |p: &mut PathBuf| {
+            if p.is_relative() {
+                *p = cwd.join(&*p);
+            }
+        };
+        self.files.iter_mut().for_each(fix);
+        if let Some(p) = self.script.as_mut() {
+            fix(p);
+        }
+        if let Some(p) = self.log_file.as_mut() {
+            fix(p);
+        }
     }
 
     /// The log format to use for `--log-file`.
@@ -603,6 +671,46 @@ mod tests {
 
     fn parse(args: &[&str]) -> Cli {
         Cli::try_parse_from(std::iter::once("gtkterm-sunshine").chain(args.iter().copied())).unwrap()
+    }
+
+    #[test]
+    fn second_launch_options() {
+        assert!(!parse(&[]).wants_tab());
+        assert!(
+            !parse(&["x.script"]).wants_tab(),
+            "a script alone only opens the editor"
+        );
+        for args in [
+            &["--new-tab"][..],
+            &["-p", "/dev/ttyUSB1"],
+            &["-U", "lab"],
+            &["--tcp", "h:23"],
+        ] {
+            assert!(parse(args).wants_tab(), "{args:?}");
+        }
+        let mut cli = parse(&[
+            "a.script",
+            "/abs/b.script",
+            "--script",
+            "run.script",
+            "--log-file",
+            "l.log",
+        ]);
+        cli.absolutize(std::path::Path::new("/work"));
+        assert_eq!(
+            cli.files,
+            [PathBuf::from("/work/a.script"), PathBuf::from("/abs/b.script")]
+        );
+        assert_eq!(cli.script, Some(PathBuf::from("/work/run.script")));
+        assert_eq!(cli.ignored_by_running_window(), ["--log-file"]);
+        let cfg = Config::default();
+        let (name, profile, explicit) = parse(&["-p", "/dev/ttyS3", "-s", "9600"])
+            .resolve_profile(&cfg)
+            .unwrap();
+        assert_eq!(name, DEFAULT_PROFILE);
+        assert!(explicit);
+        assert_eq!(profile.connection.serial().unwrap().baudrate, 9600);
+        assert!(parse(&["-U", "nope"]).resolve_profile(&cfg).is_err());
     }
 
     #[test]

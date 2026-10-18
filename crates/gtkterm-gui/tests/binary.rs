@@ -282,3 +282,129 @@ async fn headless_script_exits_with_its_result() {
     let out = run(&script).await.unwrap();
     assert!(String::from_utf8_lossy(&out.stderr).contains("probe.script:1: unknown command"));
 }
+
+/// Sessions of a running window, through its embedded MCP endpoint (raw HTTP, 2026-07-28).
+fn mcp_sessions(port: u16, token: &str) -> String {
+    use std::io::{Read as _, Write as _};
+    let body = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_ports","arguments":{},"_meta":{"io.modelcontextprotocol/clientInfo":{"name":"test","version":"1"},"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#;
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    write!(
+        s,
+        "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\n\
+         Accept: application/json, text/event-stream\r\nMcp-Protocol-Version: 2026-07-28\r\nMcp-Method: tools/call\r\n\
+         Mcp-Name: list_ports\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+    let mut out = String::new();
+    let _ = s.read_to_string(&mut out);
+    out
+}
+
+/// A second launch hands its command line to the running window: with a port it adds a tab
+/// that connects; without arguments it only raises the window. Runs on a private D-Bus session
+/// (never the desktop's, where it could reach a real window) and needs an X server (xvfb-run).
+#[test]
+fn second_launch_opens_a_tab_in_the_running_window() {
+    if std::env::var_os("GTKTERM_GUI_TESTS").is_none() || std::env::var_os("DISPLAY").is_none() {
+        return;
+    }
+    if std::env::var_os("GTKTERM_PRIVATE_BUS").is_none() {
+        // Re-run this test inside its own bus.
+        let status = std::process::Command::new("dbus-run-session")
+            .args(["--", std::env::current_exe().unwrap().to_str().unwrap()])
+            .args([
+                "--exact",
+                "second_launch_opens_a_tab_in_the_running_window",
+                "--nocapture",
+            ])
+            .env("GTKTERM_PRIVATE_BUS", "1")
+            .status()
+            .expect("dbus-run-session (package dbus) is needed for this test");
+        assert!(status.success());
+        return;
+    }
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let _rt = rt.enter(); // the PTY pairs register with the reactor
+    let home = tempfile::tempdir().unwrap();
+    let env = |c: &mut std::process::Command| {
+        c.env("XDG_CONFIG_HOME", home.path().join("config"))
+            .env("XDG_DATA_HOME", home.path().join("data"))
+            .env("XDG_STATE_HOME", home.path().join("state"))
+            .env("GSK_RENDERER", "cairo")
+            // A private bus would start its own accessibility bus, whose cleanup removes the
+            // desktop's at-spi socket; tests need no accessibility.
+            .env("GTK_A11Y", "none")
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+    };
+    let a = PtyPair::new().unwrap();
+    let b = PtyPair::new().unwrap();
+    let mcp_port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let mut primary = std::process::Command::new(BIN);
+    primary.args([
+        "-p",
+        &a.path_str(),
+        "--mcp-http",
+        &mcp_port.to_string(),
+        "--mcp-token",
+        "t0k",
+    ]);
+    env(&mut primary);
+    let mut primary = primary.spawn().unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while !mcp_sessions_ready(mcp_port) {
+        assert!(std::time::Instant::now() < deadline, "the window did not come up");
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    let run = |args: &[&str]| {
+        let mut c = std::process::Command::new(BIN);
+        c.args(args);
+        env(&mut c);
+        c.output().unwrap()
+    };
+    // No arguments: the window is raised, nothing else happens.
+    assert!(run(&[]).status.success());
+    // A port: a new tab connects to it; options of the window itself are reported as ignored.
+    let out = run(&[
+        "--new-tab",
+        "-p",
+        &b.path_str(),
+        "-s",
+        "9600",
+        "--log-file",
+        "x.log",
+    ]);
+    assert!(out.status.success(), "{out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("ignored: --log-file"),
+        "{out:?}"
+    );
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let sessions = mcp_sessions(mcp_port, "t0k");
+        if sessions.contains(&format!("{} 9600-8-N-1", b.path_str())) {
+            assert!(sessions.contains(&a.path_str()), "{sessions}");
+            assert_eq!(
+                sessions.matches("\"id\":").count() - 1,
+                2,
+                "two sessions: {sessions}"
+            );
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "no new tab: {sessions}");
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    let _ = primary.kill();
+    let _ = primary.wait();
+}
+
+fn mcp_sessions_ready(port: u16) -> bool {
+    std::net::TcpStream::connect(("127.0.0.1", port)).is_ok()
+        && mcp_sessions(port, "t0k").contains("sessions")
+}

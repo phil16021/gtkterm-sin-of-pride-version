@@ -47,9 +47,16 @@ pub fn run(cli: Cli, resolved: Resolved) -> ExitCode {
     let session = manager.create(&resolved.profile_name, resolved.profile.terminal.clone());
     session.apply_decoder_config(resolved.profile.decoder);
 
+    // One instance per user: a second launch hands its command line to the running window
+    // (a new tab, script files). A separate configuration file gets its own instance.
+    let flags = if cli.config_file.is_some() {
+        gio::ApplicationFlags::NON_UNIQUE | gio::ApplicationFlags::HANDLES_COMMAND_LINE
+    } else {
+        gio::ApplicationFlags::HANDLES_COMMAND_LINE
+    };
     let app = adw::Application::builder()
         .application_id(APP_ID)
-        .flags(gio::ApplicationFlags::NON_UNIQUE)
+        .flags(flags)
         .build();
     app.connect_startup(|_| {
         let css = gtk::CssProvider::new();
@@ -89,7 +96,8 @@ pub fn run(cli: Cli, resolved: Resolved) -> ExitCode {
     }));
     let holder: Rc<RefCell<Option<Rc<window::Win>>>> = Rc::default();
     let h = Rc::clone(&holder);
-    app.connect_activate(move |app| {
+    let files = cli.files.clone();
+    let open_window = move |app: &adw::Application| {
         if let Some(win) = h.borrow().as_ref() {
             win.window.present();
             return;
@@ -107,13 +115,76 @@ pub fn run(cli: Cli, resolved: Resolved) -> ExitCode {
         );
         win.watch_unix_signals();
         win.restore_tabs();
+        win.open_scripts(&files);
         *h.borrow_mut() = Some(win);
+    };
+    let open_window = Rc::new(open_window);
+    let ow = Rc::clone(&open_window);
+    app.connect_activate(move |app| ow(app));
+    let h = Rc::clone(&holder);
+    app.connect_command_line(move |app, cmdline| {
+        if !cmdline.is_remote() {
+            open_window(app);
+            return glib::ExitCode::SUCCESS;
+        }
+        let window = h.borrow().clone();
+        if let Some(win) = window {
+            remote_launch(&win, cmdline)
+        } else {
+            open_window(app);
+            glib::ExitCode::SUCCESS
+        }
     });
-    let status = app.run_with_args::<&str>(&["gtkterm-sunshine"]);
+    // The real arguments, so a second launch can hand them over; this process parsed them
+    // already (clap), GTK sees no options of its own.
+    let args: Vec<String> = std::env::args().collect();
+    let status = app.run_with_args(&args);
     holder.borrow_mut().take();
     if status == glib::ExitCode::SUCCESS {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
     }
+}
+
+/// A second `gtkterm-sunshine` started while this window is open: open the tab or scripts it
+/// asks for. Its own process exits with the returned status.
+fn remote_launch(win: &Rc<window::Win>, cmdline: &gio::ApplicationCommandLine) -> glib::ExitCode {
+    use clap::Parser as _;
+    let mut cli = match Cli::try_parse_from(cmdline.arguments()) {
+        Ok(c) => c,
+        Err(e) => {
+            cmdline.printerr_literal(&e.render().to_string());
+            return glib::ExitCode::from(2);
+        }
+    };
+    if let Some(cwd) = cmdline.cwd() {
+        cli.absolutize(&cwd);
+    }
+    let ignored = cli.ignored_by_running_window();
+    if !ignored.is_empty() {
+        cmdline.printerr_literal(&format!(
+            "gtkterm-sunshine: the window is already running; ignored: {}\n",
+            ignored.join(", ")
+        ));
+    }
+    let mut target = Rc::clone(win);
+    if cli.wants_tab() {
+        let config = win.manager_config();
+        let (name, profile, explicit) = match cli.resolve_profile(&config) {
+            Ok(r) => r,
+            Err(e) => {
+                cmdline.printerr_literal(&format!("gtkterm-sunshine: {e}\n"));
+                return glib::ExitCode::from(2);
+            }
+        };
+        let connect = explicit || win.connects_at_start();
+        target = win.open_tab_with(&name, profile, connect);
+        if let Some(script) = cli.script.clone() {
+            target.run_script_when_connected(script, cli.allow_exec);
+        }
+    }
+    target.open_scripts(&cli.files);
+    target.present_tab();
+    glib::ExitCode::SUCCESS
 }

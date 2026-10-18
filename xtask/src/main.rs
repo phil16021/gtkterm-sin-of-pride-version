@@ -98,6 +98,8 @@ fn check() -> Result<()> {
                 "GTKTERM_GUI_TESTS=1",
                 "GSK_RENDERER=cairo",
                 "G_DEBUG=fatal-criticals",
+                // Never the desktop's accessibility bus (a private one would also clean up its socket).
+                "GTK_A11Y=none",
                 "cargo",
                 "nextest",
                 "run",
@@ -305,6 +307,11 @@ fn layout(languages: &[String]) -> Vec<(Source, String, u32)> {
             0o644,
         ));
     }
+    files.push((
+        Source::Data(format!("{APP_ID}.mime.xml")),
+        format!("share/mime/packages/{APP_ID}.xml"),
+        0o644,
+    ));
     for size in [48, 64, 128, 256] {
         let rel = format!("icons/hicolor/{size}x{size}/apps/{APP_ID}.png");
         files.push((Source::Data(rel.clone()), format!("share/{rel}"), 0o644));
@@ -418,6 +425,9 @@ fn install(args: &[String]) -> Result<()> {
             .status();
         let _ = Command::new("update-desktop-database")
             .arg(share.join("applications"))
+            .status();
+        let _ = Command::new("update-mime-database")
+            .arg(share.join("mime"))
             .status();
     }
     eprintln!("done. Run `{BIN}` or start \"GTKTerm Sunshine\" from the application menu.");
