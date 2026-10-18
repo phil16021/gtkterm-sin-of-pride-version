@@ -19,12 +19,13 @@ use regex::bytes::Regex;
 use rmcp::handler::server::router::prompt::PromptRouter;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::{Json, Parameters};
+use rmcp::model::SubscriptionFilter;
 use rmcp::model::{
     Implementation, ListResourceTemplatesResult, ListResourcesResult, PaginatedRequestParams,
     ProgressNotificationParam, PromptMessage, ReadResourceRequestParams, ReadResourceResponse,
     ReadResourceResult, Resource, ResourceContents, ResourceTemplate, Role, ServerCapabilities, ServerConfig,
 };
-use rmcp::service::RequestContext;
+use rmcp::service::{RequestContext, SubscriptionContext};
 use rmcp::{
     ErrorData, RoleServer, ServerHandler, prompt, prompt_handler, prompt_router, tool, tool_handler,
     tool_router,
@@ -34,12 +35,12 @@ use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
 use crate::params::{
-    AutoBaudParams, BreakParams, ChartParams, ChartTypeParams, ClearChartParams, DecoderSetParams,
-    ExpectParams, FileReceiveParams, FileSendParams, GetFramesParams, GetSeriesParams, LogStartParams,
-    MacroRunParams, MacroSaveParams, ModbusFraming, ModbusRequestParams, OpenPortParams, PauseParams,
-    PngParams, PresetApplyParams, ProfileParams, ProfileSaveParams, ReadParams, ReadResult,
-    ScriptCheckParams, ScriptRunParams, SearchHit, SearchParams, SendParams, SessionArg, SignalHistoryParams,
-    SignalParams,
+    AutoBaudParams, BreakParams, ChartParams, ChartTypeParams, ClearChartParams, ConfigurePortParams,
+    DecoderSetParams, Encoding, ExpectParams, FileReceiveParams, FileSendParams, GetFramesParams,
+    GetSeriesParams, LogStartParams, MacroRunParams, MacroSaveParams, ModbusFraming, ModbusRequestParams,
+    OpenPortParams, PauseParams, PngParams, PresetApplyParams, ProfileParams, ProfileSaveParams, ReadParams,
+    ReadResult, ScriptCheckParams, ScriptRunParams, SearchHit, SearchParams, SendParams, SessionArg,
+    SignalHistoryParams, SignalParams,
 };
 
 /// Read caps protecting the agent's context window and the app.
@@ -62,6 +63,8 @@ pub const WRITE_TOOLS: &[&str] = &[
     "macro_save",
     "preset_apply",
     "profile_save",
+    "profile_delete",
+    "configure_port",
     "open_port",
     "close_port",
     "send",
@@ -75,6 +78,9 @@ pub const WRITE_TOOLS: &[&str] = &[
     "log_start",
     "log_stop",
 ];
+
+/// Default of [`ServerOptions::max_writes_per_second`]: plenty for an agent, stops a runaway loop.
+pub const DEFAULT_WRITES_PER_SECOND: u32 = 20;
 
 /// Server options.
 #[derive(Debug, Clone)]
@@ -94,6 +100,8 @@ pub struct ServerOptions {
     pub audit: Option<PathBuf>,
     /// Asked before write tools run (the GUI's confirmation dialog); `None`: no questions.
     pub approver: Option<crate::Approver>,
+    /// Write tool calls per second and client (bursts of twice that); 0: no limit.
+    pub max_writes_per_second: u32,
 }
 
 impl Default for ServerOptions {
@@ -106,6 +114,7 @@ impl Default for ServerOptions {
             allow_exec: false,
             audit: None,
             approver: None,
+            max_writes_per_second: DEFAULT_WRITES_PER_SECOND,
         }
     }
 }
@@ -159,6 +168,12 @@ pub struct GtkTermMcp {
     /// Clients the user allowed until the server stops, by reported name and version.
     /// Kept across server instances: in stateless HTTP mode every request gets a new one.
     approved: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    /// Write calls per client and second.
+    rate: Arc<crate::guard::RateLimit>,
+    /// Finished tool calls, for the GUI's activity pane.
+    activity: tokio::sync::broadcast::Sender<crate::guard::ToolCall>,
+    /// `resources/subscribe` URIs of this connection.
+    legacy: crate::notify::LegacySubscriptions,
 }
 
 fn err(e: impl std::fmt::Display) -> String {
@@ -428,6 +443,71 @@ fn framing_protocol(f: ModbusFraming) -> Protocol {
     }
 }
 
+/// The `expect` matcher: a regular expression, or literal bytes in `encoding`.
+fn expect_regex(pattern: &str, encoding: Option<Encoding>) -> Result<Regex, String> {
+    use std::fmt::Write as _;
+    let source = match encoding {
+        None => pattern.to_owned(),
+        Some(enc) => {
+            let bytes = enc.decode(pattern)?;
+            if bytes.is_empty() {
+                return Err("the pattern is empty".into());
+            }
+            let mut re = String::from("(?-u)");
+            for b in bytes {
+                let _ = write!(re, "\\x{b:02X}");
+            }
+            re
+        }
+    };
+    Regex::new(&source).map_err(|e| format!("invalid pattern: {e}"))
+}
+
+/// Query of `gtkterm://session/{id}/rx?since=…&encoding=…`.
+struct RxQuery {
+    since: u64,
+    encoding: Encoding,
+}
+
+impl RxQuery {
+    fn parse(query: &str) -> Result<Self, String> {
+        let mut q = Self {
+            since: 0,
+            encoding: Encoding::Text,
+        };
+        for pair in query.split('&').filter(|p| !p.is_empty()) {
+            let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
+            match k {
+                "since" => {
+                    q.since = v
+                        .parse()
+                        .map_err(|_| format!("since={v:?} is not a byte cursor"))?;
+                }
+                "encoding" => {
+                    q.encoding = serde_json::from_value(serde_json::Value::String(v.to_owned()))
+                        .map_err(|_| format!("encoding={v:?}: use text, hex or base64"))?;
+                }
+                _ => return Err(format!("unknown parameter {k:?}")),
+            }
+        }
+        Ok(q)
+    }
+}
+
+/// The last `max` bytes of a log file (lossy UTF-8); unreadable files give an empty string.
+fn log_tail(path: &Path, max: u64) -> String {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+    let Ok(mut f) = std::fs::File::open(path) else {
+        return String::new();
+    };
+    let len = f.metadata().map_or(0, |m| m.len());
+    let mut buf = Vec::new();
+    if f.seek(SeekFrom::Start(len.saturating_sub(max))).is_ok() {
+        let _ = f.take(max).read_to_end(&mut buf);
+    }
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
 fn status_json(s: &SessionStatus) -> serde_json::Value {
     serde_json::to_value(s).unwrap_or_default()
 }
@@ -473,6 +553,7 @@ impl GtkTermMcp {
                 tool_router.remove_route(name);
             }
         }
+        let rate = Arc::new(crate::guard::RateLimit::new(options.max_writes_per_second));
         Self {
             manager,
             audit: options
@@ -483,7 +564,27 @@ impl GtkTermMcp {
             tool_router,
             prompt_router: Self::prompt_router(),
             approved: Arc::default(),
+            rate,
+            activity: tokio::sync::broadcast::channel(256).0,
+            legacy: crate::notify::LegacySubscriptions::default(),
         }
+    }
+
+    /// Tools, prompts, fixed resources and resource templates as JSON (`--mcp-dump-schema`).
+    pub fn schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "server": { "name": "gtkterm-sunshine", "version": env!("CARGO_PKG_VERSION") },
+            "write_tools": WRITE_TOOLS,
+            "tools": self.tool_router.list_all(),
+            "prompts": self.prompt_router.list_all(),
+            "resources": static_resources(),
+            "resource_templates": resource_templates(),
+        })
+    }
+
+    /// Finished tool calls from now on (for an activity view). Slow receivers lose old entries.
+    pub fn activity(&self) -> tokio::sync::broadcast::Receiver<crate::guard::ToolCall> {
+        self.activity.subscribe()
     }
 
     /// Path of the audit log, if one is written.
@@ -524,6 +625,49 @@ impl GtkTermMcp {
             crate::Approval::Deny => Err(format!(
                 "The user denied {tool}. Ask them before trying again, or use read-only tools."
             )),
+        }
+    }
+
+    /// Candidate values for a `completion/complete` request (not yet filtered by prefix).
+    fn completions(&self, request: &rmcp::model::CompleteRequestParams) -> Vec<String> {
+        use rmcp::model::Reference;
+        let charts = |session: Option<&str>| -> Vec<String> {
+            self.manager
+                .list()
+                .into_iter()
+                .filter(|s| session.is_none_or(|id| id == s.id().to_string()))
+                .flat_map(|s| {
+                    s.with_sunshine(|st| st.charts().iter().map(|c| c.id.clone()).collect::<Vec<_>>())
+                })
+                .collect()
+        };
+        let arg = request.argument.name.as_str();
+        match &request.r#ref {
+            Reference::Resource(r) if r.uri.starts_with("gtkterm://session/{id}") => match arg {
+                "id" => self.manager.list().iter().map(|s| s.id().to_string()).collect(),
+                "packet_id" => {
+                    let session = request
+                        .context
+                        .as_ref()
+                        .and_then(|c| c.arguments.as_ref())
+                        .and_then(|a| a.get("id"));
+                    charts(session.map(String::as_str))
+                }
+                _ => Vec::new(),
+            },
+            Reference::Prompt(p) if arg == "focus" => match p.name.as_str() {
+                "analyze-sunshine-data" => charts(None),
+                "debug-serial-device" => {
+                    let mut v: Vec<String> = list_ports().into_iter().map(|p| p.path).collect();
+                    v.extend(
+                        self.manager
+                            .with_config(|c| c.profiles.keys().cloned().collect::<Vec<_>>()),
+                    );
+                    v
+                }
+                _ => Vec::new(),
+            },
+            _ => Vec::new(),
         }
     }
 
@@ -739,7 +883,14 @@ impl GtkTermMcp {
         data.extend_from_slice(p.line_ending.bytes());
         let rx_cursor = session.rx_cursor();
         let bytes = data.len();
-        session.send(data).await.map_err(err)?;
+        match p.char_delay_ms {
+            Some(ms) if ms > 1000 => return Err(format!("char_delay_ms {ms} exceeds 1000")),
+            Some(ms) => session
+                .send_paced(data, Duration::from_millis(ms.into()))
+                .await
+                .map_err(err)?,
+            None => session.send(data).await.map_err(err)?,
+        }
         Ok(Json(SendResult { bytes, rx_cursor }))
     }
 
@@ -781,7 +932,7 @@ impl GtkTermMcp {
         ct: CancellationToken,
     ) -> Result<Json<ExpectResult>, String> {
         let session = self.session(p.session)?;
-        let re = Regex::new(&p.pattern).map_err(|e| format!("invalid pattern: {e}"))?;
+        let re = expect_regex(&p.pattern, p.pattern_encoding)?;
         let cursor = p.cursor.unwrap_or_else(|| session.rx_cursor());
         if let Some(send) = &p.send {
             let mut data = p.encoding.decode(send)?;
@@ -921,34 +1072,50 @@ impl GtkTermMcp {
     ) -> Result<Json<SeriesData>, String> {
         let session = self.session(p.session)?;
         let max_points = p.max_points.unwrap_or(200).clamp(2, 5000);
-        Self::chart(&session, &p.id, |c| SeriesData {
-            id: c.id.clone(),
-            kind: kind_name(c.kind),
-            series: c
-                .series
-                .iter()
-                .filter(|s| p.series.as_ref().is_none_or(|names| names.contains(&s.name)))
-                .map(|s| {
-                    let skip = p.last_n.map_or(0, |n| s.samples.len().saturating_sub(n));
-                    let samples: Vec<_> = s.samples.iter().skip(skip).collect();
-                    let first_ms = c.first_ts.as_millisecond();
-                    let xy: Vec<(f64, f64)> = samples
-                        .iter()
-                        .map(|x| (x.index as f64, x.values.first().copied().unwrap_or(0.0)))
-                        .collect();
-                    let keep = lttb_indices(&xy, max_points);
-                    SeriesPoints {
-                        name: s.name.clone(),
-                        available: samples.len(),
-                        index: keep.iter().map(|&i| samples[i].index).collect(),
-                        t: keep
+        if p.last_seconds.is_some_and(|s| !s.is_finite() || s < 0.0) {
+            return Err("last_seconds must be a positive number".into());
+        }
+        Self::chart(&session, &p.id, |c| {
+            let since = p.last_seconds.and_then(|secs| {
+                let newest = c.series.iter().filter_map(|s| s.last()).map(|x| x.ts).max()?;
+                newest
+                    .checked_sub(jiff::SignedDuration::try_from_secs_f64(secs).ok()?)
+                    .ok()
+            });
+            SeriesData {
+                id: c.id.clone(),
+                kind: kind_name(c.kind),
+                series: c
+                    .series
+                    .iter()
+                    .filter(|s| p.series.as_ref().is_none_or(|names| names.contains(&s.name)))
+                    .map(|s| {
+                        let skip = p.last_n.map_or(0, |n| s.samples.len().saturating_sub(n));
+                        let samples: Vec<_> = s
+                            .samples
                             .iter()
-                            .map(|&i| (samples[i].ts.as_millisecond() - first_ms) as f64 / 1000.0)
-                            .collect(),
-                        values: keep.iter().map(|&i| samples[i].values.clone()).collect(),
-                    }
-                })
-                .collect(),
+                            .skip(skip)
+                            .filter(|x| since.is_none_or(|t| x.ts >= t))
+                            .collect();
+                        let first_ms = c.first_ts.as_millisecond();
+                        let xy: Vec<(f64, f64)> = samples
+                            .iter()
+                            .map(|x| (x.index as f64, x.values.first().copied().unwrap_or(0.0)))
+                            .collect();
+                        let keep = lttb_indices(&xy, max_points);
+                        SeriesPoints {
+                            name: s.name.clone(),
+                            available: samples.len(),
+                            index: keep.iter().map(|&i| samples[i].index).collect(),
+                            t: keep
+                                .iter()
+                                .map(|&i| (samples[i].ts.as_millisecond() - first_ms) as f64 / 1000.0)
+                                .collect(),
+                            values: keep.iter().map(|&i| samples[i].values.clone()).collect(),
+                        }
+                    })
+                    .collect(),
+            }
         })
         .map(Json)
     }
@@ -1186,6 +1353,44 @@ impl GtkTermMcp {
             .map_err(err)?;
         self.manager.save_config().map_err(err)?;
         Ok(Json(serde_json::json!({ "saved": p.name })))
+    }
+
+    /// Delete a saved profile. Deleting "default" resets it to the defaults.
+    #[tool(annotations(title = "Delete profile", destructive_hint = true, idempotent_hint = true))]
+    async fn profile_delete(
+        &self,
+        Parameters(p): Parameters<ProfileParams>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        self.manager
+            .with_config_mut(|c| c.remove_profile(&p.name))
+            .map_err(err)?;
+        self.manager.save_config().map_err(err)?;
+        Ok(Json(serde_json::json!({ "deleted": p.name })))
+    }
+
+    /// Change the line settings (baud rate, data bits, parity, stop bits, flow control) of an
+    /// open serial port. The port is reopened with the new settings, like changing the rate in
+    /// the window; received history is kept.
+    #[tool(annotations(title = "Configure port", idempotent_hint = true))]
+    async fn configure_port(
+        &self,
+        Parameters(p): Parameters<ConfigurePortParams>,
+    ) -> Result<Json<Done>, String> {
+        let session = self.session(p.session)?;
+        if session.status().state != gtkterm_core::session::PortState::Open {
+            return Err("the port is not open; use open_port with these settings".into());
+        }
+        let Some(gtkterm_core::config::Connection::Serial(mut cfg)) = session.connection() else {
+            return Err("configure_port needs a serial connection".into());
+        };
+        p.apply(&mut cfg)?;
+        let conn = gtkterm_core::config::Connection::Serial(cfg);
+        conn.validate().map_err(err)?;
+        session.open(conn).await.map_err(err)?;
+        Ok(Self::done(
+            &session,
+            format!("reopened as {}", session.status().description),
+        ))
     }
 
     /// Select the protocol decoder of a session. Transmitted data is decoded as requests and received
@@ -1756,6 +1961,66 @@ impl GtkTermMcp {
     }
 }
 
+fn static_resources() -> Vec<Resource> {
+    vec![
+        resource(
+            "gtkterm://ports",
+            "ports",
+            "Serial ports, sessions and profiles",
+            "application/json",
+        ),
+        resource(
+            "gtkterm://profiles",
+            "profiles",
+            "Saved connection profiles (TOML)",
+            "application/toml",
+        ),
+        resource(
+            "gtkterm://docs/script-language",
+            "script-language",
+            "Automation script language reference",
+            "text/markdown",
+        ),
+        resource(
+            "gtkterm://docs/sunshine-protocol",
+            "sunshine-protocol",
+            "Sunshine packet format",
+            "text/markdown",
+        ),
+        resource(
+            "gtkterm://macros",
+            "macros",
+            "Macros in editor syntax",
+            "text/plain",
+        ),
+    ]
+}
+
+fn resource_templates() -> Vec<ResourceTemplate> {
+    vec![
+        ResourceTemplate::new("gtkterm://session/{id}/status", "session-status")
+            .with_mime_type("application/json"),
+        ResourceTemplate::new("gtkterm://session/{id}/rx", "session-rx").with_mime_type("text/plain"),
+        ResourceTemplate::new("gtkterm://session/{id}/rx{?since,encoding}", "session-rx-since")
+            .with_description(
+                "Received data from byte cursor `since` (at most 64 KiB) as JSON with data, next_cursor \
+                 and lost; encoding text (default), hex or base64",
+            )
+            .with_mime_type("application/json"),
+        ResourceTemplate::new("gtkterm://session/{id}/log", "session-log").with_mime_type("application/json"),
+        ResourceTemplate::new("gtkterm://session/{id}/signals", "session-signals").with_mime_type("text/csv"),
+        ResourceTemplate::new("gtkterm://session/{id}/frames", "session-frames")
+            .with_mime_type("application/json"),
+        ResourceTemplate::new("gtkterm://session/{id}/sunshine", "session-sunshine")
+            .with_mime_type("application/json"),
+        ResourceTemplate::new(
+            "gtkterm://session/{id}/sunshine/{packet_id}",
+            "sunshine-chart-csv",
+        )
+        .with_mime_type("text/csv"),
+    ]
+}
+
 fn resource(uri: &str, name: &str, description: &str, mime: &str) -> Resource {
     Resource::new(uri, name)
         .with_description(description)
@@ -1785,18 +2050,43 @@ impl ServerHandler for GtkTermMcp {
             }
         });
         let audit = |outcome: &str, error: Option<String>| {
+            let time = jiff::Timestamp::now();
+            let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
             if let Some(log) = &self.audit {
                 log.write(&crate::guard::AuditEntry {
-                    time: jiff::Timestamp::now(),
+                    time,
                     tool: &tool,
                     client: client.as_deref(),
                     arguments: crate::guard::audit_arguments(args.as_ref()),
                     outcome,
-                    error,
-                    ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                    error: error.clone(),
+                    ms,
                 });
             }
+            let _ = self.activity.send(crate::guard::ToolCall {
+                time,
+                tool: tool.clone(),
+                client: client.clone(),
+                arguments: crate::guard::compact_arguments(args.as_ref(), 400),
+                outcome: outcome.to_owned(),
+                error,
+                ms,
+            });
         };
+        if WRITE_TOOLS.contains(&tool.as_str())
+            && !self.rate.try_take(
+                client.as_deref().unwrap_or("unknown client"),
+                std::time::Instant::now(),
+            )
+        {
+            let msg = format!(
+                "rate limit: at most {} write calls per second; slow down or batch the work (e.g. one \
+                 script_run instead of many sends)",
+                self.options.max_writes_per_second
+            );
+            audit("limited", Some(msg.clone()));
+            return Ok(rmcp::model::CallToolResult::error(vec![rmcp::model::ContentBlock::text(msg)]).into());
+        }
         if let Err(msg) = self.approve(&tool, args.as_ref(), client.as_deref()).await {
             audit("denied", Some(msg.clone()));
             return Ok(rmcp::model::CallToolResult::error(vec![rmcp::model::ContentBlock::text(msg)]).into());
@@ -1825,7 +2115,15 @@ impl ServerHandler for GtkTermMcp {
         } else {
             ""
         };
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().enable_resources().enable_prompts().build())
+        let capabilities = ServerCapabilities::builder()
+            .enable_tools()
+            .enable_resources()
+            .enable_resources_subscribe()
+            .enable_resources_list_changed()
+            .enable_prompts()
+            .enable_completions()
+            .build();
+        ServerConfig::new(capabilities)
             .with_server_info(Implementation::new("gtkterm-sunshine", env!("CARGO_PKG_VERSION")))
             .with_instructions(format!(
                 "GTKTerm Sunshine drives serial ports, TCP and UDP connections. Typical flow: list_ports, open_port, \
@@ -1836,43 +2134,85 @@ impl ServerHandler for GtkTermMcp {
             ))
     }
 
+    fn accepted_subscription_filter(&self, requested: &SubscriptionFilter) -> Option<SubscriptionFilter> {
+        let mut accepted = requested.supported_by(&self.get_info().capabilities);
+        if let Some(uris) = &mut accepted.resource_subscriptions {
+            uris.retain(|u| crate::notify::watchable(u));
+            if uris.is_empty() {
+                accepted.resource_subscriptions = None;
+            }
+        }
+        Some(accepted)
+    }
+
+    async fn listen(&self, context: SubscriptionContext) -> Result<(), ErrorData> {
+        let stop = context.request_context().ct.child_token();
+        crate::notify::listen(
+            Arc::clone(&self.manager),
+            context.sink().clone(),
+            context.accepted(),
+            stop,
+        )
+        .await;
+        Ok(())
+    }
+
+    #[allow(deprecated)] // legacy (2025-11-25) clients subscribe this way
+    async fn subscribe(
+        &self,
+        request: rmcp::model::SubscribeRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        if !crate::notify::watchable(&request.uri) {
+            return Err(ErrorData::invalid_params(
+                format!("{} does not change; nothing to subscribe to", request.uri),
+                None,
+            ));
+        }
+        self.legacy.subscribe(&self.manager, context.peer, request.uri);
+        Ok(())
+    }
+
+    #[allow(deprecated)]
+    async fn unsubscribe(
+        &self,
+        request: rmcp::model::UnsubscribeRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        self.legacy.unsubscribe(&request.uri);
+        Ok(())
+    }
+
+    async fn complete(
+        &self,
+        request: rmcp::model::CompleteRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::CompleteResult, ErrorData> {
+        let candidates = self.completions(&request);
+        let prefix = request.argument.value.to_lowercase();
+        let mut values: Vec<String> = candidates
+            .into_iter()
+            .filter(|c| c.to_lowercase().starts_with(&prefix))
+            .collect();
+        values.sort();
+        values.dedup();
+        let total = values.len();
+        values.truncate(rmcp::model::CompletionInfo::MAX_VALUES);
+        let info = rmcp::model::CompletionInfo::with_pagination(
+            values,
+            u32::try_from(total).ok(),
+            total > rmcp::model::CompletionInfo::MAX_VALUES,
+        )
+        .map_err(|e| ErrorData::internal_error(e, None))?;
+        Ok(rmcp::model::CompleteResult::new(info))
+    }
+
     async fn list_resources(
         &self,
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
-        let mut resources = vec![
-            resource(
-                "gtkterm://ports",
-                "ports",
-                "Serial ports, sessions and profiles",
-                "application/json",
-            ),
-            resource(
-                "gtkterm://profiles",
-                "profiles",
-                "Saved connection profiles (TOML)",
-                "application/toml",
-            ),
-            resource(
-                "gtkterm://docs/script-language",
-                "script-language",
-                "Automation script language reference",
-                "text/markdown",
-            ),
-            resource(
-                "gtkterm://docs/sunshine-protocol",
-                "sunshine-protocol",
-                "Sunshine packet format",
-                "text/markdown",
-            ),
-            resource(
-                "gtkterm://macros",
-                "macros",
-                "Macros in editor syntax",
-                "text/plain",
-            ),
-        ];
+        let mut resources = static_resources();
         for s in self.manager.list() {
             let id = s.id();
             resources.push(resource(
@@ -1886,6 +2226,12 @@ impl ServerHandler for GtkTermMcp {
                 &format!("session-{id}-rx"),
                 "Last 64 KiB of received data",
                 "text/plain",
+            ));
+            resources.push(resource(
+                &format!("gtkterm://session/{id}/log"),
+                &format!("session-{id}-log"),
+                "Log file status and its last 4 KiB",
+                "application/json",
             ));
             resources.push(resource(
                 &format!("gtkterm://session/{id}/signals"),
@@ -1914,22 +2260,7 @@ impl ServerHandler for GtkTermMcp {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourceTemplatesResult, ErrorData> {
-        Ok(ListResourceTemplatesResult::with_all_items(vec![
-            ResourceTemplate::new("gtkterm://session/{id}/status", "session-status")
-                .with_mime_type("application/json"),
-            ResourceTemplate::new("gtkterm://session/{id}/rx", "session-rx").with_mime_type("text/plain"),
-            ResourceTemplate::new("gtkterm://session/{id}/signals", "session-signals")
-                .with_mime_type("text/csv"),
-            ResourceTemplate::new("gtkterm://session/{id}/frames", "session-frames")
-                .with_mime_type("application/json"),
-            ResourceTemplate::new("gtkterm://session/{id}/sunshine", "session-sunshine")
-                .with_mime_type("application/json"),
-            ResourceTemplate::new(
-                "gtkterm://session/{id}/sunshine/{packet_id}",
-                "sunshine-chart-csv",
-            )
-            .with_mime_type("text/csv"),
-        ]))
+        Ok(ListResourceTemplatesResult::with_all_items(resource_templates()))
     }
 
     async fn read_resource(
@@ -1981,14 +2312,37 @@ impl ServerHandler for GtkTermMcp {
             }
             _ => {}
         }
-        let rest = uri.strip_prefix("gtkterm://session/").ok_or_else(not_found)?;
+        let (path, query) = uri.split_once('?').unwrap_or((uri, ""));
+        let rest = path.strip_prefix("gtkterm://session/").ok_or_else(not_found)?;
         let (id, what) = rest.split_once('/').ok_or_else(not_found)?;
         let session = id
             .parse()
             .ok()
             .and_then(|id| self.manager.get(id))
             .ok_or_else(not_found)?;
+        if !query.is_empty() && what != "rx" {
+            return Err(not_found());
+        }
         match what.split_once('/') {
+            None if what == "rx" && !query.is_empty() => {
+                let q = RxQuery::parse(query).map_err(|e| ErrorData::invalid_params(e, None))?;
+                let r = session.read_rx(q.since, 64 * 1024);
+                let body = serde_json::json!({
+                    "data": q.encoding.encode(&r.data),
+                    "bytes": r.data.len(),
+                    "next_cursor": r.next_cursor,
+                    "lost": r.lost,
+                });
+                text(body.to_string())
+            }
+            None if what == "log" => {
+                let log = session.status().log;
+                let tail = log.as_ref().map(|l| log_tail(&l.path, 4096));
+                text(
+                    serde_json::to_string_pretty(&serde_json::json!({ "log": log, "tail": tail }))
+                        .unwrap_or_default(),
+                )
+            }
             None if what == "status" => {
                 text(serde_json::to_string_pretty(&session.status()).unwrap_or_default())
             }

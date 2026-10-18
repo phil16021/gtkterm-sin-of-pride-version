@@ -1,11 +1,14 @@
-//! What agents did and may do: the JSONL audit log of tool calls and the approval hook that
-//! lets the GUI ask the user before an agent changes something.
+//! What agents did and may do: the JSONL audit log and the activity stream of tool calls, the
+//! approval hook that lets the GUI ask the user before an agent changes something, and the
+//! rate limit for write tools.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Instant;
 
 use jiff::Timestamp;
 use serde::Serialize;
@@ -84,11 +87,65 @@ pub(crate) struct AuditEntry<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client: Option<&'a str>,
     pub arguments: Value,
-    /// `ok`, `error` or `denied`.
+    /// `ok`, `error`, `denied` or `limited`.
     pub outcome: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     pub ms: u64,
+}
+
+/// A finished tool call, as the activity stream reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolCall {
+    /// When it finished.
+    pub time: Timestamp,
+    /// Tool name.
+    pub tool: String,
+    /// The client's name and version, when known.
+    pub client: Option<String>,
+    /// Arguments as compact JSON (cut to a readable length).
+    pub arguments: String,
+    /// `ok`, `error`, `denied` (by the user) or `limited` (rate limit).
+    pub outcome: String,
+    /// The error message, if any.
+    pub error: Option<String>,
+    /// Duration in milliseconds.
+    pub ms: u64,
+}
+
+/// Token bucket per client for write tools: `per_second` calls on average, bursts of twice that.
+#[derive(Debug)]
+pub(crate) struct RateLimit {
+    per_second: f64,
+    buckets: Mutex<HashMap<String, (f64, Instant)>>,
+}
+
+impl RateLimit {
+    /// `per_second == 0` disables the limit.
+    pub(crate) fn new(per_second: u32) -> Self {
+        Self {
+            per_second: f64::from(per_second),
+            buckets: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Take one call for `client`; `false` when its bucket is empty.
+    pub(crate) fn try_take(&self, client: &str, now: Instant) -> bool {
+        if self.per_second <= 0.0 {
+            return true;
+        }
+        let burst = self.per_second * 2.0;
+        let mut buckets = self.buckets.lock().unwrap_or_else(PoisonError::into_inner);
+        let (tokens, last) = buckets.entry(client.to_owned()).or_insert((burst, now));
+        *tokens = (*tokens + now.saturating_duration_since(*last).as_secs_f64() * self.per_second).min(burst);
+        *last = now;
+        if *tokens >= 1.0 {
+            *tokens -= 1.0;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 /// Arguments as stored in the audit log: the JSON object, or a cut string when it is long.
@@ -156,6 +213,21 @@ impl AuditLog {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rate_limit_allows_bursts_and_refills() {
+        let limit = RateLimit::new(5);
+        let t0 = Instant::now();
+        assert_eq!(
+            (0..12).filter(|_| limit.try_take("a", t0)).count(),
+            10,
+            "burst of twice the rate"
+        );
+        assert!(limit.try_take("b", t0), "clients have their own buckets");
+        assert!(!limit.try_take("a", t0 + std::time::Duration::from_millis(100)));
+        assert!(limit.try_take("a", t0 + std::time::Duration::from_millis(250)));
+        assert!(RateLimit::new(0).try_take("a", t0), "0 disables the limit");
+    }
 
     #[test]
     fn arguments_are_cut() {

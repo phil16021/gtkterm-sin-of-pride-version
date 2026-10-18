@@ -5,13 +5,15 @@
 #![forbid(unsafe_code)]
 
 mod guard;
+mod notify;
 mod params;
 mod server;
 pub mod transport;
 
-pub use guard::{Approval, ApprovalRequest, Approver};
+pub use guard::{Approval, ApprovalRequest, Approver, ToolCall};
 pub use server::{
-    GtkTermMcp, ServerOptions, WRITE_TOOLS, default_audit_path, default_log_dir, default_transfer_dir,
+    DEFAULT_WRITES_PER_SECOND, GtkTermMcp, ServerOptions, WRITE_TOOLS, default_audit_path, default_log_dir,
+    default_transfer_dir,
 };
 
 /// Reference of the automation script language (Markdown), also served as

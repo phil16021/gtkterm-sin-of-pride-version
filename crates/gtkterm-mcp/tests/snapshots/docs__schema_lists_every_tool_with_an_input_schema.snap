@@ -1,0 +1,2309 @@
+---
+source: crates/gtkterm-mcp/tests/docs.rs
+expression: "schema[\"tools\"]"
+---
+- annotations:
+    destructiveHint: true
+    title: Clear buffer
+  description: Clear the received history and all Sunshine charts of a session.
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      session:
+        default: ~
+        description: "Session id from `list_ports` / `get_status`; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    type: object
+  name: clear_buffer
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      message:
+        description: What happened.
+        type: string
+      status:
+        description: Session status afterwards.
+    required:
+      - message
+      - status
+    type: object
+- annotations:
+    idempotentHint: true
+    title: Close port
+  description: Close the connection of a session.
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      session:
+        default: ~
+        description: "Session id from `list_ports` / `get_status`; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    type: object
+  name: close_port
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      message:
+        description: What happened.
+        type: string
+      status:
+        description: Session status afterwards.
+    required:
+      - message
+      - status
+    type: object
+- annotations:
+    idempotentHint: true
+    title: Configure port
+  description: "Change the line settings (baud rate, data bits, parity, stop bits, flow control) of an\nopen serial port. The port is reopened with the new settings, like changing the rate in\nthe window; received history is kept."
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      baudrate:
+        default: ~
+        description: "Baud rate (any rate, e.g. 250000)."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      bits:
+        default: ~
+        description: Data bits 5-8.
+        format: uint8
+        maximum: 255
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      flow_control:
+        default: ~
+        description: "none, xon, rts or rs485."
+        type:
+          - string
+          - "null"
+      parity:
+        default: ~
+        description: "none, odd, even, mark or space."
+        type:
+          - string
+          - "null"
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      stopbits:
+        default: ~
+        description: 1 or 2.
+        format: uint8
+        maximum: 255
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    type: object
+  name: configure_port
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      message:
+        description: What happened.
+        type: string
+      status:
+        description: Session status afterwards.
+    required:
+      - message
+      - status
+    type: object
+- annotations:
+    readOnlyHint: true
+    title: Get decoded frames
+  description: "Decoded protocol frames (Modbus, NMEA, AT, CAN, EtherCAT, ...) with checksum results.\nPoll with `since` = the previous `next_seq` to get only new frames."
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      include_bytes:
+        default: ~
+        description: "Include each frame's bytes as hex (default true)."
+        type:
+          - boolean
+          - "null"
+      max:
+        default: ~
+        description: "Maximum number of frames (default 100, at most 1000)."
+        format: uint
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      since:
+        default: ~
+        description: "First sequence number to return (use `next_seq` of the previous call); default: the newest `max` frames."
+        format: uint64
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      timeout_ms:
+        default: ~
+        description: "Wait up to this many ms for a frame when none is available (default 0, at most 60000)."
+        format: uint64
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    type: object
+  name: decoder_get_frames
+  outputSchema:
+    $defs:
+      FrameOut:
+        description: A decoded frame as returned to agents.
+        properties:
+          bytes:
+            description: Frame bytes as hex.
+            type:
+              - string
+              - "null"
+          check:
+            description: "none, ok or failed (with received/computed)."
+          fields:
+            additionalProperties: true
+            description: Decoded fields.
+            type: object
+          protocol:
+            description: Protocol id.
+            type: string
+          seq:
+            description: Sequence number.
+            format: uint64
+            minimum: 0
+            type: integer
+          source:
+            description: "rx, tx or lines (modem line change)."
+            type: string
+          summary:
+            description: One-line decoding.
+            type: string
+          time:
+            description: Completion time (RFC 3339).
+            type: string
+        required:
+          - seq
+          - time
+          - source
+          - protocol
+          - summary
+          - check
+          - fields
+        type: object
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      decoder:
+        description: Decoder state.
+      dropped:
+        description: Frames that were requested but already dropped from the ring.
+        format: uint64
+        minimum: 0
+        type: integer
+      frames:
+        description: "Frames, oldest first."
+        items:
+          $ref: "#/$defs/FrameOut"
+        type: array
+      next_seq:
+        description: "Pass as `since` to get only newer frames."
+        format: uint64
+        minimum: 0
+        type: integer
+    required:
+      - frames
+      - next_seq
+      - dropped
+      - decoder
+    type: object
+- annotations:
+    idempotentHint: true
+    title: Set decoder
+  description: "Select the protocol decoder of a session. Transmitted data is decoded as requests and received\ndata as responses; read the frames with decoder_get_frames."
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      clear:
+        default: false
+        description: Drop the frames decoded so far.
+        type: boolean
+      mode:
+        description: "off, auto, raw, at, nmea, modbus_rtu, modbus_ascii, modbus_tcp, can (candump text), slcan,\nethercat or rs232 (modem line changes only)."
+        type: string
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      signals:
+        default: false
+        description: Also record modem line changes (DTR/RTS/CTS/DSR/DCD/RI) as frames.
+        type: boolean
+    required:
+      - mode
+    type: object
+  name: decoder_set
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+- annotations:
+    openWorldHint: true
+    title: Expect
+  description: "Optionally send data, then wait until received data matches a regular expression."
+  inputSchema:
+    $defs:
+      Encoding:
+        description: How bytes are represented in tool arguments and results.
+        oneOf:
+          - const: text
+            description: "UTF-8 text (invalid bytes are replaced when reading). Escapes like \\n are NOT interpreted."
+            type: string
+          - const: hex
+            description: "Hex bytes such as \"DE AD BE EF\" or \"0x01 0x02\"."
+            type: string
+          - const: base64
+            description: Standard base64.
+            type: string
+      LineEnding:
+        description: Line ending appended to sent data.
+        oneOf:
+          - const: none
+            description: Nothing appended.
+            type: string
+          - const: cr
+            description: "Carriage return (\\r) — typical for AT modems."
+            type: string
+          - const: lf
+            description: "Line feed (\\n)."
+            type: string
+          - const: crlf
+            description: "\\r\\n."
+            type: string
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      cursor:
+        default: ~
+        description: "Start matching at this cursor; default: data arriving after the call starts."
+        format: uint64
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      encoding:
+        $ref: "#/$defs/Encoding"
+        default: text
+        description: "Encoding of `send`."
+      line_ending:
+        $ref: "#/$defs/LineEnding"
+        default: none
+        description: "Line ending appended to `send`."
+      pattern:
+        description: "Regular expression (Rust regex syntax) matched against received bytes, or literal bytes\nwhen `pattern_encoding` is given."
+        type: string
+      pattern_encoding:
+        anyOf:
+          - $ref: "#/$defs/Encoding"
+          - type: "null"
+        default: ~
+        description: "Treat `pattern` as literal bytes in this encoding instead of a regular expression, e.g.\n`hex` with \"AA 55\" waits for the bytes 0xAA 0x55."
+      send:
+        default: ~
+        description: "Optional data to send first (same encoding rules as `send`)."
+        type:
+          - string
+          - "null"
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      timeout_ms:
+        default: ~
+        description: "Timeout in ms (default 5000, at most 600000)."
+        format: uint64
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    required:
+      - pattern
+    type: object
+  name: expect
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      before:
+        description: Received text between the start cursor and the match.
+        type: string
+      captures:
+        description: Capture groups 1..n (null for groups that did not participate).
+        items:
+          type:
+            - string
+            - "null"
+        type: array
+      cursor:
+        description: Cursor just after the match.
+        format: uint64
+        minimum: 0
+        type: integer
+      matched:
+        description: The matched text.
+        type: string
+    required:
+      - matched
+      - captures
+      - before
+      - cursor
+    type: object
+- annotations:
+    idempotentHint: true
+    title: Cancel transfer
+  description: Cancel the running file transfer of a session (also one started in the window).
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      session:
+        default: ~
+        description: "Session id from `list_ports` / `get_status`; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    type: object
+  name: file_cancel
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      message:
+        description: What happened.
+        type: string
+      status:
+        description: Session status afterwards.
+    required:
+      - message
+      - status
+    type: object
+- annotations:
+    openWorldHint: true
+    title: Receive file
+  description: "Download files from the device into the transfer directory (YMODEM/ZMODEM keep the\ndevice's file names, XMODEM uses `name`). Sends progress notifications."
+  inputSchema:
+    $defs:
+      TransferProtocolArg:
+        description: File transfer protocol.
+        oneOf:
+          - const: xmodem
+            description: "128-byte blocks, CRC or checksum (one file)."
+            type: string
+          - const: xmodem1k
+            description: 1024-byte blocks (one file).
+            type: string
+          - const: ymodem
+            description: Batch with names and sizes.
+            type: string
+          - const: ymodem_g
+            description: "YMODEM streaming, error-free links only."
+            type: string
+          - const: zmodem
+            description: ZMODEM via lrzsz (sz/rz must be installed).
+            type: string
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      name:
+        default: ~
+        description: "File name for XMODEM, which carries none (default: xmodem-<time>.bin)."
+        type:
+          - string
+          - "null"
+      overwrite:
+        default: false
+        description: "Replace existing files instead of saving as \"name (1).ext\"."
+        type: boolean
+      protocol:
+        $ref: "#/$defs/TransferProtocolArg"
+        description: Protocol. Start the transfer on the device right after (or just before) this call.
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      subdir:
+        default: ~
+        description: Subdirectory of the transfer directory to save into (created if missing).
+        type:
+          - string
+          - "null"
+    required:
+      - protocol
+    type: object
+  name: file_receive
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      bytes:
+        description: Bytes transferred.
+        format: uint64
+        minimum: 0
+        type: integer
+      elapsed_ms:
+        description: Duration in ms.
+        format: uint64
+        minimum: 0
+        type: integer
+      files:
+        description: "Files sent or received, with local paths for received files."
+        items: true
+        type: array
+      message:
+        description: "Note about the end of the transfer, if any."
+        type:
+          - string
+          - "null"
+      protocol:
+        description: Protocol.
+        type: string
+      retries:
+        description: Repeated blocks and timeouts.
+        format: uint32
+        minimum: 0
+        type: integer
+      summary:
+        description: One-line summary.
+        type: string
+    required:
+      - summary
+      - protocol
+      - files
+      - bytes
+      - elapsed_ms
+      - retries
+    type: object
+- annotations:
+    openWorldHint: true
+    title: Send file
+  description: "Upload files to the device with XMODEM, XMODEM-1K, YMODEM, YMODEM-G or ZMODEM. Start the\nreceiver on the device first. Sends progress notifications; cancelling the call aborts."
+  inputSchema:
+    $defs:
+      TransferProtocolArg:
+        description: File transfer protocol.
+        oneOf:
+          - const: xmodem
+            description: "128-byte blocks, CRC or checksum (one file)."
+            type: string
+          - const: xmodem1k
+            description: 1024-byte blocks (one file).
+            type: string
+          - const: ymodem
+            description: Batch with names and sizes.
+            type: string
+          - const: ymodem_g
+            description: "YMODEM streaming, error-free links only."
+            type: string
+          - const: zmodem
+            description: ZMODEM via lrzsz (sz/rz must be installed).
+            type: string
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      paths:
+        description: "Files to send: absolute paths inside the transfer directory or a directory allowed with\n--mcp-allow-dir, or names relative to the transfer directory. XMODEM takes exactly one."
+        items:
+          type: string
+        type: array
+      protocol:
+        $ref: "#/$defs/TransferProtocolArg"
+        description: "Protocol. The device must already be waiting to receive (e.g. after `rx`/`rb`/`rz` or a\nbootloader's \"send file now\" prompt)."
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    required:
+      - protocol
+      - paths
+    type: object
+  name: file_send
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      bytes:
+        description: Bytes transferred.
+        format: uint64
+        minimum: 0
+        type: integer
+      elapsed_ms:
+        description: Duration in ms.
+        format: uint64
+        minimum: 0
+        type: integer
+      files:
+        description: "Files sent or received, with local paths for received files."
+        items: true
+        type: array
+      message:
+        description: "Note about the end of the transfer, if any."
+        type:
+          - string
+          - "null"
+      protocol:
+        description: Protocol.
+        type: string
+      retries:
+        description: Repeated blocks and timeouts.
+        format: uint32
+        minimum: 0
+        type: integer
+      summary:
+        description: One-line summary.
+        type: string
+    required:
+      - summary
+      - protocol
+      - files
+      - bytes
+      - elapsed_ms
+      - retries
+    type: object
+- annotations:
+    readOnlyHint: true
+    title: Get signals
+  description: "Read the modem lines (DTR, RTS, CTS, DSR, DCD, RI) of a serial port."
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      session:
+        default: ~
+        description: "Session id from `list_ports` / `get_status`; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    type: object
+  name: get_signals
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+- annotations:
+    readOnlyHint: true
+    title: Get status
+  description: "Connection state, endpoint, byte counters, modem lines and logging state."
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      session:
+        default: ~
+        description: "Session id from `list_ports` / `get_status`; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    type: object
+  name: get_status
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+- annotations:
+    readOnlyHint: true
+    title: List ports
+  description: "List serial ports, sessions and saved profiles."
+  inputSchema:
+    properties: {}
+    type: object
+  name: list_ports
+  outputSchema:
+    $defs:
+      PortEntry:
+        description: "One entry of `list_ports`."
+        properties:
+          class:
+            description: "usb_serial, usb_acm, uart, bluetooth or pty."
+            type: string
+          label:
+            description: Description with vendor/model/serial number.
+            type: string
+          path:
+            description: Device path.
+            type: string
+        required:
+          - path
+          - class
+          - label
+        type: object
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      ports:
+        description: Serial devices found on this machine.
+        items:
+          $ref: "#/$defs/PortEntry"
+        type: array
+      profiles:
+        description: Saved profile names usable with open_port.
+        items:
+          type: string
+        type: array
+      sessions:
+        description: Existing sessions with their state.
+        items: true
+        type: array
+    required:
+      - ports
+      - sessions
+      - profiles
+    type: object
+- annotations:
+    title: Start log
+  description: "Start logging received (and, except for raw logs, sent) data to a file in the log directory."
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      file_name:
+        default: ~
+        description: "File name inside the log directory; default: <timestamp>_<port>_<profile>.<ext>."
+        type:
+          - string
+          - "null"
+      format:
+        default: ~
+        description: "raw (default), text, csv, json or xml."
+        type:
+          - string
+          - "null"
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    type: object
+  name: log_start
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+- annotations:
+    readOnlyHint: true
+    title: Log status
+  description: "Current log file, format and size."
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      session:
+        default: ~
+        description: "Session id from `list_ports` / `get_status`; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    type: object
+  name: log_status
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+- annotations:
+    title: Stop log
+  description: Stop logging and close the log file.
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      session:
+        default: ~
+        description: "Session id from `list_ports` / `get_status`; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    type: object
+  name: log_stop
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+- annotations:
+    readOnlyHint: true
+    title: List macros
+  description: List macros with their shortcuts and steps (in the editor syntax accepted by macro_save).
+  inputSchema:
+    properties: {}
+    type: object
+  name: macro_list
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+- annotations:
+    openWorldHint: true
+    title: Run macro
+  description: Run a macro in a session and wait until it finishes (expect steps fail on timeout).
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      name:
+        description: Macro name (see macro_list).
+        type: string
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    required:
+      - name
+    type: object
+  name: macro_run
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+- annotations:
+    idempotentHint: true
+    title: Save macro
+  description: Create or replace a macro from editor text.
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      name:
+        description: Macro name; an existing macro with this name is replaced.
+        type: string
+      shortcut:
+        default: ~
+        description: "Optional keyboard shortcut in GTK syntax, e.g. `F9` or `<Control><Shift>1`."
+        type:
+          - string
+          - "null"
+      text:
+        description: "Steps, one per line: `send: ATZ\\r`, `send[250]: text` (pause first), `wait: 500 ms`,\n`expect: OK` or `expect[2000]: regex` (timeout in ms). `#` starts a comment."
+        type: string
+    required:
+      - name
+      - text
+    type: object
+  name: macro_save
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+- annotations:
+    openWorldHint: true
+    title: Modbus request
+  description: "Send a Modbus request (RTU, ASCII or TCP framing built with CRC/LRC/MBAP) and wait for the\ndecoded response. Switches the session's decoder to the framing's protocol if needed."
+  inputSchema:
+    $defs:
+      ModbusFraming:
+        description: Modbus framing.
+        oneOf:
+          - const: rtu
+            description: Binary RTU with CRC-16 (serial lines).
+            type: string
+          - const: ascii
+            description: "ASCII `:`…LRC CRLF (serial lines)."
+            type: string
+          - const: tcp
+            description: MBAP header (Modbus TCP; use with a TCP connection to port 502).
+            type: string
+      ModbusRequestSpec:
+        description: A Modbus request.
+        oneOf:
+          - description: "0x01: read coils."
+            properties:
+              address:
+                description: First coil address (0-based).
+                format: uint16
+                maximum: 65535
+                minimum: 0
+                type: integer
+              count:
+                description: Number of coils (1-2000).
+                format: uint16
+                maximum: 65535
+                minimum: 0
+                type: integer
+              function:
+                const: read_coils
+                type: string
+            required:
+              - function
+              - address
+              - count
+            type: object
+          - description: "0x02: read discrete inputs."
+            properties:
+              address:
+                description: First input address (0-based).
+                format: uint16
+                maximum: 65535
+                minimum: 0
+                type: integer
+              count:
+                description: Number of inputs (1-2000).
+                format: uint16
+                maximum: 65535
+                minimum: 0
+                type: integer
+              function:
+                const: read_discrete_inputs
+                type: string
+            required:
+              - function
+              - address
+              - count
+            type: object
+          - description: "0x03: read holding registers."
+            properties:
+              address:
+                description: "First register address (0-based, so 40001 is 0)."
+                format: uint16
+                maximum: 65535
+                minimum: 0
+                type: integer
+              count:
+                description: Number of registers (1-125).
+                format: uint16
+                maximum: 65535
+                minimum: 0
+                type: integer
+              function:
+                const: read_holding_registers
+                type: string
+            required:
+              - function
+              - address
+              - count
+            type: object
+          - description: "0x04: read input registers."
+            properties:
+              address:
+                description: "First register address (0-based, so 30001 is 0)."
+                format: uint16
+                maximum: 65535
+                minimum: 0
+                type: integer
+              count:
+                description: Number of registers (1-125).
+                format: uint16
+                maximum: 65535
+                minimum: 0
+                type: integer
+              function:
+                const: read_input_registers
+                type: string
+            required:
+              - function
+              - address
+              - count
+            type: object
+          - description: "0x05: write a single coil."
+            properties:
+              address:
+                description: Coil address.
+                format: uint16
+                maximum: 65535
+                minimum: 0
+                type: integer
+              function:
+                const: write_single_coil
+                type: string
+              value:
+                description: On or off.
+                type: boolean
+            required:
+              - function
+              - address
+              - value
+            type: object
+          - description: "0x06: write a single register."
+            properties:
+              address:
+                description: Register address.
+                format: uint16
+                maximum: 65535
+                minimum: 0
+                type: integer
+              function:
+                const: write_single_register
+                type: string
+              value:
+                description: Value.
+                format: uint16
+                maximum: 65535
+                minimum: 0
+                type: integer
+            required:
+              - function
+              - address
+              - value
+            type: object
+          - description: "0x0F: write multiple coils."
+            properties:
+              address:
+                description: First coil address.
+                format: uint16
+                maximum: 65535
+                minimum: 0
+                type: integer
+              function:
+                const: write_multiple_coils
+                type: string
+              values:
+                description: Values (1-1968).
+                items:
+                  type: boolean
+                type: array
+            required:
+              - function
+              - address
+              - values
+            type: object
+          - description: "0x10: write multiple registers."
+            properties:
+              address:
+                description: First register address.
+                format: uint16
+                maximum: 65535
+                minimum: 0
+                type: integer
+              function:
+                const: write_multiple_registers
+                type: string
+              values:
+                description: Values (1-123).
+                items:
+                  format: uint16
+                  maximum: 65535
+                  minimum: 0
+                  type: integer
+                type: array
+            required:
+              - function
+              - address
+              - values
+            type: object
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      framing:
+        anyOf:
+          - $ref: "#/$defs/ModbusFraming"
+          - type: "null"
+        default: ~
+        description: "Framing; default: the session's Modbus decoder, else rtu."
+      request:
+        $ref: "#/$defs/ModbusRequestSpec"
+        description: The request.
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      timeout_ms:
+        default: ~
+        description: "Response timeout in ms (default 1000, at most 60000)."
+        format: uint64
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      unit:
+        description: Unit (slave) ID 1-247; 0 broadcasts (no response is awaited).
+        format: uint8
+        maximum: 255
+        minimum: 0
+        type: integer
+    required:
+      - unit
+      - request
+    type: object
+  name: modbus_request
+  outputSchema:
+    $defs:
+      ModbusFraming:
+        description: Modbus framing.
+        oneOf:
+          - const: rtu
+            description: Binary RTU with CRC-16 (serial lines).
+            type: string
+          - const: ascii
+            description: "ASCII `:`…LRC CRLF (serial lines)."
+            type: string
+          - const: tcp
+            description: MBAP header (Modbus TCP; use with a TCP connection to port 502).
+            type: string
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      decoder_changed:
+        description: "The session's decoder was switched to this framing."
+        type: boolean
+      elapsed_ms:
+        description: Round trip in ms.
+        format: uint64
+        minimum: 0
+        type: integer
+      framing:
+        $ref: "#/$defs/ModbusFraming"
+        description: Framing used.
+      request:
+        description: "Bytes sent, as hex."
+        type: string
+      response:
+        description: "Parsed response: bits, registers, written or exception."
+      response_bytes:
+        description: "Bytes of the response frame, as hex (absent for broadcasts)."
+        type:
+          - string
+          - "null"
+      summary:
+        description: Decoded response summary.
+        type:
+          - string
+          - "null"
+    required:
+      - framing
+      - request
+      - elapsed_ms
+      - decoder_changed
+    type: object
+- annotations:
+    destructiveHint: false
+    openWorldHint: true
+    title: Open port
+  description: "Open a serial device, TCP or UDP connection (reopens if already open)."
+  inputSchema:
+    $defs:
+      ConnectionSpec:
+        description: Connection to open.
+        oneOf:
+          - description: A serial device.
+            properties:
+              baudrate:
+                default: ~
+                description: "Baud rate, default 115200. Any rate is accepted (e.g. 250000)."
+                format: uint32
+                minimum: 0
+                type:
+                  - integer
+                  - "null"
+              bits:
+                default: ~
+                description: "Data bits 5-8, default 8."
+                format: uint8
+                maximum: 255
+                minimum: 0
+                type:
+                  - integer
+                  - "null"
+              flow_control:
+                default: ~
+                description: "none (default), xon, rts or rs485."
+                type:
+                  - string
+                  - "null"
+              parity:
+                default: ~
+                description: "none (default), odd, even, mark or space."
+                type:
+                  - string
+                  - "null"
+              port:
+                description: "Device path, e.g. /dev/ttyUSB0 (see list_ports)."
+                type: string
+              stopbits:
+                default: ~
+                description: 1 (default) or 2.
+                format: uint8
+                maximum: 255
+                minimum: 0
+                type:
+                  - integer
+                  - "null"
+              type:
+                const: serial
+                type: string
+            required:
+              - type
+              - port
+            type: object
+          - description: Connect to a TCP server.
+            properties:
+              host:
+                description: Host name or address.
+                type: string
+              port:
+                description: TCP port.
+                format: uint16
+                maximum: 65535
+                minimum: 0
+                type: integer
+              type:
+                const: tcp_client
+                type: string
+            required:
+              - type
+              - host
+              - port
+            type: object
+          - description: Listen for TCP clients.
+            properties:
+              bind:
+                default: ~
+                description: "Bind address, default 0.0.0.0."
+                type:
+                  - string
+                  - "null"
+              port:
+                description: TCP port to listen on.
+                format: uint16
+                maximum: 65535
+                minimum: 0
+                type: integer
+              type:
+                const: tcp_server
+                type: string
+            required:
+              - type
+              - port
+            type: object
+          - description: UDP socket.
+            properties:
+              local_port:
+                default: 0
+                description: Local port (0 = any).
+                format: uint16
+                maximum: 65535
+                minimum: 0
+                type: integer
+              remote_host:
+                default: ~
+                description: "Remote host; if omitted, the first sender becomes the remote."
+                type:
+                  - string
+                  - "null"
+              remote_port:
+                default: 0
+                description: Remote port.
+                format: uint16
+                maximum: 65535
+                minimum: 0
+                type: integer
+              type:
+                const: udp
+                type: string
+            required:
+              - type
+            type: object
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      connection:
+        anyOf:
+          - $ref: "#/$defs/ConnectionSpec"
+          - type: "null"
+        description: "Connection to open. Either this or `profile` is required."
+      profile:
+        default: ~
+        description: "Name of a saved profile to open instead of `connection`."
+        type:
+          - string
+          - "null"
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    type: object
+  name: open_port
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      message:
+        description: What happened.
+        type: string
+      status:
+        description: Session status afterwards.
+    required:
+      - message
+      - status
+    type: object
+- annotations:
+    openWorldHint: true
+    title: Detect baud rate
+  description: "Experimental: find the baud rate of a device that is sending text by trying common\nrates; the port is reopened at the best one."
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      candidates:
+        default: ~
+        description: "Rates to try (default: common rates from 2400 to 1000000)."
+        items:
+          format: uint32
+          minimum: 0
+          type: integer
+        type:
+          - array
+          - "null"
+      listen_ms:
+        default: ~
+        description: Listen time per rate in ms (default 400).
+        format: uint64
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    type: object
+  name: port_auto_baud
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+- annotations:
+    idempotentHint: true
+    title: Flush port
+  description: "Discard data waiting in the serial driver's input and output buffers."
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      session:
+        default: ~
+        description: "Session id from `list_ports` / `get_status`; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    type: object
+  name: port_flush
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      message:
+        description: What happened.
+        type: string
+      status:
+        description: Session status afterwards.
+    required:
+      - message
+      - status
+    type: object
+- annotations:
+    title: Apply preset
+  description: "Apply a preset's line settings to the session's serial port (reopens it)."
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      name:
+        description: "Preset name (see preset_list), e.g. \"Modbus RTU\"."
+        type: string
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    required:
+      - name
+    type: object
+  name: preset_apply
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      message:
+        description: What happened.
+        type: string
+      status:
+        description: Session status afterwards.
+    required:
+      - message
+      - status
+    type: object
+- annotations:
+    readOnlyHint: true
+    title: List presets
+  description: List serial presets (built-in and user defined).
+  inputSchema:
+    properties: {}
+    type: object
+  name: preset_list
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+- annotations:
+    destructiveHint: true
+    idempotentHint: true
+    title: Delete profile
+  description: "Delete a saved profile. Deleting \"default\" resets it to the defaults."
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      name:
+        description: Profile name.
+        type: string
+    required:
+      - name
+    type: object
+  name: profile_delete
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+- annotations:
+    readOnlyHint: true
+    title: Get profile
+  description: "Get a profile's settings (connection and terminal)."
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      name:
+        description: Profile name.
+        type: string
+    required:
+      - name
+    type: object
+  name: profile_get
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+- annotations:
+    readOnlyHint: true
+    title: List profiles
+  description: List saved profiles.
+  inputSchema:
+    properties: {}
+    type: object
+  name: profile_list
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+- annotations:
+    idempotentHint: true
+    title: Save profile
+  description: "Save the session's current connection and terminal settings as a profile."
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      name:
+        description: Profile name (created or replaced).
+        type: string
+      session:
+        default: ~
+        description: "Session whose current connection and terminal settings are saved; default: the first."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    required:
+      - name
+    type: object
+  name: profile_save
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+- annotations:
+    readOnlyHint: true
+    title: Read data
+  description: Read received data from a cursor; optionally wait for data to arrive.
+  inputSchema:
+    $defs:
+      Encoding:
+        description: How bytes are represented in tool arguments and results.
+        oneOf:
+          - const: text
+            description: "UTF-8 text (invalid bytes are replaced when reading). Escapes like \\n are NOT interpreted."
+            type: string
+          - const: hex
+            description: "Hex bytes such as \"DE AD BE EF\" or \"0x01 0x02\"."
+            type: string
+          - const: base64
+            description: Standard base64.
+            type: string
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      cursor:
+        default: ~
+        description: "Byte cursor from a previous call (`next_cursor`). Omit to read only data arriving from now on."
+        format: uint64
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      encoding:
+        $ref: "#/$defs/Encoding"
+        default: text
+        description: "text (default), hex or base64."
+      max_bytes:
+        default: ~
+        description: "Maximum bytes to return (default 4096, at most 1048576)."
+        format: uint
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      timeout_ms:
+        default: ~
+        description: "If no data is available yet, wait up to this long for some (default 0, at most 60000)."
+        format: uint64
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    type: object
+  name: read
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      bytes:
+        description: Number of bytes returned.
+        format: uint
+        minimum: 0
+        type: integer
+      data:
+        description: Received data.
+        type: string
+      lost:
+        description: Bytes that were evicted from history before they could be read.
+        format: uint64
+        minimum: 0
+        type: integer
+      next_cursor:
+        description: "Pass this as `cursor` next time."
+        format: uint64
+        minimum: 0
+        type: integer
+    required:
+      - data
+      - bytes
+      - next_cursor
+      - lost
+    type: object
+- annotations:
+    readOnlyHint: true
+    title: Check script
+  description: Check a script for syntax errors without running it.
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      script:
+        description: Script text to validate.
+        type: string
+    required:
+      - script
+    type: object
+  name: script_check
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+- annotations:
+    openWorldHint: true
+    title: Run script
+  description: "Run an automation script (send/expect/delay/set_dtr/if_match/goto/…; read\ngtkterm://docs/script-language) and wait for it. `log` lines arrive as progress\nnotifications. Failures report the line, the log so far and the received data."
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      path:
+        default: ~
+        description: Script file inside the transfer directory or an --mcp-allow-dir directory.
+        type:
+          - string
+          - "null"
+      script:
+        default: ~
+        description: "Script text (see the resource gtkterm://docs/script-language). Give this or `path`."
+        type:
+          - string
+          - "null"
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      timeout_ms:
+        default: ~
+        description: Give up after this many ms (default 600000).
+        format: uint64
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      vars:
+        additionalProperties:
+          type: string
+        default: {}
+        description: "Initial variables, usable as ${name}."
+        type: object
+    type: object
+  name: script_run
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+- annotations:
+    idempotentHint: true
+    title: Stop script
+  description: Stop the script or macro running in a session.
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      session:
+        default: ~
+        description: "Session id from `list_ports` / `get_status`; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    type: object
+  name: script_stop
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      message:
+        description: What happened.
+        type: string
+      status:
+        description: Session status afterwards.
+    required:
+      - message
+      - status
+    type: object
+- annotations:
+    readOnlyHint: true
+    title: Search buffer
+  description: Search the retained received data with a regular expression.
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      max_matches:
+        default: ~
+        description: "Maximum matches (default 50, at most 1000)."
+        format: uint
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      pattern:
+        description: Regular expression searched in the retained received data.
+        type: string
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    required:
+      - pattern
+    type: object
+  name: search_buffer
+  outputSchema:
+    $defs:
+      SearchHit:
+        description: A search hit.
+        properties:
+          line:
+            description: The line containing the match.
+            type: string
+          offset:
+            description: "Byte offset of the match in the RX stream (usable as a `read` cursor)."
+            format: uint64
+            minimum: 0
+            type: integer
+          text:
+            description: Matched text.
+            type: string
+        required:
+          - offset
+          - text
+          - line
+        type: object
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      matches:
+        description: "Matches, oldest first."
+        items:
+          $ref: "#/$defs/SearchHit"
+        type: array
+      truncated:
+        description: True if more matches exist than were returned.
+        type: boolean
+    required:
+      - matches
+      - truncated
+    type: object
+- annotations:
+    openWorldHint: true
+    title: Send data
+  description: Send data to the device. Returns an rx_cursor to read the reply from.
+  inputSchema:
+    $defs:
+      Encoding:
+        description: How bytes are represented in tool arguments and results.
+        oneOf:
+          - const: text
+            description: "UTF-8 text (invalid bytes are replaced when reading). Escapes like \\n are NOT interpreted."
+            type: string
+          - const: hex
+            description: "Hex bytes such as \"DE AD BE EF\" or \"0x01 0x02\"."
+            type: string
+          - const: base64
+            description: Standard base64.
+            type: string
+      LineEnding:
+        description: Line ending appended to sent data.
+        oneOf:
+          - const: none
+            description: Nothing appended.
+            type: string
+          - const: cr
+            description: "Carriage return (\\r) — typical for AT modems."
+            type: string
+          - const: lf
+            description: "Line feed (\\n)."
+            type: string
+          - const: crlf
+            description: "\\r\\n."
+            type: string
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      char_delay_ms:
+        default: ~
+        description: "Pause after every byte, 0-1000 ms (slow bootloaders); default: the profile's character delay."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      data:
+        description: "Data to send, interpreted according to `encoding`."
+        type: string
+      encoding:
+        $ref: "#/$defs/Encoding"
+        default: text
+        description: "text (default), hex or base64."
+      line_ending:
+        $ref: "#/$defs/LineEnding"
+        default: none
+        description: "Line ending appended after the data: none (default), cr, lf or crlf."
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    required:
+      - data
+    type: object
+  name: send
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      bytes:
+        description: Bytes written to the device.
+        format: uint
+        minimum: 0
+        type: integer
+      rx_cursor:
+        description: "RX cursor at the time of sending: pass it to `read` or `expect` to see the reply."
+        format: uint64
+        minimum: 0
+        type: integer
+    required:
+      - bytes
+      - rx_cursor
+    type: object
+- annotations:
+    title: Send break
+  description: Send a serial break condition.
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      duration_ms:
+        default: ~
+        description: "Break duration in ms (default 250, at most 5000)."
+        format: uint64
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    type: object
+  name: send_break
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      message:
+        description: What happened.
+        type: string
+      status:
+        description: Session status afterwards.
+    required:
+      - message
+      - status
+    type: object
+- annotations:
+    idempotentHint: true
+    title: Set signals
+  description: Set the DTR and/or RTS output lines of a serial port.
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      dtr:
+        default: ~
+        description: Set DTR high (true) or low (false); omit to leave unchanged.
+        type:
+          - boolean
+          - "null"
+      rts:
+        default: ~
+        description: Set RTS high (true) or low (false); omit to leave unchanged.
+        type:
+          - boolean
+          - "null"
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    type: object
+  name: set_signals
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      message:
+        description: What happened.
+        type: string
+      status:
+        description: Session status afterwards.
+    required:
+      - message
+      - status
+    type: object
+- annotations:
+    readOnlyHint: true
+    title: Signal history
+  description: "Modem line history (DTR, RTS, CTS, DSR, DCD, RI) of the last seconds, polled every\n50 ms; pulses shorter than that are recovered from the driver's counters."
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      csv:
+        default: false
+        description: "Return CSV (Timestamp,DTR,RTS,CTS,DSR,DCD,RI,Changed Signals) instead of samples."
+        type: boolean
+      seconds:
+        default: ~
+        description: "Look back this many seconds (default 60, at most 300)."
+        format: uint64
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    type: object
+  name: signal_history
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+- annotations:
+    destructiveHint: true
+    title: Clear charts
+  description: "Clear one Sunshine chart's samples, or remove all charts."
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      id:
+        default: ~
+        description: Packet ID to clear; omit to remove all charts.
+        type:
+          - string
+          - "null"
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    type: object
+  name: sunshine_clear
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      message:
+        description: What happened.
+        type: string
+      status:
+        description: Session status afterwards.
+    required:
+      - message
+      - status
+    type: object
+- annotations:
+    readOnlyHint: true
+    title: Export CSV
+  description: "Export a Sunshine chart as CSV (timestamp, elapsed seconds, series, index, values)."
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      id:
+        description: Packet ID (chart) as shown by sunshine_list_series.
+        type: string
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    required:
+      - id
+    type: object
+  name: sunshine_export_csv
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      text:
+        description: The content.
+        type: string
+    required:
+      - text
+    type: object
+- annotations:
+    readOnlyHint: true
+    title: Chart image
+  description: "Render a Sunshine chart as a PNG image, to look at the data the way the user sees it."
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      dark:
+        default: false
+        description: Dark theme instead of light.
+        type: boolean
+      height:
+        default: ~
+        description: "Image height in pixels (default 450, 150-1500)."
+        format: int32
+        type:
+          - integer
+          - "null"
+      id:
+        description: Packet ID (chart).
+        type: string
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      width:
+        default: ~
+        description: "Image width in pixels (default 800, 200-2000)."
+        format: int32
+        type:
+          - integer
+          - "null"
+    required:
+      - id
+    type: object
+  name: sunshine_export_png
+- annotations:
+    readOnlyHint: true
+    title: Get Sunshine series
+  description: "Get the samples of a Sunshine chart, downsampled for the context window."
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      id:
+        description: Packet ID (chart).
+        type: string
+      last_n:
+        default: ~
+        description: Only the most recent N samples of each series.
+        format: uint
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      last_seconds:
+        default: ~
+        description: Only samples from the last N seconds (counted back from the newest sample of the chart).
+        format: double
+        type:
+          - number
+          - "null"
+      max_points:
+        default: ~
+        description: "Downsample (LTTB) to at most this many points per series (default 200, at most 5000)."
+        format: uint
+        minimum: 0
+        type:
+          - integer
+          - "null"
+      series:
+        default: ~
+        description: "Only these series (default: all)."
+        items:
+          type: string
+        type:
+          - array
+          - "null"
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    required:
+      - id
+    type: object
+  name: sunshine_get_series
+  outputSchema:
+    $defs:
+      SeriesPoints:
+        description: Points of one series.
+        properties:
+          available:
+            description: Samples before downsampling.
+            format: uint
+            minimum: 0
+            type: integer
+          index:
+            description: Per-series sample numbers.
+            items:
+              format: uint64
+              minimum: 0
+              type: integer
+            type: array
+          name:
+            description: Series name.
+            type: string
+          t:
+            description: "Seconds since the chart's first packet."
+            items:
+              format: double
+              type: number
+            type: array
+          values:
+            description: "Values per sample (one value for plain series, several for X/Y data)."
+            items:
+              items:
+                format: double
+                type: number
+              type: array
+            type: array
+        required:
+          - name
+          - available
+          - index
+          - t
+          - values
+        type: object
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      id:
+        description: Packet ID.
+        type: string
+      kind:
+        description: Chart type.
+        type: string
+      series:
+        description: Series.
+        items:
+          $ref: "#/$defs/SeriesPoints"
+        type: array
+    required:
+      - id
+      - kind
+      - series
+    type: object
+- annotations:
+    readOnlyHint: true
+    title: List Sunshine series
+  description: List Sunshine charts with per-series statistics (min/max/mean/last).
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      session:
+        default: ~
+        description: "Session id from `list_ports` / `get_status`; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    type: object
+  name: sunshine_list_series
+  outputSchema:
+    $defs:
+      ChartSummary:
+        description: Summary of one chart.
+        properties:
+          capacity:
+            description: Samples kept per series.
+            format: uint
+            minimum: 0
+            type: integer
+          id:
+            description: Packet ID.
+            type: string
+          kind:
+            description: "line, bar, pie or scatter."
+            type: string
+          packets:
+            description: Packets received.
+            format: uint64
+            minimum: 0
+            type: integer
+          paused:
+            description: Whether the chart is paused.
+            type: boolean
+          series:
+            description: Series summaries.
+            items:
+              $ref: "#/$defs/SeriesSummary"
+            type: array
+        required:
+          - id
+          - kind
+          - packets
+          - paused
+          - capacity
+          - series
+        type: object
+      SeriesSummary:
+        description: Summary of one series.
+        properties:
+          color:
+            description: "\"#RRGGBB\" colour from the packet, if any."
+            type:
+              - string
+              - "null"
+          last:
+            description: Latest values.
+            items:
+              format: double
+              type: number
+            type:
+              - array
+              - "null"
+          max:
+            description: Maximum of the first value over retained samples.
+            format: double
+            type:
+              - number
+              - "null"
+          mean:
+            description: Mean of the first value over retained samples.
+            format: double
+            type:
+              - number
+              - "null"
+          min:
+            description: Minimum of the first value over retained samples.
+            format: double
+            type:
+              - number
+              - "null"
+          name:
+            description: Series name.
+            type: string
+          samples:
+            description: Samples retained.
+            format: uint
+            minimum: 0
+            type: integer
+          total:
+            description: Samples ever received.
+            format: uint64
+            minimum: 0
+            type: integer
+        required:
+          - name
+          - samples
+          - total
+        type: object
+      StatsOut:
+        description: Packet counters.
+        properties:
+          errors:
+            description: Rejected lines.
+            format: uint64
+            minimum: 0
+            type: integer
+          overflows:
+            description: Overlong lines discarded.
+            format: uint64
+            minimum: 0
+            type: integer
+          packets:
+            description: Valid packets.
+            format: uint64
+            minimum: 0
+            type: integer
+        required:
+          - packets
+          - errors
+          - overflows
+        type: object
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      charts:
+        description: Charts in creation order.
+        items:
+          $ref: "#/$defs/ChartSummary"
+        type: array
+      last_error:
+        description: Last rejected packet line with the reason.
+        type:
+          - string
+          - "null"
+      stats:
+        $ref: "#/$defs/StatsOut"
+        description: Packet counters.
+    required:
+      - charts
+      - stats
+    type: object
+- annotations:
+    idempotentHint: true
+    title: Pause chart
+  description: Pause or resume a Sunshine chart.
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      id:
+        description: Packet ID (chart).
+        type: string
+      paused:
+        description: "true to freeze the chart, false to continue."
+        type: boolean
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    required:
+      - id
+      - paused
+    type: object
+  name: sunshine_pause
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      message:
+        description: What happened.
+        type: string
+      status:
+        description: Session status afterwards.
+    required:
+      - message
+      - status
+    type: object
+- annotations:
+    idempotentHint: true
+    title: Set chart type
+  description: "Choose the chart type (line, bar, pie, scatter) for a packet ID."
+  inputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      id:
+        description: Packet ID (chart); the type is also remembered for charts that do not exist yet.
+        type: string
+      kind:
+        description: "line, bar, pie or scatter."
+        type: string
+      session:
+        default: ~
+        description: "Session to use; default: the first session."
+        format: uint32
+        minimum: 0
+        type:
+          - integer
+          - "null"
+    required:
+      - id
+      - kind
+    type: object
+  name: sunshine_set_chart_type
+  outputSchema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    properties:
+      message:
+        description: What happened.
+        type: string
+      status:
+        description: Session status afterwards.
+    required:
+      - message
+      - status
+    type: object

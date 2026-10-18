@@ -1,10 +1,11 @@
 ---
 source: crates/gtkterm-mcp/tests/mcp.rs
-assertion_line: 102
+assertion_line: 143
 expression: names
 ---
 - clear_buffer
 - close_port
+- configure_port
 - decoder_get_frames
 - decoder_set
 - expect
@@ -26,6 +27,7 @@ expression: names
 - port_flush
 - preset_apply
 - preset_list
+- profile_delete
 - profile_get
 - profile_list
 - profile_save

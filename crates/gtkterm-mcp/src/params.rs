@@ -206,6 +206,9 @@ pub(crate) struct SendParams {
     /// Line ending appended after the data: none (default), cr, lf or crlf.
     #[serde(default)]
     pub(crate) line_ending: LineEnding,
+    /// Pause after every byte, 0-1000 ms (slow bootloaders); default: the profile's character delay.
+    #[serde(default)]
+    pub(crate) char_delay_ms: Option<u32>,
 }
 
 /// `read` arguments.
@@ -247,8 +250,13 @@ pub(crate) struct ExpectParams {
     /// Session to use; default: the first session.
     #[serde(default)]
     pub(crate) session: Option<u32>,
-    /// Regular expression (Rust regex syntax) matched against received bytes.
+    /// Regular expression (Rust regex syntax) matched against received bytes, or literal bytes
+    /// when `pattern_encoding` is given.
     pub(crate) pattern: String,
+    /// Treat `pattern` as literal bytes in this encoding instead of a regular expression, e.g.
+    /// `hex` with "AA 55" waits for the bytes 0xAA 0x55.
+    #[serde(default)]
+    pub(crate) pattern_encoding: Option<Encoding>,
     /// Optional data to send first (same encoding rules as `send`).
     #[serde(default)]
     pub(crate) send: Option<String>,
@@ -339,6 +347,9 @@ pub(crate) struct GetSeriesParams {
     /// Only the most recent N samples of each series.
     #[serde(default)]
     pub(crate) last_n: Option<usize>,
+    /// Only samples from the last N seconds (counted back from the newest sample of the chart).
+    #[serde(default)]
+    pub(crate) last_seconds: Option<f64>,
     /// Downsample (LTTB) to at most this many points per series (default 200, at most 5000).
     #[serde(default)]
     pub(crate) max_points: Option<usize>,
@@ -450,6 +461,51 @@ pub(crate) struct PresetApplyParams {
 pub(crate) struct ProfileParams {
     /// Profile name.
     pub(crate) name: String,
+}
+
+/// `configure_port` arguments: the serial settings to change; omitted ones stay.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub(crate) struct ConfigurePortParams {
+    /// Session to use; default: the first session.
+    #[serde(default)]
+    pub(crate) session: Option<u32>,
+    /// Baud rate (any rate, e.g. 250000).
+    #[serde(default)]
+    pub(crate) baudrate: Option<u32>,
+    /// Data bits 5-8.
+    #[serde(default)]
+    pub(crate) bits: Option<u8>,
+    /// none, odd, even, mark or space.
+    #[serde(default)]
+    pub(crate) parity: Option<String>,
+    /// 1 or 2.
+    #[serde(default)]
+    pub(crate) stopbits: Option<u8>,
+    /// none, xon, rts or rs485.
+    #[serde(default)]
+    pub(crate) flow_control: Option<String>,
+}
+
+impl ConfigurePortParams {
+    /// Apply the given settings to `cfg`.
+    pub(crate) fn apply(&self, cfg: &mut SerialConfig) -> Result<(), String> {
+        if let Some(b) = self.baudrate {
+            cfg.baudrate = b;
+        }
+        if let Some(b) = self.bits {
+            cfg.bits = b;
+        }
+        if let Some(b) = self.stopbits {
+            cfg.stopbits = b;
+        }
+        if let Some(p) = &self.parity {
+            cfg.parity = Parity::parse(p).ok_or_else(|| format!("unknown parity {p:?}"))?;
+        }
+        if let Some(f) = &self.flow_control {
+            cfg.flow_control = FlowControl::parse(f).ok_or_else(|| format!("unknown flow control {f:?}"))?;
+        }
+        Ok(())
+    }
 }
 
 /// `profile_save` arguments.

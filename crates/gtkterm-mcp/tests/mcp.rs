@@ -22,6 +22,10 @@ struct Client {
     progress: Arc<std::sync::Mutex<Vec<rmcp::model::ProgressNotificationParam>>>,
     /// Name reported in `clientInfo` (default: rmcp's).
     name: Option<&'static str>,
+    /// Protocol version to ask for (default: the latest).
+    version: Option<rmcp::model::ProtocolVersion>,
+    /// Legacy notifications: updated URIs, and "list" for list changes.
+    updates: Arc<std::sync::Mutex<Vec<String>>>,
 }
 
 impl ClientHandler for Client {
@@ -30,7 +34,22 @@ impl ClientHandler for Client {
         if let Some(name) = self.name {
             c.client_info = rmcp::model::Implementation::new(name, "1.0");
         }
+        if let Some(v) = &self.version {
+            c.protocol_version = v.clone();
+        }
         c
+    }
+
+    async fn on_resource_updated(
+        &self,
+        params: rmcp::model::ResourceUpdatedNotificationParam,
+        _context: rmcp::service::NotificationContext<RoleClient>,
+    ) {
+        self.updates.lock().unwrap().push(params.uri);
+    }
+
+    async fn on_resource_list_changed(&self, _context: rmcp::service::NotificationContext<RoleClient>) {
+        self.updates.lock().unwrap().push("list".into());
     }
 
     async fn on_progress(
@@ -51,6 +70,10 @@ struct Fixture {
 }
 
 async fn fixture(options: ServerOptions) -> Fixture {
+    fixture_with(options, Client::default()).await
+}
+
+async fn fixture_with(options: ServerOptions, client: Client) -> Fixture {
     let manager = SessionManager::new(Config::default(), None);
     let server = GtkTermMcp::new(Arc::clone(&manager), options);
     let (server_io, client_io) = tokio::io::duplex(1 << 16);
@@ -59,10 +82,22 @@ async fn fixture(options: ServerOptions) -> Fixture {
             let _ = running.waiting().await;
         }
     });
-    let client = Client::default()
-        .serve(client_io)
-        .await
-        .expect("client handshake");
+    // 2026-07-28 has no initialize handshake; such clients discover the server.
+    let client = match client.version.clone() {
+        Some(v) if !v.has_initialize() => {
+            use rmcp::ClientServiceExt as _;
+            client
+                .serve_with_lifecycle(
+                    client_io,
+                    rmcp::ClientLifecycleMode::Discover {
+                        preferred_versions: vec![v],
+                    },
+                )
+                .await
+        }
+        _ => client.serve(client_io).await,
+    }
+    .expect("client handshake");
     Fixture {
         client,
         manager,
@@ -998,4 +1033,484 @@ async fn approval_is_remembered_per_client() {
     ok(&b, "send", json!({"data": "3"})).await;
     ok(&b, "send", json!({"data": "4"})).await;
     assert_eq!(*asked.lock().unwrap(), ["agent-a 1.0", "agent-b 1.0"]);
+}
+
+/// The next notification of a subscription (at most 5 s).
+async fn next(sub: &mut rmcp::service::Subscription) -> rmcp::model::ServerNotification {
+    tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await
+        .expect("a notification")
+        .unwrap()
+        .expect("subscription open")
+}
+
+/// Wait until `cond` holds (polling), at most 5 s.
+async fn eventually(what: &str, mut cond: impl FnMut() -> bool) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !cond() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for {what}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test]
+async fn both_protocol_versions_are_served() {
+    use rmcp::model::ProtocolVersion;
+    for version in [ProtocolVersion::V_2026_07_28, ProtocolVersion::V_2025_11_25] {
+        let f = fixture_with(
+            ServerOptions::default(),
+            Client {
+                version: Some(version.clone()),
+                ..Client::default()
+            },
+        )
+        .await;
+        let negotiated = f.client.peer().peer_info().map(|i| i.protocol_version.clone());
+        assert_eq!(negotiated, Some(version.clone()), "{version:?}");
+        let tools = f.client.list_all_tools().await.unwrap();
+        assert!(tools.iter().any(|t| t.name == "send"), "{version:?}");
+        let _dev = with_device(&f).await;
+        ok(&f.client, "send", json!({"data": "hi"})).await;
+    }
+}
+
+/// Wrong arguments are tool errors the model can correct (MCP 2025-11-25 and later); an unknown
+/// tool is a protocol error.
+#[tokio::test]
+async fn bad_arguments_and_unknown_tools() {
+    let f = fixture(ServerOptions::default()).await;
+    let msg = tool_error(&f.client, "send", json!({"data": 42})).await;
+    assert!(msg.contains("expected a string"), "{msg}");
+    match f
+        .client
+        .call_tool(CallToolRequestParams::new("no_such_tool"))
+        .await
+    {
+        Err(rmcp::ServiceError::McpError(e)) => assert_eq!(e.code.0, -32602, "{e:?}"),
+        other => panic!("expected invalid params, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn listen_reports_updates_and_new_sessions() {
+    use rmcp::model::{ServerNotification, SubscriptionFilter};
+    let f = fixture_with(
+        ServerOptions::default(),
+        Client {
+            version: Some(rmcp::model::ProtocolVersion::V_2026_07_28),
+            ..Client::default()
+        },
+    )
+    .await;
+    let dev = with_device(&f).await;
+    let filter = SubscriptionFilter::builder()
+        .resource_subscriptions(["gtkterm://session/1/rx", "gtkterm://docs/sunshine-protocol"])
+        .resources_list_changed()
+        .build();
+    let mut sub = f.client.peer().listen(filter).await.unwrap();
+    assert_eq!(
+        sub.acknowledged().resource_subscriptions.as_deref(),
+        Some(&["gtkterm://session/1/rx".to_owned()][..]),
+        "static documents are not watchable"
+    );
+    // A burst of data gives one update per throttle period, not one per chunk.
+    for i in 0..50 {
+        dev.send(format!("line {i}\n").into_bytes()).await.unwrap();
+    }
+    match next(&mut sub).await {
+        ServerNotification::ResourceUpdatedNotification(n) => {
+            assert_eq!(n.params.uri, "gtkterm://session/1/rx");
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+    let s2 = f
+        .manager
+        .create("second", gtkterm_core::config::TerminalConfig::default());
+    loop {
+        match next(&mut sub).await {
+            ServerNotification::ResourceListChangedNotification(_) => break,
+            ServerNotification::ResourceUpdatedNotification(n) => {
+                assert_eq!(n.params.uri, "gtkterm://session/1/rx");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    // Data in the second session is not subscribed.
+    let (port, dev2) = loopback::pair("loop2");
+    s2.attach(port).await.unwrap();
+    dev2.send(&b"other\n"[..]).await.unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(400), sub.next())
+            .await
+            .is_err(),
+        "nothing for unsubscribed resources"
+    );
+}
+
+#[tokio::test]
+async fn legacy_subscribe_and_unsubscribe() {
+    use rmcp::model::{ProtocolVersion, SubscribeRequestParams, UnsubscribeRequestParams};
+    let client = Client {
+        version: Some(ProtocolVersion::V_2025_11_25),
+        ..Client::default()
+    };
+    let updates = Arc::clone(&client.updates);
+    let f = fixture_with(ServerOptions::default(), client).await;
+    let dev = with_device(&f).await;
+    #[allow(deprecated)]
+    {
+        let bad = f
+            .client
+            .subscribe(SubscribeRequestParams::new("gtkterm://docs/sunshine-protocol"))
+            .await;
+        assert!(bad.is_err(), "documents do not change");
+        f.client
+            .subscribe(SubscribeRequestParams::new("gtkterm://session/1/status"))
+            .await
+            .unwrap();
+    }
+    dev.send(&b"x\n"[..]).await.unwrap();
+    eventually("a status update", || {
+        updates
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|u| u == "gtkterm://session/1/status")
+    })
+    .await;
+    #[allow(deprecated)]
+    f.client
+        .unsubscribe(UnsubscribeRequestParams::new("gtkterm://session/1/status"))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    updates.lock().unwrap().clear();
+    dev.send(&b"y\n"[..]).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(
+        updates.lock().unwrap().is_empty(),
+        "{:?}",
+        updates.lock().unwrap()
+    );
+}
+
+#[tokio::test]
+async fn completions_for_templates_and_prompts() {
+    use rmcp::model::{ArgumentInfo, CompleteRequestParams, CompletionContext, Reference};
+    let f = fixture(ServerOptions::default()).await;
+    let dev = with_device(&f).await;
+    dev.send(&b"{imu|Roll|1}\n{env|T|2}\n{imx|A|3}\n"[..])
+        .await
+        .unwrap();
+    eventually("charts", || {
+        f.manager.list()[0].with_sunshine(|s| s.charts().len()) == 3
+    })
+    .await;
+    let complete = |r: Reference, name: &str, value: &str, ctx: Option<(&str, &str)>| {
+        let mut p = CompleteRequestParams::new(r, ArgumentInfo::new(name, value));
+        if let Some((k, v)) = ctx {
+            p.context = Some(CompletionContext::with_arguments(
+                [(k.to_owned(), v.to_owned())].into(),
+            ));
+        }
+        let client = &f.client;
+        async move { client.complete(p).await.unwrap().completion.values }
+    };
+    let template = || Reference::for_resource("gtkterm://session/{id}/sunshine/{packet_id}");
+    assert_eq!(complete(template(), "id", "", None).await, ["1"]);
+    assert_eq!(
+        complete(template(), "packet_id", "im", Some(("id", "1"))).await,
+        ["imu", "imx"]
+    );
+    assert!(
+        complete(template(), "packet_id", "", Some(("id", "9")))
+            .await
+            .is_empty()
+    );
+    assert_eq!(
+        complete(Reference::for_prompt("analyze-sunshine-data"), "focus", "E", None).await,
+        ["env"]
+    );
+}
+
+#[tokio::test]
+async fn write_tools_are_rate_limited_per_client() {
+    let f = fixture(ServerOptions {
+        max_writes_per_second: 2,
+        ..ServerOptions::default()
+    })
+    .await;
+    let _dev = with_device(&f).await;
+    for i in 0..4 {
+        ok(&f.client, "send", json!({"data": i.to_string()})).await;
+    }
+    let msg = tool_error(&f.client, "send", json!({"data": "5"})).await;
+    assert!(msg.contains("rate limit"), "{msg}");
+    // Read tools are not limited.
+    ok(&f.client, "get_status", json!({})).await;
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    ok(&f.client, "send", json!({"data": "6"})).await;
+}
+
+#[tokio::test]
+async fn activity_stream_reports_calls() {
+    let manager = SessionManager::new(Config::default(), None);
+    let server = GtkTermMcp::new(Arc::clone(&manager), ServerOptions::default());
+    let mut activity = server.activity();
+    let (server_io, client_io) = tokio::io::duplex(1 << 16);
+    tokio::spawn(async move {
+        if let Ok(running) = server.serve(server_io).await {
+            let _ = running.waiting().await;
+        }
+    });
+    let client = Client::default().serve(client_io).await.unwrap();
+    ok(&client, "get_status", json!({})).await;
+    tool_error(&client, "send", json!({"data": "x"})).await;
+    let a = activity.recv().await.unwrap();
+    assert_eq!((a.tool.as_str(), a.outcome.as_str()), ("get_status", "ok"));
+    let b = activity.recv().await.unwrap();
+    assert_eq!((b.tool.as_str(), b.outcome.as_str()), ("send", "error"));
+    assert!(b.error.unwrap().contains("not open"));
+    assert_eq!(b.arguments, r#"{"data":"x"}"#);
+}
+
+#[tokio::test]
+async fn send_pacing_byte_patterns_and_cancelled_expect() {
+    let f = fixture(ServerOptions::default()).await;
+    let mut dev = with_device(&f).await;
+    let started = std::time::Instant::now();
+    ok(&f.client, "send", json!({"data": "abc", "char_delay_ms": 30})).await;
+    assert!(
+        started.elapsed() >= Duration::from_millis(55),
+        "{:?}",
+        started.elapsed()
+    );
+    for want in [b"a", b"b", b"c"] {
+        assert_eq!(&dev.recv().await.unwrap()[..], want);
+    }
+    let msg = tool_error(&f.client, "send", json!({"data": "x", "char_delay_ms": 5000})).await;
+    assert!(msg.contains("exceeds 1000"), "{msg}");
+
+    // Literal bytes, including ones that are regex syntax and not UTF-8.
+    let cursor = f.manager.list()[0].rx_cursor();
+    dev.send(&b"noise.\xAA\x55*end"[..]).await.unwrap();
+    let m = ok(
+        &f.client,
+        "expect",
+        json!({"pattern": "AA 55 2A", "pattern_encoding": "hex", "cursor": cursor, "timeout_ms": 2000}),
+    )
+    .await;
+    assert_eq!(m["cursor"].as_u64().unwrap(), cursor + 9);
+    let msg = tool_error(
+        &f.client,
+        "expect",
+        json!({"pattern": "", "pattern_encoding": "hex"}),
+    )
+    .await;
+    assert!(msg.contains("empty"), "{msg}");
+
+    // A cancelled expect gives the session back at once.
+    let params = CallToolRequestParams::new("expect").with_arguments(
+        json!({"pattern": "never", "timeout_ms": 600_000})
+            .as_object()
+            .cloned()
+            .unwrap(),
+    );
+    let handle = f
+        .client
+        .peer()
+        .send_cancellable_request(
+            rmcp::model::ClientRequest::CallToolRequest(rmcp::model::CallToolRequest::new(params)),
+            rmcp::service::PeerRequestOptions::no_options(),
+        )
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    handle.cancel(Some("test".into())).await.unwrap();
+    let started = std::time::Instant::now();
+    dev.send(&b"ready\n"[..]).await.unwrap();
+    ok(
+        &f.client,
+        "expect",
+        json!({"pattern": "ready", "cursor": 0, "timeout_ms": 2000}),
+    )
+    .await;
+    assert!(started.elapsed() < Duration::from_secs(1));
+}
+
+#[tokio::test]
+async fn profiles_can_be_deleted() {
+    let f = fixture(ServerOptions::default()).await;
+    let _dev = with_device(&f).await;
+    f.manager.list()[0]
+        .open(gtkterm_core::config::Connection::Udp {
+            bind: "127.0.0.1".into(),
+            local_port: 0,
+            remote_host: None,
+            remote_port: 0,
+        })
+        .await
+        .unwrap();
+    ok(&f.client, "profile_save", json!({"name": "bench"})).await;
+    let listed = ok(&f.client, "profile_list", json!({})).await;
+    assert!(listed.to_string().contains("bench"));
+    assert_eq!(
+        ok(&f.client, "profile_delete", json!({"name": "bench"})).await["deleted"],
+        "bench"
+    );
+    let listed = ok(&f.client, "profile_list", json!({})).await;
+    assert!(!listed.to_string().contains("bench"), "{listed}");
+    let msg = tool_error(&f.client, "profile_delete", json!({"name": "bench"})).await;
+    assert!(msg.contains("bench"), "{msg}");
+}
+
+#[tokio::test]
+async fn configure_port_reopens_with_new_settings() {
+    let pty = PtyPair::new().unwrap();
+    let f = fixture(ServerOptions::default()).await;
+    let msg = tool_error(&f.client, "configure_port", json!({"baudrate": 9600})).await;
+    assert!(msg.contains("not open"), "{msg}");
+    ok(
+        &f.client,
+        "open_port",
+        json!({"connection": {"type": "serial", "port": pty.path_str(), "baudrate": 115_200}}),
+    )
+    .await;
+    pty.write(b"before\n").await.unwrap();
+    ok(
+        &f.client,
+        "expect",
+        json!({"pattern": "before", "cursor": 0, "timeout_ms": 2000}),
+    )
+    .await;
+    let done = ok(
+        &f.client,
+        "configure_port",
+        json!({"baudrate": 57_600, "parity": "even", "bits": 7}),
+    )
+    .await;
+    let desc = done["status"]["description"].as_str().unwrap();
+    assert!(desc.contains("57600-7-E-1"), "{desc}");
+    let msg = tool_error(&f.client, "configure_port", json!({"parity": "sideways"})).await;
+    assert!(msg.contains("parity"), "{msg}");
+    let rx = ok(&f.client, "read", json!({"cursor": 0})).await;
+    assert!(rx["data"].as_str().unwrap().contains("before"), "history is kept");
+}
+
+#[tokio::test]
+async fn rx_since_and_log_resources_and_series_windows() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fixture(ServerOptions {
+        log_dir: dir.path().to_owned(),
+        ..ServerOptions::default()
+    })
+    .await;
+    let dev = with_device(&f).await;
+    let read = |uri: String| {
+        let client = &f.client;
+        async move {
+            let r = client.read_resource(ReadResourceRequestParams::new(uri)).await?;
+            let v = serde_json::to_value(&r.contents[0]).unwrap();
+            Ok::<String, rmcp::ServiceError>(v["text"].as_str().unwrap().to_owned())
+        }
+    };
+    ok(&f.client, "log_start", json!({"file_name": "s.log"})).await;
+    dev.send(&b"hello\nworld\n"[..]).await.unwrap();
+    eventually("data", || f.manager.list()[0].rx_cursor() == 12).await;
+    let body: Value = serde_json::from_str(
+        &read("gtkterm://session/1/rx?since=6&encoding=hex".into())
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(body["data"], "77 6F 72 6C 64 0A");
+    assert_eq!(body["next_cursor"], 12);
+    assert!(read("gtkterm://session/1/rx?since=x".into()).await.is_err());
+    assert!(read("gtkterm://session/1/status?since=1".into()).await.is_err());
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let log = loop {
+        let log: Value =
+            serde_json::from_str(&read("gtkterm://session/1/log".into()).await.unwrap()).unwrap();
+        if log["tail"].as_str().unwrap().contains("world") {
+            break log;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "log tail: {log}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    assert!(log["log"]["path"].as_str().unwrap().ends_with("s.log"));
+
+    // Time window: samples from the last 0.3 s of the chart.
+    dev.send(&b"{w|v|1}\n{w|v|2}\n"[..]).await.unwrap();
+    eventually("two samples", || {
+        f.manager.list()[0].with_sunshine(|s| s.chart("w").map_or(0, |c| c.series[0].samples.len())) == 2
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    dev.send(&b"{w|v|3}\n"[..]).await.unwrap();
+    eventually("third sample", || {
+        f.manager.list()[0].with_sunshine(|s| s.chart("w").map_or(0, |c| c.series[0].samples.len())) == 3
+    })
+    .await;
+    let s = ok(
+        &f.client,
+        "sunshine_get_series",
+        json!({"id": "w", "last_seconds": 0.3}),
+    )
+    .await;
+    assert_eq!(s["series"][0]["values"], json!([[3.0]]));
+    let msg = tool_error(
+        &f.client,
+        "sunshine_get_series",
+        json!({"id": "w", "last_seconds": -1}),
+    )
+    .await;
+    assert!(msg.contains("positive"), "{msg}");
+}
+
+#[tokio::test]
+async fn http_clients_can_listen_for_updates() {
+    use rmcp::ClientServiceExt as _;
+    use rmcp::model::{ProtocolVersion, ServerNotification, SubscriptionFilter};
+    let manager = SessionManager::new(Config::default(), None);
+    let session = manager.first_or_create();
+    let (port, dev) = loopback::pair("loopback");
+    session.attach(port).await.unwrap();
+    let server = GtkTermMcp::new(Arc::clone(&manager), ServerOptions::default());
+    let handle = serve_http(server, "127.0.0.1:0".parse().unwrap(), HttpSecurity::default())
+        .await
+        .unwrap();
+    let transport = rmcp::transport::StreamableHttpClientTransport::from_config(
+        rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(
+            handle.url.clone(),
+        ),
+    );
+    let client = Client::default()
+        .serve_with_lifecycle(
+            transport,
+            rmcp::ClientLifecycleMode::Discover {
+                preferred_versions: vec![ProtocolVersion::V_2026_07_28],
+            },
+        )
+        .await
+        .unwrap();
+    let filter = SubscriptionFilter::builder()
+        .resource_subscriptions(["gtkterm://session/1/rx"])
+        .build();
+    let mut sub = client.peer().listen(filter).await.unwrap();
+    dev.send(&b"over http\n"[..]).await.unwrap();
+    let note = tokio::time::timeout(Duration::from_secs(5), sub.next())
+        .await
+        .expect("an update")
+        .unwrap()
+        .expect("subscription open");
+    assert!(
+        matches!(&note, ServerNotification::ResourceUpdatedNotification(n) if n.params.uri == "gtkterm://session/1/rx"),
+        "{note:?}"
+    );
+    drop(sub);
+    client.cancel().await.unwrap();
+    handle.shutdown().await;
 }
