@@ -36,6 +36,8 @@ use gtkterm_protocols::logfmt::{LogFormat, LogMeta};
 /// Session identifier, unique within a [`crate::manager::SessionManager`].
 pub type SessionId = u32;
 
+/// How long closing the log or the port waits for queued sends to be reported.
+const SETTLE_TIMEOUT: Duration = Duration::from_millis(500);
 /// How long the writer waits for the configured "wait char" before sending the next line.
 const WAIT_CHAR_TIMEOUT: Duration = Duration::from_secs(2);
 /// Modem line polling interval.
@@ -733,6 +735,7 @@ impl Actor {
                 let _ = reply.send(());
             }
             Command::Close(reply) => {
+                self.settle_writes().await;
                 self.teardown(PortState::Closed).await;
                 let _ = reply.send(());
             }
@@ -763,6 +766,9 @@ impl Actor {
                 }
             },
             Command::Log(op, reply) => {
+                if matches!(op, LogOp::Stop) {
+                    self.settle_writes().await;
+                }
                 let _ = reply.send(self.log_op(op));
             }
             Command::Transfer(req, reply) => {
@@ -945,6 +951,29 @@ impl Actor {
                 self.teardown(state).await;
             }
             None => self.teardown(PortState::Closed).await,
+        }
+    }
+
+    /// Record writes that already reached the port (the device may have answered them) before
+    /// the log closes or the port goes away: their reports travel on another channel than
+    /// commands. Waits up to [`SETTLE_TIMEOUT`] for queued sends.
+    async fn settle_writes(&mut self) {
+        let deadline = tokio::time::Instant::now() + SETTLE_TIMEOUT;
+        loop {
+            let Some(p) = self.port.as_mut() else { return };
+            let ev = match p.written.try_recv() {
+                Ok(ev) => ev,
+                Err(_) if self.shared.tx_queue.load(Ordering::Relaxed) == 0 => return,
+                Err(_) => match tokio::time::timeout_at(deadline, p.written.recv()).await {
+                    Ok(Some(ev)) => ev,
+                    _ => return,
+                },
+            };
+            let failed = matches!(ev, WriterEvent::Failed(_));
+            self.on_written(Some(ev)).await;
+            if failed {
+                return;
+            }
         }
     }
 

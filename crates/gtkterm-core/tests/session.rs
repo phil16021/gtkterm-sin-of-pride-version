@@ -444,3 +444,36 @@ async fn auto_baud_finds_the_rate_the_device_talks_at() {
         "reopened at the detected rate"
     );
 }
+
+/// Data the device already received is in the log even when the log stops (or the port
+/// closes) right after the send: write reports and commands travel on different channels.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stopping_the_log_right_after_a_send_keeps_the_tx_record() {
+    use gtkterm_core::session::LogOp;
+    use gtkterm_protocols::logfmt::LogFormat;
+    let dir = tempfile::tempdir().unwrap();
+    let s = session();
+    for round in 0..100 {
+        let (port, mut dev) = loopback::pair("loop");
+        s.attach(port).await.unwrap();
+        let path = dir.path().join(format!("{round}.txt"));
+        s.log(LogOp::Start {
+            path: path.clone(),
+            format: LogFormat::Text,
+            append: false,
+            port_label: None,
+        })
+        .await
+        .unwrap();
+        s.send(&b"AT\r"[..]).await.unwrap();
+        assert_eq!(&dev.recv().await.unwrap()[..], b"AT\r");
+        let done = if round % 2 == 0 {
+            s.log(LogOp::Stop).await.unwrap().unwrap()
+        } else {
+            s.close().await.unwrap();
+            s.log(LogOp::Stop).await.unwrap().unwrap()
+        };
+        assert_eq!(done.bytes, 3, "round {round}");
+        assert!(std::fs::read_to_string(&path).unwrap().contains("T: AT<0D>"));
+    }
+}

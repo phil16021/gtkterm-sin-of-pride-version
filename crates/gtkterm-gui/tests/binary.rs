@@ -119,12 +119,13 @@ async fn headless_terminal_on_pty() {
     });
     let mut errlog = String::new();
     while !errlog.contains("connected to") {
-        errlog.push_str(
-            &tokio::time::timeout(Duration::from_secs(5), err_rx.recv())
-                .await
-                .unwrap()
-                .unwrap(),
-        );
+        match tokio::time::timeout(Duration::from_secs(5), err_rx.recv()).await {
+            Ok(Some(s)) => errlog.push_str(&s),
+            other => panic!(
+                "not connected ({other:?}, exit {:?}); stderr:\n{errlog}",
+                child.try_wait()
+            ),
+        }
     }
 
     pty.write(b"hello\nworld").await.unwrap();
