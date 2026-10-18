@@ -4205,7 +4205,8 @@ mod tests {
 
     /// The README screenshots: realistic scenes rendered from the real window.
     /// `GTKTERM_SCREENSHOTS=docs/screenshots GSK_RENDERER=cairo xvfb-run -a cargo test -p gtkterm-gui readme_screenshots`,
-    /// then in docs/screenshots: `for f in chart-*.png; do convert $f -crop 566x620+0+34 +repage $f; done;
+    /// then in docs/screenshots (drop the tab bar and the toolbar of each chart):
+    /// `for f in chart-*.png; do convert $f -chop 0x34 -gravity south -chop 0x46 +repage $f; done;
     /// convert chart-bar.png chart-pie.png chart-scatter.png +append -strip charts.png; rm chart-*.png`
     #[gtk::test]
     fn readme_screenshots() {

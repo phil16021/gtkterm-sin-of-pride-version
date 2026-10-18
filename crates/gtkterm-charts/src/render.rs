@@ -449,10 +449,10 @@ fn draw_xy(
                 Some(st) => format!(
                     "{}  {}  ({} … {}, ⌀ {})",
                     s.name,
-                    short(st.last),
-                    short(st.min),
-                    short(st.max),
-                    short(st.mean)
+                    stat(st.last),
+                    stat(st.min),
+                    stat(st.max),
+                    stat(st.mean)
                 ),
                 None => s.name.clone(),
             };
@@ -486,6 +486,26 @@ fn draw_xy(
         legend,
         model: Model::Line(m.clone()),
     })
+}
+
+/// A statistic for the legend: about four significant digits.
+fn stat(v: f64) -> String {
+    let a = v.abs();
+    let s = if a >= 1000.0 {
+        format!("{v:.0}")
+    } else if a >= 100.0 {
+        format!("{v:.1}")
+    } else if a >= 1.0 {
+        format!("{v:.2}")
+    } else {
+        format!("{v:.3}")
+    };
+    let s = if s.contains('.') {
+        s.trim_end_matches('0').trim_end_matches('.').to_owned()
+    } else {
+        s
+    };
+    if s == "-0" { "0".into() } else { s }
 }
 
 fn short(v: f64) -> String {
@@ -656,6 +676,16 @@ mod tests {
     use jiff::Timestamp;
 
     use super::*;
+
+    #[test]
+    fn legend_statistics_are_short() {
+        assert_eq!(stat(5.519_375), "5.52");
+        assert_eq!(stat(0.609_125), "0.609");
+        assert_eq!(stat(-49.97), "-49.97");
+        assert_eq!(stat(1234.56), "1235");
+        assert_eq!(stat(25.0), "25");
+        assert_eq!(stat(-0.0001), "0");
+    }
 
     fn chart(lines: &str, id: &str) -> ChartData {
         let mut s = SunshineStore::new();

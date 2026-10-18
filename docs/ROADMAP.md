@@ -8,7 +8,12 @@
 > serial close, lag handling, bounded/flushable send queue, streamed raw file send, durable saves,
 > MCP chart notifications, per-client approval, profile autosave and naming, action enabling,
 > hardening (0600 logs, exec paths, token source) and cleanup. Soak: 4 min at ~8000 packets/s,
-> RSS flat at ~190 MB. Next: R11 tabs, R12 daily-use features, then 2.0.0.
+> RSS flat at ~190 MB. R11 tabs and R12 daily-use features are **done** (2.0.0-rc.2): send bar,
+> Enter mapping, character delay, DTR/RTS at open, auto-reconnect, TX colour, history redraw on
+> view changes, quick capture and log on connect, export/copy, paste guard, chart controls, help,
+> script editor unsaved state, accessible indicators. Deferred to R13/R14: async udev hotplug
+> watcher, TX/RX direction markers in dump views, MCP `send.char_delay_ms`, and applying
+> `term_rows`/`term_columns` (the window keeps its own size). Next: the hardware checklist, then 2.0.0.
 
 ## Context
 
