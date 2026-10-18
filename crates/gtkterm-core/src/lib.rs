@@ -15,5 +15,6 @@ pub mod script;
 pub mod session;
 pub mod signals;
 pub mod sunshine;
+#[cfg(any(test, feature = "testing"))]
 pub mod testing;
 pub mod transfer;

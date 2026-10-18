@@ -2609,8 +2609,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         super::super::state::set_test_dir(dir.path());
         let _guard = rt().enter();
+        // `cargo test` runs all GUI tests in one process: each needs its own D-Bus object path.
+        static APPS: AtomicUsize = AtomicUsize::new(0);
+        let app_id = format!(
+            "at.philipp.GtkTermSunshine.Test{}",
+            APPS.fetch_add(1, Ordering::SeqCst)
+        );
         let app = adw::Application::builder()
-            .application_id("at.philipp.GtkTermSunshine.Test")
+            .application_id(app_id)
             .flags(gio::ApplicationFlags::NON_UNIQUE)
             .build();
         app.register(gio::Cancellable::NONE).unwrap();

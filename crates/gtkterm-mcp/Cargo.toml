@@ -34,6 +34,7 @@ thiserror.workspace = true
 directories.workspace = true
 
 [dev-dependencies]
+gtkterm-core = { workspace = true, features = ["testing"] }
 rmcp = { workspace = true, features = ["client", "transport-streamable-http-client-reqwest"] }
 reqwest = { version = "0.13", default-features = false }
 tempfile.workspace = true

@@ -5,6 +5,7 @@
 //! expose [`SerialControl`] for modem lines and break. Dropping the `OpenPort` cancels the
 //! backend tasks and closes the device or sockets.
 
+#[cfg(any(test, feature = "testing"))]
 pub mod loopback;
 pub mod serial;
 pub mod tcp;
@@ -273,17 +274,6 @@ impl OpenPort {
             control,
             closer,
         }
-    }
-
-    /// Send a break of the given duration (serial only).
-    pub async fn send_break(&self, duration: Duration) -> Result<(), PortError> {
-        let control = self
-            .control
-            .clone()
-            .ok_or_else(|| PortError::Unsupported("break on non-serial port".into()))?;
-        control.set_break(true)?;
-        tokio::time::sleep(duration).await;
-        control.set_break(false)
     }
 }
 
