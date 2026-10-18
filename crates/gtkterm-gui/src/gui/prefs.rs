@@ -527,6 +527,11 @@ pub fn show(
         &gettext("Agents may read data but not send, open or close"),
         mcp.read_only,
     );
+    let mcp_confirm = switch(
+        &gettext("Ask before agents change anything"),
+        &gettext("Sending, opening ports, transfers and scripts need your OK first"),
+        mcp.confirm_writes,
+    );
     let token = mcp.token.clone().unwrap_or_default();
     let token_row = adw::ActionRow::builder()
         .title(gettext("Bearer token"))
@@ -564,6 +569,7 @@ pub fn show(
             mcp_enabled.upcast_ref(),
             mcp_port.upcast_ref(),
             mcp_ro.upcast_ref(),
+            mcp_confirm.upcast_ref(),
             token_row.upcast_ref(),
         ],
     );
@@ -671,6 +677,7 @@ pub fn show(
             read_only: mcp_ro.is_active(),
             token: original_mcp.token.clone(),
             allow_exec: mcp_exec.is_active(),
+            confirm_writes: mcp_confirm.is_active(),
         };
         apply(p, m, local_exec.is_active());
     });

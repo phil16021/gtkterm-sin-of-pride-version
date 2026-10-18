@@ -182,7 +182,8 @@ async fn mcp_stdio_drives_a_pty() {
     command
         .arg("--config")
         .arg(dir.path().join("c.toml"))
-        .arg("--mcp-stdio");
+        .arg("--mcp-stdio")
+        .env("XDG_DATA_HOME", dir.path());
     let client = Client
         .serve(TokioChildProcess::new(command).unwrap())
         .await
@@ -223,6 +224,21 @@ async fn mcp_stdio_drives_a_pty() {
     assert_ne!(r.is_error, Some(true));
     assert_eq!(pty.read_exact(5).await.unwrap(), b"ping\n");
     client.cancel().await.unwrap();
+
+    // Every call is in the audit log.
+    let audit = std::fs::read_to_string(dir.path().join("gtkterm-sunshine/mcp-audit.jsonl")).unwrap();
+    let tools: Vec<String> = audit
+        .lines()
+        .map(|l| {
+            serde_json::from_str::<serde_json::Value>(l).unwrap()["tool"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(tools.first().map(String::as_str), Some("open_port"));
+    assert_eq!(tools.last().map(String::as_str), Some("send"));
+    assert!(audit.contains(r#""data":"ping""#), "{audit}");
 }
 
 #[tokio::test]

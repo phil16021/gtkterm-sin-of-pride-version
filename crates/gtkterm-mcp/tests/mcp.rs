@@ -849,3 +849,86 @@ async fn scripts_signals_and_port_control() {
         .unwrap();
     assert!(serde_json::to_string(&doc.contents).unwrap().contains("if_match"));
 }
+
+#[tokio::test]
+async fn write_tools_ask_the_approver_and_every_call_is_audited() {
+    use gtkterm_mcp::{Approval, Approver};
+    use std::sync::Mutex;
+    let dir = tempfile::tempdir().unwrap();
+    let audit = dir.path().join("audit.jsonl");
+    let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+    let answers = Arc::new(Mutex::new(vec![Approval::Deny, Approval::Once, Approval::Always]));
+    let (a, q) = (Arc::clone(&answers), Arc::clone(&asked));
+    let f = fixture(ServerOptions {
+        audit: Some(audit.clone()),
+        approver: Some(Approver::new(move |req| {
+            q.lock().unwrap().push(format!("{} {}", req.tool, req.arguments));
+            let answer = a.lock().unwrap().remove(0);
+            async move { answer }
+        })),
+        ..ServerOptions::default()
+    })
+    .await;
+    let mut dev = with_device(&f).await;
+
+    // Read tools never ask.
+    ok(&f.client, "get_status", json!({})).await;
+    // Denied: nothing is sent.
+    let msg = tool_error(&f.client, "send", json!({"data": "one"})).await;
+    assert!(msg.contains("denied"), "{msg}");
+    // Once: this call runs, the next one asks again.
+    ok(&f.client, "send", json!({"data": "two"})).await;
+    assert_eq!(&dev.recv().await.unwrap()[..], b"two");
+    // Always: no more questions.
+    ok(&f.client, "send", json!({"data": "three"})).await;
+    ok(&f.client, "send", json!({"data": "four"})).await;
+    assert_eq!(&dev.recv().await.unwrap()[..], b"three");
+    assert_eq!(&dev.recv().await.unwrap()[..], b"four");
+    assert_eq!(
+        *asked.lock().unwrap(),
+        [
+            r#"send {"data":"one"}"#,
+            r#"send {"data":"two"}"#,
+            r#"send {"data":"three"}"#
+        ]
+    );
+
+    let lines: Vec<Value> = std::fs::read_to_string(&audit)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let summary: Vec<(String, String)> = lines
+        .iter()
+        .map(|l| {
+            (
+                l["tool"].as_str().unwrap().to_owned(),
+                l["outcome"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    let expect = |t: &str, o: &str| (t.to_owned(), o.to_owned());
+    assert_eq!(
+        summary,
+        [
+            expect("get_status", "ok"),
+            expect("send", "denied"),
+            expect("send", "ok"),
+            expect("send", "ok"),
+            expect("send", "ok"),
+        ]
+    );
+    assert_eq!(lines[2]["arguments"]["data"], "two");
+    assert!(lines.iter().all(|l| l["time"].is_string() && l["ms"].is_u64()));
+    use std::os::unix::fs::PermissionsExt as _;
+    assert_eq!(
+        std::fs::metadata(&audit).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    // Failing tools are recorded with their message.
+    tool_error(&f.client, "sunshine_get_series", json!({"id": "nope"})).await;
+    let last: Value =
+        serde_json::from_str(std::fs::read_to_string(&audit).unwrap().lines().last().unwrap()).unwrap();
+    assert_eq!(last["outcome"], "error");
+    assert!(last["error"].as_str().unwrap().contains("nope"), "{last}");
+}

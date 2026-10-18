@@ -15,7 +15,7 @@ use gtkterm_core::manager::SessionManager;
 use gtkterm_core::ports::{PortWatcher, list_ports, watch_ports};
 use gtkterm_core::session::{LogOp, PortState, Session, SessionEvent};
 use gtkterm_mcp::transport::{HttpHandle, HttpSecurity, random_token, serve_http};
-use gtkterm_mcp::{GtkTermMcp, ServerOptions};
+use gtkterm_mcp::{Approval, ApprovalRequest, Approver, GtkTermMcp, ServerOptions};
 use gtkterm_protocols::logfmt::{LogFormat, session_file_name};
 use gtkterm_protocols::view::{HEX_WIDTHS, ViewMode};
 use vte::prelude::TerminalExt as _;
@@ -1903,6 +1903,8 @@ impl Win {
                 read_only: settings.read_only,
                 allowed_dirs: self.mcp_allow_dirs.borrow().clone(),
                 allow_exec: self.state.borrow().mcp.allow_exec,
+                audit: Some(gtkterm_mcp::default_audit_path()),
+                approver: (settings.confirm_writes && !settings.read_only).then(|| self.approver()),
                 ..ServerOptions::default()
             },
         );
@@ -1946,6 +1948,50 @@ impl Win {
                 }
             },
         );
+    }
+
+    /// Approval hook of the embedded MCP server: questions arrive from the I/O runtime and are
+    /// answered one at a time with a dialog on the main thread.
+    fn approver(self: &Rc<Self>) -> Approver {
+        let (tx, rx) =
+            async_channel::unbounded::<(ApprovalRequest, tokio::sync::oneshot::Sender<Approval>)>();
+        let w = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            while let Ok((request, mut reply)) = rx.recv().await {
+                let Some(win) = w.upgrade().map(|w| w.window.clone()) else {
+                    let _ = reply.send(Approval::Deny);
+                    continue;
+                };
+                let dialog = approval_dialog(&request);
+                let choice = dialog.clone().choose_future(Some(&win));
+                let answer = tokio::select! {
+                    r = choice => match r.as_str() {
+                        "always" => Approval::Always,
+                        "once" => Approval::Once,
+                        _ => Approval::Deny,
+                    },
+                    // The request timed out or the agent went away.
+                    () = reply.closed() => {
+                        dialog.force_close();
+                        continue;
+                    }
+                };
+                let _ = reply.send(answer);
+            }
+        });
+        Approver::new(move |request| {
+            let tx = tx.clone();
+            async move {
+                let (reply, answer) = tokio::sync::oneshot::channel();
+                if tx.send((request, reply)).await.is_err() {
+                    return Approval::Deny;
+                }
+                match tokio::time::timeout(APPROVAL_TIMEOUT, answer).await {
+                    Ok(Ok(a)) => a,
+                    _ => Approval::Deny,
+                }
+            }
+        })
     }
 
     fn stop_mcp(&self) {
@@ -2165,6 +2211,35 @@ fn shortcuts_dialog() -> adw::ShortcutsDialog {
     for (_, s) in sections {
         dialog.add(s);
     }
+    dialog
+}
+
+/// How long an agent's write waits for the user before it is denied.
+const APPROVAL_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// "Allow the agent to …?" for one tool call.
+fn approval_dialog(request: &ApprovalRequest) -> adw::AlertDialog {
+    let client = request.client.clone().unwrap_or_else(|| gettext("An AI agent"));
+    let dialog = adw::AlertDialog::builder()
+        .heading(gettext_f("Allow {tool}?", &[("tool", &request.tool)]))
+        .body(gettext_f(
+            "{client} wants to run {tool} with {arguments}.\nIt can send data to the device, change the connection or write files.",
+            &[
+                ("client", &client),
+                ("tool", &request.tool),
+                ("arguments", &request.arguments),
+            ],
+        ))
+        .close_response("deny")
+        .default_response("once")
+        .build();
+    dialog.add_responses(&[
+        ("deny", gettext("Deny").as_str()),
+        ("once", gettext("Allow Once").as_str()),
+        ("always", gettext("Allow Until the Server Stops").as_str()),
+    ]);
+    dialog.set_response_appearance("deny", adw::ResponseAppearance::Destructive);
+    dialog.set_response_appearance("once", adw::ResponseAppearance::Suggested);
     dialog
 }
 
@@ -2638,6 +2713,17 @@ mod tests {
         // Echo off by default, toggled on above: the TX chunk is displayed (no assertion on VTE
         // contents, but the path must not warn).
         win.term.term.feed_child(b"x");
+        pump_until(Duration::from_millis(100), || false);
+
+        // The MCP approval dialog builds and closes without warnings.
+        let dialog = approval_dialog(&ApprovalRequest {
+            tool: "send".into(),
+            arguments: r#"{"data":"AT"}"#.into(),
+            client: Some("claude-code".into()),
+        });
+        dialog.present(Some(&win.window));
+        pump_until(Duration::from_millis(100), || false);
+        dialog.force_close();
         pump_until(Duration::from_millis(100), || false);
 
         // SIGUSR2 closes the port (C GTKTerm compatibility).

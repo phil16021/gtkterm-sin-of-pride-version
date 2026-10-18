@@ -19,6 +19,8 @@ pub struct McpSettings {
     pub token: Option<String>,
     /// Scripts run by agents may use `exec`.
     pub allow_exec: bool,
+    /// Ask the user before an agent runs a write tool.
+    pub confirm_writes: bool,
 }
 
 impl Default for McpSettings {
@@ -29,6 +31,7 @@ impl Default for McpSettings {
             read_only: false,
             token: None,
             allow_exec: false,
+            confirm_writes: true,
         }
     }
 }

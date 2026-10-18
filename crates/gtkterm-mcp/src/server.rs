@@ -89,6 +89,11 @@ pub struct ServerOptions {
     pub allowed_dirs: Vec<PathBuf>,
     /// Scripts may use `exec` (`--mcp-allow-exec`).
     pub allow_exec: bool,
+    /// Every tool call is appended to this JSONL file (`None`, the default: no audit log; the
+    /// application uses [`default_audit_path`]).
+    pub audit: Option<PathBuf>,
+    /// Asked before write tools run (the GUI's confirmation dialog); `None`: no questions.
+    pub approver: Option<crate::Approver>,
 }
 
 impl Default for ServerOptions {
@@ -99,6 +104,8 @@ impl Default for ServerOptions {
             transfer_dir: default_transfer_dir(),
             allowed_dirs: Vec::new(),
             allow_exec: false,
+            audit: None,
+            approver: None,
         }
     }
 }
@@ -109,6 +116,11 @@ pub fn default_log_dir() -> PathBuf {
         .map_or_else(|| PathBuf::from("."), |d| d.data_dir().to_owned())
         .join("gtkterm-sunshine")
         .join("logs")
+}
+
+/// Default audit log of agent tool calls: `$XDG_DATA_HOME/gtkterm-sunshine/mcp-audit.jsonl`.
+pub fn default_audit_path() -> PathBuf {
+    default_log_dir().with_file_name("mcp-audit.jsonl")
 }
 
 /// Default transfer directory: `$XDG_DATA_HOME/gtkterm-sunshine/transfers`.
@@ -143,6 +155,9 @@ pub struct GtkTermMcp {
     options: ServerOptions,
     tool_router: ToolRouter<Self>,
     prompt_router: PromptRouter<Self>,
+    audit: Option<Arc<crate::guard::AuditLog>>,
+    /// The user answered "Always" (shared by every client of this server).
+    approved: Arc<std::sync::atomic::AtomicBool>,
 }
 
 fn err(e: impl std::fmt::Display) -> String {
@@ -459,9 +474,50 @@ impl GtkTermMcp {
         }
         Self {
             manager,
+            audit: options
+                .audit
+                .clone()
+                .map(|p| Arc::new(crate::guard::AuditLog::new(p))),
             options,
             tool_router,
             prompt_router: Self::prompt_router(),
+            approved: Arc::default(),
+        }
+    }
+
+    /// Path of the audit log, if one is written.
+    pub fn audit_path(&self) -> Option<&Path> {
+        self.audit.as_deref().map(crate::guard::AuditLog::path)
+    }
+
+    /// Ask the approver (if any) whether `tool` may run. `Err` carries the refusal message.
+    async fn approve(
+        &self,
+        tool: &str,
+        args: Option<&serde_json::Map<String, serde_json::Value>>,
+        client: Option<&str>,
+    ) -> Result<(), String> {
+        use std::sync::atomic::Ordering;
+        let Some(approver) = &self.options.approver else {
+            return Ok(());
+        };
+        if !WRITE_TOOLS.contains(&tool) || self.approved.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        let request = crate::ApprovalRequest {
+            tool: tool.to_owned(),
+            arguments: crate::guard::compact_arguments(args, 400),
+            client: client.map(str::to_owned),
+        };
+        match approver.ask(request).await {
+            crate::Approval::Always => {
+                self.approved.store(true, Ordering::Relaxed);
+                Ok(())
+            }
+            crate::Approval::Once => Ok(()),
+            crate::Approval::Deny => Err(format!(
+                "The user denied {tool}. Ask them before trying again, or use read-only tools."
+            )),
         }
     }
 
@@ -1691,6 +1747,50 @@ fn resource(uri: &str, name: &str, description: &str, mime: &str) -> Resource {
 #[tool_handler(router = self.tool_router)]
 #[prompt_handler(router = self.prompt_router)]
 impl ServerHandler for GtkTermMcp {
+    async fn call_tool(
+        &self,
+        request: rmcp::model::CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::CallToolResponse, ErrorData> {
+        let started = std::time::Instant::now();
+        let tool = request.name.to_string();
+        let args = request.arguments.clone();
+        let client = context.peer.peer_info().map(|i| i.client_info.name.clone());
+        let audit = |outcome: &str, error: Option<String>| {
+            if let Some(log) = &self.audit {
+                log.write(&crate::guard::AuditEntry {
+                    time: jiff::Timestamp::now(),
+                    tool: &tool,
+                    client: client.as_deref(),
+                    arguments: crate::guard::audit_arguments(args.as_ref()),
+                    outcome,
+                    error,
+                    ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                });
+            }
+        };
+        if let Err(msg) = self.approve(&tool, args.as_ref(), client.as_deref()).await {
+            audit("denied", Some(msg.clone()));
+            return Ok(rmcp::model::CallToolResult::error(vec![rmcp::model::ContentBlock::text(msg)]).into());
+        }
+        let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+        let result = self.tool_router.call(tcc).await;
+        match &result {
+            Ok(rmcp::model::CallToolResponse::Complete(r)) if r.is_error == Some(true) => {
+                let text = r
+                    .content
+                    .iter()
+                    .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                audit("error", Some(text));
+            }
+            Ok(_) => audit("ok", None),
+            Err(e) => audit("error", Some(e.message.to_string())),
+        }
+        result
+    }
+
     fn get_info(&self) -> ServerConfig {
         let mode = if self.options.read_only {
             " The server is read-only: data can be read but not sent."

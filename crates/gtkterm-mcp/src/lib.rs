@@ -4,11 +4,15 @@
 //! 2025-11-25 and older for clients that still use the initialize handshake.
 #![forbid(unsafe_code)]
 
+mod guard;
 mod params;
 mod server;
 pub mod transport;
 
-pub use server::{GtkTermMcp, ServerOptions, WRITE_TOOLS, default_log_dir, default_transfer_dir};
+pub use guard::{Approval, ApprovalRequest, Approver};
+pub use server::{
+    GtkTermMcp, ServerOptions, WRITE_TOOLS, default_audit_path, default_log_dir, default_transfer_dir,
+};
 
 /// Reference of the automation script language (Markdown), also served as
 /// `gtkterm://docs/script-language`.

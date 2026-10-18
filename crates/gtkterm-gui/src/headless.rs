@@ -48,6 +48,7 @@ fn mcp_options(cli: &Cli) -> ServerOptions {
         read_only: cli.mcp_read_only,
         allowed_dirs: cli.mcp_allow_dir.clone(),
         allow_exec: cli.mcp_allow_exec,
+        audit: Some(gtkterm_mcp::default_audit_path()),
         ..ServerOptions::default()
     }
 }
