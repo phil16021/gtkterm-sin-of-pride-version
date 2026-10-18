@@ -14,72 +14,84 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: crates/gtkterm-gui/src/gui/charts.rs:50
+#: crates/gtkterm-gui/src/gui/charts.rs:57
 msgid "Pause"
 msgstr "Anhalten"
 
-#: crates/gtkterm-gui/src/gui/charts.rs:54
+#: crates/gtkterm-gui/src/gui/charts.rs:61
 msgid "Time axis instead of sample number"
 msgstr "Zeitachse statt Messwertnummer"
 
-#: crates/gtkterm-gui/src/gui/charts.rs:60
+#: crates/gtkterm-gui/src/gui/charts.rs:67
 msgid "Chart type"
 msgstr "Diagrammtyp"
 
-#: crates/gtkterm-gui/src/gui/charts.rs:63
+#: crates/gtkterm-gui/src/gui/charts.rs:70
 msgid "Samples kept per series"
 msgstr "Gespeicherte Werte je Reihe"
 
-#: crates/gtkterm-gui/src/gui/charts.rs:66
+#: crates/gtkterm-gui/src/gui/charts.rs:73
+msgid "Follow the newest data (off while zoomed or panned)"
+msgstr "Den neuesten Daten folgen (aus beim Zoomen oder Verschieben)"
+
+#: crates/gtkterm-gui/src/gui/charts.rs:78
+msgid "Show only the newest seconds (time axis) or samples; 0 shows everything kept"
+msgstr "Nur die neuesten Sekunden (Zeitachse) bzw. Werte zeigen; 0 zeigt alles Gespeicherte"
+
+#: crates/gtkterm-gui/src/gui/charts.rs:82
+msgid "Keep the current Y range"
+msgstr "Aktuellen Y-Bereich beibehalten"
+
+#: crates/gtkterm-gui/src/gui/charts.rs:86
 #: crates/gtkterm-gui/src/gui/signals.rs:61
 msgid "Export CSV"
 msgstr "Als CSV exportieren"
 
-#: crates/gtkterm-gui/src/gui/charts.rs:70
+#: crates/gtkterm-gui/src/gui/charts.rs:90
 msgid "Export PNG"
 msgstr "Als PNG exportieren"
 
-#: crates/gtkterm-gui/src/gui/charts.rs:74
+#: crates/gtkterm-gui/src/gui/charts.rs:94
 msgid "Clear data"
 msgstr "Daten löschen"
 
-#: crates/gtkterm-gui/src/gui/charts.rs:333
+#: crates/gtkterm-gui/src/gui/charts.rs:412
 msgid "PNG export failed: {error}"
 msgstr "PNG-Export fehlgeschlagen: {error}"
 
-#: crates/gtkterm-gui/src/gui/charts.rs:375
+#: crates/gtkterm-gui/src/gui/charts.rs:513
 msgid "Export"
 msgstr "Exportieren"
 
-#: crates/gtkterm-gui/src/gui/charts.rs:385
+#: crates/gtkterm-gui/src/gui/charts.rs:523
 #: crates/gtkterm-gui/src/gui/scripts.rs:362
 msgid "Saved {path}"
 msgstr "{path} gespeichert"
 
-#: crates/gtkterm-gui/src/gui/charts.rs:389
+#: crates/gtkterm-gui/src/gui/charts.rs:527
 #: crates/gtkterm-gui/src/gui/scripts.rs:364
 msgid "Cannot save {path}: {error}"
 msgstr "{path} kann nicht gespeichert werden: {error}"
 
-#: crates/gtkterm-gui/src/gui/charts.rs:412
+#: crates/gtkterm-gui/src/gui/charts.rs:551
 msgid "No Sunshine data yet"
 msgstr "Noch keine Sunshine-Daten"
 
-#: crates/gtkterm-gui/src/gui/charts.rs:413
+#: crates/gtkterm-gui/src/gui/charts.rs:552
 msgid ""
 "Lines like <tt>{temp|Inside|21.5}</tt> are plotted here.\n"
 "Prefixes B:, P: and S: select bar, pie and scatter charts."
 msgstr "Zeilen wie <tt>{temp|Inside|21.5}</tt> werden hier dargestellt.\nDie Präfixe B:, P: und S: wählen Balken-, Torten- und Streudiagramme."
 
-#: crates/gtkterm-gui/src/gui/charts.rs:490
+#: crates/gtkterm-gui/src/gui/charts.rs:630
 msgid "Packet ID {id}"
 msgstr "Paket-ID {id}"
 
-#: crates/gtkterm-gui/src/gui/charts.rs:528
+#: crates/gtkterm-gui/src/gui/charts.rs:668
 msgid "{packets} packets · {rejected} rejected"
 msgstr "{packets} Pakete · {rejected} verworfen"
 
-#: crates/gtkterm-gui/src/gui/charts.rs:533
+#: crates/gtkterm-gui/src/gui/charts.rs:673
 msgid " · last: {error}"
 msgstr " · zuletzt: {error}"
 

@@ -206,7 +206,13 @@ pub struct SunshineStats {
     pub errors: u64,
     /// Lines discarded for exceeding the length limit.
     pub overflows: u64,
+    /// Packets dropped because [`MAX_CHARTS`] charts exist already.
+    pub too_many_charts: u64,
 }
+
+/// Most charts (packet IDs) a session keeps; packets with further IDs are dropped, so line
+/// noise or firmware with changing IDs cannot create tabs without end.
+pub const MAX_CHARTS: usize = 64;
 
 /// What changed after feeding data.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -261,6 +267,18 @@ impl SunshineStore {
         for ev in events {
             match ev {
                 ScanEvent::Packet(p) => {
+                    if !self.index.contains_key(&p.id) && self.charts.len() >= MAX_CHARTS {
+                        self.stats.too_many_charts += 1;
+                        if self.stats.too_many_charts == 1 {
+                            let error = format!("more than {MAX_CHARTS} packet IDs; further IDs are ignored");
+                            self.last_error = Some(error.clone());
+                            updates.push(SunshineUpdate::Rejected {
+                                line: p.id.clone(),
+                                error,
+                            });
+                        }
+                        continue;
+                    }
                     self.stats.packets += 1;
                     let (idx, created) = self.chart_index(&p, ts);
                     self.charts[idx].ingest(&p, ts);
@@ -360,6 +378,30 @@ impl SunshineStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chart_count_is_capped() {
+        let mut s = SunshineStore::new();
+        let mut text = String::new();
+        for i in 0..(MAX_CHARTS + 10) {
+            use std::fmt::Write as _;
+            let _ = writeln!(text, "{{id{i}|v|1}}");
+        }
+        let updates = s.feed(text.as_bytes(), Timestamp::UNIX_EPOCH);
+        assert_eq!(s.charts().len(), MAX_CHARTS);
+        assert_eq!(s.stats().too_many_charts, 10);
+        assert_eq!(
+            updates
+                .iter()
+                .filter(|u| matches!(u, SunshineUpdate::Rejected { .. }))
+                .count(),
+            1,
+            "reported once"
+        );
+        // Known IDs keep updating.
+        s.feed(b"{id0|v|2}\n", Timestamp::UNIX_EPOCH);
+        assert_eq!(s.chart("id0").unwrap().packets, 2);
+    }
 
     fn t(ms: i64) -> Timestamp {
         Timestamp::from_millisecond(ms).unwrap()

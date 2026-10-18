@@ -29,6 +29,11 @@ pub struct ViewState {
     pub x_window: Option<Range>,
     /// Points per series after downsampling (roughly 2× the plot width in pixels).
     pub max_points: usize,
+    /// While following (no zoom/pan), show only the newest span of X (seconds on the time
+    /// axis, samples on the index axis); `None` shows everything retained.
+    pub follow_span: Option<f64>,
+    /// Fixed Y range instead of fitting the visible data.
+    pub y_fixed: Option<Range>,
 }
 
 impl Default for ViewState {
@@ -37,6 +42,8 @@ impl Default for ViewState {
             x_axis: XAxis::Index,
             x_window: None,
             max_points: 2000,
+            follow_span: None,
+            y_fixed: None,
         }
     }
 }
@@ -67,6 +74,51 @@ impl ViewState {
     pub fn reset(&mut self) {
         self.x_window = None;
     }
+
+    /// Following the newest data (not zoomed or panned).
+    pub fn following(&self) -> bool {
+        self.x_window.is_none()
+    }
+
+    /// The X window shown: the zoom/pan window, else the newest `follow_span`, else all.
+    pub fn window(&self, full: Range) -> Option<Range> {
+        self.x_window.or_else(|| {
+            self.follow_span
+                .filter(|w| *w > 0.0 && *w < full.span())
+                .map(|w| Range::new(full.max - w, full.max))
+        })
+    }
+}
+
+/// Statistics of a series over the visible window.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SeriesStats {
+    /// Newest value.
+    pub last: f64,
+    /// Smallest value.
+    pub min: f64,
+    /// Largest value.
+    pub max: f64,
+    /// Mean.
+    pub mean: f64,
+}
+
+impl SeriesStats {
+    fn of(points: &[(f64, f64)]) -> Option<Self> {
+        let last = points.last()?.1;
+        let (mut min, mut max, mut sum) = (f64::INFINITY, f64::NEG_INFINITY, 0.0);
+        for p in points {
+            min = min.min(p.1);
+            max = max.max(p.1);
+            sum += p.1;
+        }
+        Some(Self {
+            last,
+            min,
+            max,
+            mean: sum / points.len() as f64,
+        })
+    }
 }
 
 /// One series ready to plot.
@@ -82,6 +134,8 @@ pub struct PlotSeries {
     pub visible: bool,
     /// Points in data coordinates, sorted by X for index/time data.
     pub points: Vec<(f64, f64)>,
+    /// Last/min/max/mean of the visible points (before downsampling).
+    pub stats: Option<SeriesStats>,
 }
 
 /// Line/scatter plot model.
@@ -137,6 +191,7 @@ pub fn xy_model(chart: &ChartData, view: &ViewState) -> XyModel {
                     color: series_color(i, s.color),
                     visible: s.visible,
                     points,
+                    stats: None,
                 },
                 pairs,
             )
@@ -149,10 +204,11 @@ pub fn xy_model(chart: &ChartData, view: &ViewState) -> XyModel {
             .flat_map(|(s, _)| s.points.iter().map(|p| p.0)),
     )
     .unwrap_or(Range::new(0.0, 1.0));
-    let x = view.x_window.unwrap_or(x_full);
+    let window = view.window(x_full);
+    let x = window.unwrap_or(x_full);
 
     for (s, is_pairs) in &mut all {
-        if view.x_window.is_some() {
+        if window.is_some() {
             if *is_pairs {
                 s.points.retain(|p| p.0 >= x.min && p.0 <= x.max);
             } else {
@@ -162,20 +218,30 @@ pub fn xy_model(chart: &ChartData, view: &ViewState) -> XyModel {
                 s.points = s.points[start..end.max(start)].to_vec();
             }
         }
+        let visible: Vec<(f64, f64)> = s
+            .points
+            .iter()
+            .copied()
+            .filter(|p| *is_pairs || (p.0 >= x.min && p.0 <= x.max))
+            .collect();
+        s.stats = SeriesStats::of(&visible);
         if !*is_pairs && s.points.len() > view.max_points {
             let keep = lttb_indices(&s.points, view.max_points);
             s.points = keep.into_iter().map(|i| s.points[i]).collect();
         }
     }
-    let y = Range::of(all.iter().filter(|(s, _)| s.visible).flat_map(|(s, _)| {
-        s.points
-            .iter()
-            .filter(|p| p.0 >= x.min && p.0 <= x.max)
-            .map(|p| p.1)
-    }))
-    .unwrap_or(Range::new(0.0, 1.0))
-    .padded(0.1);
-    let x = if view.x_window.is_some() {
+    let fitted = || {
+        Range::of(all.iter().filter(|(s, _)| s.visible).flat_map(|(s, _)| {
+            s.points
+                .iter()
+                .filter(|p| p.0 >= x.min && p.0 <= x.max)
+                .map(|p| p.1)
+        }))
+        .unwrap_or(Range::new(0.0, 1.0))
+        .padded(0.1)
+    };
+    let y = view.y_fixed.unwrap_or_else(fitted);
+    let x = if window.is_some() {
         x
     } else {
         x.padded(if pairs { 0.1 } else { 0.0 })
@@ -414,6 +480,42 @@ mod tests {
             );
         }
         s
+    }
+
+    #[test]
+    fn follow_span_fixed_y_and_stats() {
+        let s = store(&["{a|t|1}", "{a|t|5}", "{a|t|2}", "{a|t|4}", "{a|t|3}"]);
+        let c = s.chart("a").unwrap();
+        // The newest 2 samples (index axis): x 2..4, stats over the visible part only.
+        let m = xy_model(
+            c,
+            &ViewState {
+                follow_span: Some(2.0),
+                ..ViewState::default()
+            },
+        );
+        assert_eq!(m.x, Range::new(2.0, 4.0));
+        let st = m.series[0].stats.unwrap();
+        assert_eq!((st.last, st.min, st.max), (3.0, 2.0, 4.0));
+        assert!((st.mean - 3.0).abs() < 1e-9);
+        // A span wider than the data shows everything.
+        let all = xy_model(
+            c,
+            &ViewState {
+                follow_span: Some(100.0),
+                ..ViewState::default()
+            },
+        );
+        assert_eq!(all.x, Range::new(0.0, 4.0));
+        // A fixed Y range wins over fitting.
+        let fixed = xy_model(
+            c,
+            &ViewState {
+                y_fixed: Some(Range::new(-10.0, 10.0)),
+                ..ViewState::default()
+            },
+        );
+        assert_eq!(fixed.y, Range::new(-10.0, 10.0));
     }
 
     #[test]

@@ -440,10 +440,24 @@ fn draw_xy(
     }
     p.cr.restore()?;
 
+    // Legend with the newest value and the min…max of what is visible.
     let entries: Vec<_> = m
         .series
         .iter()
-        .map(|s| (s.index, s.name.clone(), s.color, s.visible))
+        .map(|s| {
+            let label = match s.stats.filter(|_| !m.pairs) {
+                Some(st) => format!(
+                    "{}  {}  ({} … {}, ⌀ {})",
+                    s.name,
+                    short(st.last),
+                    short(st.min),
+                    short(st.max),
+                    short(st.mean)
+                ),
+                None => s.name.clone(),
+            };
+            (s.index, label, s.color, s.visible)
+        })
         .collect();
     let legend = legend(
         p,
@@ -451,7 +465,7 @@ fn draw_xy(
         &entries,
         plot.x + plot.w - 6.0,
         plot.y + 6.0,
-        plot.w * 0.4,
+        plot.w * 0.5,
     )?;
 
     if let Some(h) = hover {

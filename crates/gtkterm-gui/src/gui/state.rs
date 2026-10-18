@@ -36,6 +36,20 @@ impl Default for McpSettings {
     }
 }
 
+/// Remembered settings of one chart (by packet ID).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ChartPrefs {
+    /// Chart type chosen by the user.
+    pub kind: Option<gtkterm_protocols::sunshine::ChartKind>,
+    /// Samples kept per series.
+    pub capacity: Option<usize>,
+    /// Time axis instead of sample numbers.
+    pub time_axis: bool,
+    /// Show only the newest span (seconds or samples).
+    pub follow_span: Option<f64>,
+}
+
 /// UI state.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -86,6 +100,8 @@ pub struct UiState {
     pub send_ending: u32,
     /// Repeat interval of the send bar in ms.
     pub send_every_ms: u32,
+    /// Chart settings by packet ID.
+    pub charts: std::collections::BTreeMap<String, ChartPrefs>,
 }
 
 impl Default for UiState {
@@ -114,6 +130,7 @@ impl Default for UiState {
             send_history: Vec::new(),
             send_ending: 1,
             send_every_ms: 1000,
+            charts: std::collections::BTreeMap::new(),
         }
     }
 }

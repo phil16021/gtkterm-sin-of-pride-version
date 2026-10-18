@@ -13,6 +13,7 @@ use gtkterm_core::sunshine::SunshineUpdate;
 use gtkterm_protocols::sunshine::ChartKind;
 
 use super::i18n::{gettext, gettext_f};
+use super::state::{ChartPrefs, UiState};
 
 fn style_for(widget: &impl IsA<gtk::Widget>) -> Style {
     let dark = adw::StyleManager::default().is_dark();
@@ -35,10 +36,16 @@ pub struct ChartView {
     drag_origin: Cell<Option<f64>>,
     pause: gtk::ToggleButton,
     kind: gtk::DropDown,
+    axis: gtk::ToggleButton,
+    follow: gtk::ToggleButton,
+    span: gtk::SpinButton,
+    state: Rc<RefCell<UiState>>,
+    /// Updating toolbar widgets from the view (no feedback into the view).
+    syncing: Cell<bool>,
 }
 
 impl ChartView {
-    fn new(session: &Session, id: &str, toast: adw::ToastOverlay) -> Rc<Self> {
+    fn new(session: &Session, id: &str, toast: adw::ToastOverlay, state: &Rc<RefCell<UiState>>) -> Rc<Self> {
         let area = gtk::DrawingArea::builder()
             .hexpand(true)
             .vexpand(true)
@@ -61,6 +68,19 @@ impl ChartView {
             .build();
         let history = gtk::SpinButton::with_range(10.0, 1_000_000.0, 100.0);
         history.set_tooltip_text(Some(&gettext("Samples kept per series")));
+        let follow = gtk::ToggleButton::builder()
+            .icon_name("go-last-symbolic")
+            .tooltip_text(gettext("Follow the newest data (off while zoomed or panned)"))
+            .active(true)
+            .build();
+        let span = gtk::SpinButton::with_range(0.0, 1_000_000.0, 10.0);
+        span.set_tooltip_text(Some(&gettext(
+            "Show only the newest seconds (time axis) or samples; 0 shows everything kept",
+        )));
+        let ylock = gtk::ToggleButton::builder()
+            .icon_name("changes-prevent-symbolic")
+            .tooltip_text(gettext("Keep the current Y range"))
+            .build();
         let csv = gtk::Button::builder()
             .icon_name("x-office-spreadsheet-symbolic")
             .tooltip_text(gettext("Export CSV"))
@@ -77,9 +97,12 @@ impl ChartView {
         toolbar.add_css_class("chart-toolbar");
         for w in [
             pause.upcast_ref::<gtk::Widget>(),
+            follow.upcast_ref(),
             axis.upcast_ref(),
             kind.upcast_ref(),
             history.upcast_ref(),
+            span.upcast_ref(),
+            ylock.upcast_ref(),
         ] {
             toolbar.append(w);
         }
@@ -104,7 +127,13 @@ impl ChartView {
             drag_origin: Cell::new(None),
             pause: pause.clone(),
             kind: kind.clone(),
+            axis: axis.clone(),
+            follow: follow.clone(),
+            span: span.clone(),
+            state: Rc::clone(state),
+            syncing: Cell::new(false),
         });
+        me.apply_prefs();
         me.sync_toolbar(&history);
 
         let w = Rc::downgrade(&me);
@@ -172,6 +201,7 @@ impl ChartView {
                 });
             } else if n == 2 {
                 me.view.borrow_mut().reset();
+                me.sync_follow();
             }
             me.area.queue_draw();
         });
@@ -205,6 +235,7 @@ impl ChartView {
             me.view
                 .borrow_mut()
                 .zoom(full, center, if dy < 0.0 { 0.8 } else { 1.25 });
+            me.sync_follow();
             me.area.queue_draw();
             glib::Propagation::Stop
         });
@@ -236,6 +267,7 @@ impl ChartView {
             drop(layout);
             let per_px = map.x.span() / map.plot.w.max(1.0);
             me.view.borrow_mut().pan(full, -(dx - last) * per_px);
+            me.sync_follow();
             me.drag_origin.set(Some(dx));
             me.area.queue_draw();
         });
@@ -266,6 +298,7 @@ impl ChartView {
                 v.x_axis = if b.is_active() { XAxis::Time } else { XAxis::Index };
                 v.reset();
                 drop(v);
+                me.save_prefs();
                 me.area.queue_draw();
             }
         });
@@ -278,6 +311,7 @@ impl ChartView {
             let current = me.session.with_sunshine(|s| s.chart(&me.id).map(|c| c.kind));
             if current != Some(k) {
                 me.session.with_sunshine_mut(|s| s.set_kind(&me.id, k));
+                me.save_prefs();
                 me.area.queue_draw();
             }
         });
@@ -289,8 +323,53 @@ impl ChartView {
                         c.set_capacity(sp.value() as usize);
                     }
                 });
+                me.save_prefs();
                 me.area.queue_draw();
             }
+        });
+        let w = Rc::downgrade(&me);
+        follow.connect_toggled(move |b| {
+            let Some(me) = w.upgrade() else { return };
+            if me.syncing.get() {
+                return;
+            }
+            if b.is_active() {
+                me.view.borrow_mut().reset();
+            } else {
+                // Stop following: freeze the window that is shown now.
+                let shown = me.layout.borrow().as_ref().and_then(|l| match &l.model {
+                    gtkterm_charts::model::Model::Line(x) | gtkterm_charts::model::Model::Scatter(x) => {
+                        Some(x.x)
+                    }
+                    _ => None,
+                });
+                me.view.borrow_mut().x_window = shown;
+            }
+            me.area.queue_draw();
+        });
+        let w = Rc::downgrade(&me);
+        span.connect_value_changed(move |sp| {
+            let Some(me) = w.upgrade() else { return };
+            let v = sp.value();
+            me.view.borrow_mut().follow_span = (v > 0.0).then_some(v);
+            if !me.syncing.get() {
+                me.save_prefs();
+            }
+            me.area.queue_draw();
+        });
+        let w = Rc::downgrade(&me);
+        ylock.connect_toggled(move |b| {
+            let Some(me) = w.upgrade() else { return };
+            let current = b.is_active().then(|| {
+                me.layout.borrow().as_ref().and_then(|l| match &l.model {
+                    gtkterm_charts::model::Model::Line(x) | gtkterm_charts::model::Model::Scatter(x) => {
+                        Some(x.y)
+                    }
+                    _ => None,
+                })
+            });
+            me.view.borrow_mut().y_fixed = current.flatten();
+            me.area.queue_draw();
         });
         let w = Rc::downgrade(&me);
         clear.connect_clicked(move |_| {
@@ -338,15 +417,74 @@ impl ChartView {
         me
     }
 
+    /// Settings remembered for this packet ID (type, history, axis, span).
+    fn apply_prefs(&self) {
+        let Some(p) = self.state.borrow().charts.get(&self.id).cloned() else {
+            return;
+        };
+        self.session.with_sunshine_mut(|s| {
+            if let Some(k) = p.kind {
+                s.set_kind(&self.id, k);
+            }
+            if let (Some(cap), Some(c)) = (p.capacity, s.chart_mut(&self.id)) {
+                c.set_capacity(cap);
+            }
+        });
+        {
+            let mut v = self.view.borrow_mut();
+            v.x_axis = if p.time_axis { XAxis::Time } else { XAxis::Index };
+            v.follow_span = p.follow_span;
+        }
+        self.syncing.set(true);
+        self.axis.set_active(p.time_axis);
+        self.span.set_value(p.follow_span.unwrap_or(0.0));
+        self.syncing.set(false);
+    }
+
+    fn save_prefs(&self) {
+        if self.syncing.get() {
+            return;
+        }
+        let (kind, cap) = self
+            .session
+            .with_sunshine(|s| {
+                s.chart(&self.id)
+                    .map(|c| (c.kind_overridden.then_some(c.kind), c.capacity))
+            })
+            .unwrap_or((None, 0));
+        let view = self.view.borrow();
+        self.state.borrow_mut().charts.insert(
+            self.id.clone(),
+            ChartPrefs {
+                kind,
+                capacity: Some(cap).filter(|c| *c > 0),
+                time_axis: view.x_axis == XAxis::Time,
+                follow_span: view.follow_span,
+            },
+        );
+    }
+
+    /// The Follow button shows whether the view follows the data.
+    fn sync_follow(&self) {
+        let following = self.view.borrow().following();
+        if self.follow.is_active() != following {
+            self.syncing.set(true);
+            self.follow.set_active(following);
+            self.syncing.set(false);
+        }
+    }
+
     fn sync_toolbar(&self, history: &gtk::SpinButton) {
         if let Some((kind, paused, cap)) = self
             .session
             .with_sunshine(|s| s.chart(&self.id).map(|c| (c.kind, c.paused, c.capacity)))
         {
             let idx = ChartKind::ALL.iter().position(|k| *k == kind).unwrap_or(0);
+            self.syncing.set(true);
             self.kind.set_selected(idx as u32);
             self.pause.set_active(paused);
             history.set_value(cap as f64);
+            self.syncing.set(false);
         }
     }
 
@@ -402,11 +540,12 @@ pub struct VizPanel {
     session: Session,
     toast: glib::WeakRef<adw::ToastOverlay>,
     footer: gtk::Label,
+    state: Rc<RefCell<UiState>>,
 }
 
 impl VizPanel {
     /// Build an empty panel.
-    pub fn new(session: &Session, toast: &adw::ToastOverlay) -> Rc<Self> {
+    pub fn new(session: &Session, toast: &adw::ToastOverlay, state: &Rc<RefCell<UiState>>) -> Rc<Self> {
         let empty = adw::StatusPage::builder()
             .icon_name("utilities-system-monitor-symbolic")
             .title(gettext("No Sunshine data yet"))
@@ -445,6 +584,7 @@ impl VizPanel {
             session: session.clone(),
             toast: toast.downgrade(),
             footer,
+            state: Rc::clone(state),
         });
         let w = Rc::downgrade(&me);
         me.tab_view.connect_close_page(move |tv, page| {
@@ -484,7 +624,7 @@ impl VizPanel {
         // Note: libadwaita 1.9 logs "AdwGizmo (tabboxchild) reported min width -6" while the
         // tab-open animation starts; it is cosmetic and disappears with animations disabled.
         let Some(toast) = self.toast.upgrade() else { return };
-        let view = ChartView::new(&self.session, id, toast);
+        let view = ChartView::new(&self.session, id, toast, &self.state);
         let page = self.tab_view.append(&view.widget);
         page.set_title(id);
         page.set_tooltip(&gettext_f("Packet ID {id}", &[("id", &id)]));

@@ -367,7 +367,7 @@ impl Win {
         let st = chrome.state.borrow().clone();
         let term = TerminalView::new(&session, &profile.terminal);
         term.term.set_font_scale(st.font_scale.clamp(0.25, 4.0));
-        let panel = VizPanel::new(&session, &chrome.toast);
+        let panel = VizPanel::new(&session, &chrome.toast, &chrome.state);
         let frames = FramesView::new(&session, &chrome.toast);
         let term_paned = gtk::Paned::builder()
             .orientation(gtk::Orientation::Vertical)
@@ -3845,6 +3845,34 @@ mod tests {
         assert_eq!(UNEXPECTED_LOGS.load(Ordering::SeqCst), 0, "GTK warnings");
     }
 
+    /// Chart settings remembered for a packet ID apply when its chart appears again.
+    #[gtk::test]
+    fn chart_settings_are_remembered() {
+        if std::env::var_os("GTKTERM_GUI_TESTS").is_none() {
+            return;
+        }
+        let (win, dev, _dir) = setup();
+        win.state.borrow_mut().charts.insert(
+            "temp".into(),
+            super::super::state::ChartPrefs {
+                kind: Some(gtkterm_protocols::sunshine::ChartKind::Bar),
+                capacity: Some(50),
+                time_axis: true,
+                follow_span: Some(30.0),
+            },
+        );
+        rt().block_on(dev.send(&b"{temp|a|1|b|2}\n"[..])).unwrap();
+        assert!(pump_until(Duration::from_secs(2), || win.panel.len() == 1));
+        pump_until(Duration::from_millis(100), || false);
+        let (kind, cap) = win
+            .session
+            .with_sunshine(|s| s.chart("temp").map(|c| (c.kind, c.capacity)))
+            .unwrap();
+        assert_eq!(kind, gtkterm_protocols::sunshine::ChartKind::Bar);
+        assert_eq!(cap, 50);
+        assert_eq!(UNEXPECTED_LOGS.load(Ordering::SeqCst), 0, "GTK warnings");
+    }
+
     /// Changing the view redraws what was already received (it used to apply to new data
     /// only); dump views get timestamps too.
     #[gtk::test]
@@ -3935,8 +3963,15 @@ mod tests {
         // A multi-line paste asks first; confirmed, it goes to the device (Enter mapping applies).
         win.window.clipboard().set_text("line1\nline2\n");
         gio::prelude::ActionGroupExt::activate_action(&win.window, "paste", None);
-        assert!(pump_until(Duration::from_secs(2), || win.window.visible_dialog().is_some()), "asked");
-        let dialog = win.window.visible_dialog().and_downcast::<adw::AlertDialog>().unwrap();
+        assert!(
+            pump_until(Duration::from_secs(2), || win.window.visible_dialog().is_some()),
+            "asked"
+        );
+        let dialog = win
+            .window
+            .visible_dialog()
+            .and_downcast::<adw::AlertDialog>()
+            .unwrap();
         dialog.emit_by_name::<()>("response", &[&"paste"]);
         let mut pasted = Vec::new();
         while pasted.len() < 14 {
@@ -3949,7 +3984,10 @@ mod tests {
         // Counters can be reset.
         assert!(win.session.status().tx_bytes > 0);
         gio::prelude::ActionGroupExt::activate_action(&win.window, "reset-counters", None);
-        assert_eq!((win.session.status().rx_bytes, win.session.status().tx_bytes), (0, 0));
+        assert_eq!(
+            (win.session.status().rx_bytes, win.session.status().tx_bytes),
+            (0, 0)
+        );
 
         // Quick capture: the header toggle starts an auto-named log and stops it again.
         gio::prelude::ActionGroupExt::activate_action(&win.window, "quick-log", None);

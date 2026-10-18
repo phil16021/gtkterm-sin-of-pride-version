@@ -46,9 +46,11 @@ cargo build --release -p gtkterm-gui --no-default-features
 - Tabs: one connection per tab (Ctrl+Shift+T or "+" opens a profile in a new tab,
   Ctrl+Shift+W closes it, Ctrl+PgUp/PgDn switch). The header, menus and shortcuts act on the
   selected tab; open tabs come back at the next start. Agents (MCP) see every tab's session.
-- Charts: one tab per packet ID; scroll to zoom, drag to pan, double-click to follow, click a
-  legend entry to hide a series, hover for values; pause, time axis, chart type, history
-  length, CSV/PNG export.
+- Charts: one tab per packet ID (at most 64); scroll to zoom, drag to pan, double-click or
+  *Follow* to follow the newest data, click a legend entry to hide a series, hover for values.
+  The legend shows each series' newest value with min…max and mean of what is visible. Toolbar:
+  pause, follow, time axis, chart type, history length, *show the newest N s/samples*, lock the
+  Y range, CSV/PNG export. Type, history, axis and span are remembered per packet ID.
 - Status bar: profiles, endpoint, RX/TX counters, DTR/RTS toggles, CTS/DSR/DCD/RI, log and MCP state.
 - Preferences cover every port and terminal setting, MCP and automation:
 
