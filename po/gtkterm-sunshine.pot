@@ -127,7 +127,7 @@ msgid "Clear frames"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/frames.rs:209
-#: crates/gtkterm-gui/src/gui/window.rs:2339
+#: crates/gtkterm-gui/src/gui/window.rs:2773
 msgid "Decoder"
 msgstr ""
 
@@ -297,13 +297,13 @@ msgstr ""
 
 #: crates/gtkterm-gui/src/gui/macros.rs:229
 #: crates/gtkterm-gui/src/gui/prefs.rs:300
-#: crates/gtkterm-gui/src/gui/window.rs:2018
+#: crates/gtkterm-gui/src/gui/window.rs:2231
 msgid "Save"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/macros.rs:259
-#: crates/gtkterm-gui/src/gui/window.rs:158
-#: crates/gtkterm-gui/src/gui/window.rs:2414
+#: crates/gtkterm-gui/src/gui/window.rs:208
+#: crates/gtkterm-gui/src/gui/window.rs:2864
 msgid "Macros"
 msgstr ""
 
@@ -314,15 +314,17 @@ msgstr ""
 #: crates/gtkterm-gui/src/gui/macros.rs:316
 #: crates/gtkterm-gui/src/gui/prefs.rs:300
 #: crates/gtkterm-gui/src/gui/transfer.rs:98
-#: crates/gtkterm-gui/src/gui/window.rs:1502
-#: crates/gtkterm-gui/src/gui/window.rs:1781
-#: crates/gtkterm-gui/src/gui/window.rs:2017
-#: crates/gtkterm-gui/src/gui/window.rs:2052
+#: crates/gtkterm-gui/src/gui/window.rs:1714
+#: crates/gtkterm-gui/src/gui/window.rs:1993
+#: crates/gtkterm-gui/src/gui/window.rs:2230
+#: crates/gtkterm-gui/src/gui/window.rs:2266
+#: crates/gtkterm-gui/src/gui/window.rs:2531
+#: crates/gtkterm-gui/src/gui/window.rs:2629
 msgid "Cancel"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/macros.rs:317
-#: crates/gtkterm-gui/src/gui/window.rs:2053
+#: crates/gtkterm-gui/src/gui/window.rs:2267
 msgid "Delete"
 msgstr ""
 
@@ -354,7 +356,7 @@ msgid "TCP server"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/prefs.rs:168
-#: crates/gtkterm-gui/src/gui/window.rs:2407
+#: crates/gtkterm-gui/src/gui/window.rs:2857
 msgid "Device"
 msgstr ""
 
@@ -471,7 +473,7 @@ msgid "Host"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/prefs.rs:335
-#: crates/gtkterm-gui/src/gui/window.rs:129
+#: crates/gtkterm-gui/src/gui/window.rs:179
 msgid "Port"
 msgstr ""
 
@@ -503,6 +505,8 @@ msgstr ""
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:64
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:70
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:76
+#: crates/gtkterm-gui/src/gui/shortcuts.rs:82
+#: crates/gtkterm-gui/src/gui/shortcuts.rs:88
 msgid "Connection"
 msgstr ""
 
@@ -563,7 +567,7 @@ msgid "Insert LF after a bare CR"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/prefs.rs:441
-#: crates/gtkterm-gui/src/gui/window.rs:2301
+#: crates/gtkterm-gui/src/gui/window.rs:2735
 msgid "Timestamps"
 msgstr ""
 
@@ -592,7 +596,7 @@ msgid "Wait for character after each line (empty: off)"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/prefs.rs:473
-#: crates/gtkterm-gui/src/gui/window.rs:172
+#: crates/gtkterm-gui/src/gui/window.rs:222
 msgid "View mode"
 msgstr ""
 
@@ -699,7 +703,7 @@ msgid "Automation"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/prefs.rs:615
-#: crates/gtkterm-gui/src/gui/shortcuts.rs:131
+#: crates/gtkterm-gui/src/gui/shortcuts.rs:143
 msgid "Scripts"
 msgstr ""
 
@@ -799,119 +803,127 @@ msgid "Clear scrollback"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:47
-msgid "Connect / disconnect"
+msgid "New tab"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:53
-#: crates/gtkterm-gui/src/gui/window.rs:487
-msgid "Disconnect"
+msgid "Close tab"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:59
-#: crates/gtkterm-gui/src/gui/window.rs:2293
-msgid "Toggle DTR"
+msgid "Connect / disconnect"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:65
-#: crates/gtkterm-gui/src/gui/window.rs:2294
-msgid "Toggle RTS"
+#: crates/gtkterm-gui/src/gui/window.rs:670
+msgid "Disconnect"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:71
-msgid "Send break"
+#: crates/gtkterm-gui/src/gui/window.rs:2727
+msgid "Toggle DTR"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:77
-#: crates/gtkterm-gui/src/gui/window.rs:2269
-msgid "Preferences"
-msgstr ""
-
-#: crates/gtkterm-gui/src/gui/shortcuts.rs:82
-#: crates/gtkterm-gui/src/gui/shortcuts.rs:88
-#: crates/gtkterm-gui/src/gui/shortcuts.rs:94
-#: crates/gtkterm-gui/src/gui/shortcuts.rs:100
-#: crates/gtkterm-gui/src/gui/shortcuts.rs:106
-#: crates/gtkterm-gui/src/gui/shortcuts.rs:130
-msgid "Data"
+#: crates/gtkterm-gui/src/gui/window.rs:2728
+msgid "Toggle RTS"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:83
-#: crates/gtkterm-gui/src/gui/window.rs:1496
-msgid "Send hex data"
+msgid "Send break"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:89
-#: crates/gtkterm-gui/src/gui/window.rs:1557
-msgid "Send file"
+#: crates/gtkterm-gui/src/gui/window.rs:2703
+msgid "Preferences"
+msgstr ""
+
+#: crates/gtkterm-gui/src/gui/shortcuts.rs:94
+#: crates/gtkterm-gui/src/gui/shortcuts.rs:100
+#: crates/gtkterm-gui/src/gui/shortcuts.rs:106
+#: crates/gtkterm-gui/src/gui/shortcuts.rs:112
+#: crates/gtkterm-gui/src/gui/shortcuts.rs:118
+#: crates/gtkterm-gui/src/gui/shortcuts.rs:142
+msgid "Data"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:95
-msgid "Receive file"
+#: crates/gtkterm-gui/src/gui/window.rs:1708
+msgid "Send hex data"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:101
-msgid "Save received data"
+#: crates/gtkterm-gui/src/gui/window.rs:1769
+msgid "Send file"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:107
-msgid "Start logging"
-msgstr ""
-
-#: crates/gtkterm-gui/src/gui/shortcuts.rs:112
-#: crates/gtkterm-gui/src/gui/shortcuts.rs:118
-#: crates/gtkterm-gui/src/gui/shortcuts.rs:124
-#: crates/gtkterm-gui/src/gui/shortcuts.rs:136
-#: crates/gtkterm-gui/src/gui/shortcuts.rs:142
-#: crates/gtkterm-gui/src/gui/shortcuts.rs:148
-#: crates/gtkterm-gui/src/gui/shortcuts.rs:154
-#: crates/gtkterm-gui/src/gui/shortcuts.rs:160
-msgid "View"
+msgid "Receive file"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:113
-msgid "Visualization panel"
+msgid "Save received data"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:119
-msgid "Decoded frames"
+msgid "Start logging"
+msgstr ""
+
+#: crates/gtkterm-gui/src/gui/shortcuts.rs:124
+#: crates/gtkterm-gui/src/gui/shortcuts.rs:130
+#: crates/gtkterm-gui/src/gui/shortcuts.rs:136
+#: crates/gtkterm-gui/src/gui/shortcuts.rs:148
+#: crates/gtkterm-gui/src/gui/shortcuts.rs:154
+#: crates/gtkterm-gui/src/gui/shortcuts.rs:160
+#: crates/gtkterm-gui/src/gui/shortcuts.rs:166
+#: crates/gtkterm-gui/src/gui/shortcuts.rs:172
+msgid "View"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:125
-msgid "Signal monitor"
+msgid "Visualization panel"
+msgstr ""
+
+#: crates/gtkterm-gui/src/gui/shortcuts.rs:131
+msgid "Decoded frames"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:137
-msgid "Zoom in"
-msgstr ""
-
-#: crates/gtkterm-gui/src/gui/shortcuts.rs:143
-msgid "Zoom out"
+msgid "Signal monitor"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:149
-msgid "Normal size"
+msgid "Zoom in"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:155
-#: crates/gtkterm-gui/src/gui/window.rs:2324
-msgid "Fullscreen"
+msgid "Zoom out"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:161
+msgid "Normal size"
+msgstr ""
+
+#: crates/gtkterm-gui/src/gui/shortcuts.rs:167
+#: crates/gtkterm-gui/src/gui/window.rs:2758
+msgid "Fullscreen"
+msgstr ""
+
+#: crates/gtkterm-gui/src/gui/shortcuts.rs:173
 msgid "Keyboard shortcuts"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/shortcuts.rs:165
-#: crates/gtkterm-gui/src/gui/shortcuts.rs:167
+#: crates/gtkterm-gui/src/gui/shortcuts.rs:177
+#: crates/gtkterm-gui/src/gui/shortcuts.rs:179
 msgid "Application"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/shortcuts.rs:165
+#: crates/gtkterm-gui/src/gui/shortcuts.rs:177
 msgid "About"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/shortcuts.rs:168
-#: crates/gtkterm-gui/src/gui/window.rs:2357
+#: crates/gtkterm-gui/src/gui/shortcuts.rs:180
+#: crates/gtkterm-gui/src/gui/window.rs:2791
 msgid "Quit"
 msgstr ""
 
@@ -933,7 +945,7 @@ msgstr ""
 
 #: crates/gtkterm-gui/src/gui/signals.rs:65
 #: crates/gtkterm-gui/src/gui/signals.rs:84
-#: crates/gtkterm-gui/src/gui/window.rs:2349
+#: crates/gtkterm-gui/src/gui/window.rs:2783
 msgid "Signal Monitor"
 msgstr ""
 
@@ -1048,7 +1060,7 @@ msgid "Select All"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/terminal.rs:272
-#: crates/gtkterm-gui/src/gui/window.rs:2326
+#: crates/gtkterm-gui/src/gui/window.rs:2760
 msgid "Clear Screen"
 msgstr ""
 
@@ -1092,472 +1104,505 @@ msgstr ""
 msgid "Choose Folder…"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:134
+#: crates/gtkterm-gui/src/gui/window.rs:184
 msgid "Rescan ports"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:137
+#: crates/gtkterm-gui/src/gui/window.rs:187
 msgid "Baud rate (other rates: Preferences)"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:140
-#: crates/gtkterm-gui/src/gui/window.rs:489
+#: crates/gtkterm-gui/src/gui/window.rs:190
+#: crates/gtkterm-gui/src/gui/window.rs:672
 msgid "Connect"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:141
+#: crates/gtkterm-gui/src/gui/window.rs:191
 msgid "Connect / disconnect (F5)"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:153
+#: crates/gtkterm-gui/src/gui/window.rs:203
 msgid "Main menu"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:164
+#: crates/gtkterm-gui/src/gui/window.rs:214
 msgid "Visualization panel (Ctrl+Shift+G)"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:177
+#: crates/gtkterm-gui/src/gui/window.rs:227
 msgid "Search (Ctrl+Shift+F)"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:214
-msgid "Reconnect"
+#: crates/gtkterm-gui/src/gui/window.rs:233
+msgid "New tab (Ctrl+Shift+T)"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:322
+#: crates/gtkterm-gui/src/gui/window.rs:330
 msgid "Cannot start logging: {error}"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:372
+#: crates/gtkterm-gui/src/gui/window.rs:393
+msgid "Reconnect"
+msgstr ""
+
+#: crates/gtkterm-gui/src/gui/window.rs:521
 msgid "{port} (not found)"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:500
+#: crates/gtkterm-gui/src/gui/window.rs:658
 msgid "Connection error: {error}"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:671
+#: crates/gtkterm-gui/src/gui/window.rs:849
 msgid "connected: {description}"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:685
+#: crates/gtkterm-gui/src/gui/window.rs:863
 msgid "disconnected"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:686
+#: crates/gtkterm-gui/src/gui/window.rs:864
 msgid "error: {error}"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:788
+#: crates/gtkterm-gui/src/gui/window.rs:966
 msgid "Edit macros"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:804
+#: crates/gtkterm-gui/src/gui/window.rs:982
 msgid "Macro {name} finished ({steps} steps, {ms} ms)"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:811
+#: crates/gtkterm-gui/src/gui/window.rs:989
 msgid "Macro stopped"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:812
+#: crates/gtkterm-gui/src/gui/window.rs:990
 msgid "Macro: {error}"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:834
+#: crates/gtkterm-gui/src/gui/window.rs:1012
 msgid "Nothing was recorded"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:836
+#: crates/gtkterm-gui/src/gui/window.rs:1014
 msgid "Recorded"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:907
+#: crates/gtkterm-gui/src/gui/window.rs:1089
 msgid "script {name}"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:927
+#: crates/gtkterm-gui/src/gui/window.rs:1109
 msgid "Import presets (GTKTerm JSON)"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:945
+#: crates/gtkterm-gui/src/gui/window.rs:1127
 msgid "Imported {n} preset"
 msgid_plural "Imported {n} presets"
 msgstr[0] ""
 msgstr[1] ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:953
+#: crates/gtkterm-gui/src/gui/window.rs:1135
 msgid "Cannot import presets: {error}"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1035
+#: crates/gtkterm-gui/src/gui/window.rs:1226
 msgid "{name}  (current)"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1043
+#: crates/gtkterm-gui/src/gui/window.rs:1234
 msgid "Load profile"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1045
+#: crates/gtkterm-gui/src/gui/window.rs:1236
 msgid "Save current settings"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1047
+#: crates/gtkterm-gui/src/gui/window.rs:1238
 msgid "Save as new profile…"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1050
+#: crates/gtkterm-gui/src/gui/window.rs:1241
 msgid "Delete this profile…"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1097
+#: crates/gtkterm-gui/src/gui/window.rs:1288
 msgid "Break sent"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1119
+#: crates/gtkterm-gui/src/gui/window.rs:1310
 msgid "Buffers flushed"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1351
+#: crates/gtkterm-gui/src/gui/window.rs:1560
 msgid "No macro is running"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1427
+#: crates/gtkterm-gui/src/gui/window.rs:1639
 msgid "Log saved: {path} ({bytes} bytes)"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1451
+#: crates/gtkterm-gui/src/gui/window.rs:1663
 msgid "Log to file — format follows the extension"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1477
+#: crates/gtkterm-gui/src/gui/window.rs:1689
 msgid "DE AD BE EF, 0x01 0x02 or \\x41\\x42"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1503
+#: crates/gtkterm-gui/src/gui/window.rs:1715
 msgid "Send"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1526
+#: crates/gtkterm-gui/src/gui/window.rs:1738
 msgid "Sent {n} bytes"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1533
+#: crates/gtkterm-gui/src/gui/window.rs:1745
 msgid "Invalid hex: {error}"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1555
+#: crates/gtkterm-gui/src/gui/window.rs:1767
 msgid "Send files"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1602
+#: crates/gtkterm-gui/src/gui/window.rs:1814
 msgid "A file is already being sent"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1608
+#: crates/gtkterm-gui/src/gui/window.rs:1820
 msgid "{path} is larger than 256 MiB; use a file transfer protocol"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1627
-#: crates/gtkterm-gui/src/gui/window.rs:1644
+#: crates/gtkterm-gui/src/gui/window.rs:1839
+#: crates/gtkterm-gui/src/gui/window.rs:1856
 msgid "Sending {name}: {sent} of {size} bytes"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1671
+#: crates/gtkterm-gui/src/gui/window.rs:1883
 msgid "Sending {name} cancelled after {sent} bytes"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1678
+#: crates/gtkterm-gui/src/gui/window.rs:1890
 msgid "Sent {path} ({n} bytes)"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1701
+#: crates/gtkterm-gui/src/gui/window.rs:1913
 msgid "Save received files in"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1774
+#: crates/gtkterm-gui/src/gui/window.rs:1986
 msgid "Open a serial port first; the device must be sending text"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1780
+#: crates/gtkterm-gui/src/gui/window.rs:1992
 msgid "Detecting the baud rate…"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1811
+#: crates/gtkterm-gui/src/gui/window.rs:2023
 msgid "Detected {baud} baud"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1813
+#: crates/gtkterm-gui/src/gui/window.rs:2025
 msgid "No rate gave readable text; the original rate is kept"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1815
+#: crates/gtkterm-gui/src/gui/window.rs:2027
 msgid "Auto-baud failed: {error}"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1826
+#: crates/gtkterm-gui/src/gui/window.rs:2038
 msgid "Cannot start the transfer: {error}"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1842
+#: crates/gtkterm-gui/src/gui/window.rs:2054
 msgid "Show"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1859
+#: crates/gtkterm-gui/src/gui/window.rs:2071
 msgid "Nothing received yet"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1888
+#: crates/gtkterm-gui/src/gui/window.rs:2100
 msgid "Preset {name} saved"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1912
+#: crates/gtkterm-gui/src/gui/window.rs:2124
 msgid "Settings not applied: {error}"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1975
+#: crates/gtkterm-gui/src/gui/window.rs:2187
 msgid "Profile [{name}] saved"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1977
+#: crates/gtkterm-gui/src/gui/window.rs:2189
 msgid "Cannot save profile: {error}"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:1983
+#: crates/gtkterm-gui/src/gui/window.rs:2195
 msgid "No profile [{name}]"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2002
+#: crates/gtkterm-gui/src/gui/window.rs:2215
 msgid "Profile [{name}] loaded"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2007
+#: crates/gtkterm-gui/src/gui/window.rs:2220
+#: crates/gtkterm-gui/src/gui/window.rs:2619
 msgid "Profile name"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2011
+#: crates/gtkterm-gui/src/gui/window.rs:2224
 msgid "Save profile as"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2043
+#: crates/gtkterm-gui/src/gui/window.rs:2257
 msgid "Delete profile [{name}]?"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2045
+#: crates/gtkterm-gui/src/gui/window.rs:2259
 msgid "The default profile is reset to default settings."
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2047
+#: crates/gtkterm-gui/src/gui/window.rs:2261
 msgid "The profile is removed from the configuration file."
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2088
-#: crates/gtkterm-gui/src/gui/window.rs:2140
+#: crates/gtkterm-gui/src/gui/window.rs:2302
+#: crates/gtkterm-gui/src/gui/window.rs:2356
 msgid "MCP server could not start: {error}"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2130
+#: crates/gtkterm-gui/src/gui/window.rs:2346
 msgid "MCP server on {url}"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2131
+#: crates/gtkterm-gui/src/gui/window.rs:2347
 msgid "Copy setup command"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2273
+#: crates/gtkterm-gui/src/gui/window.rs:2523
+msgid "Close [{name}]?"
+msgstr ""
+
+#: crates/gtkterm-gui/src/gui/window.rs:2526
+msgid "The connection is closed and a running log is stopped."
+msgstr ""
+
+#: crates/gtkterm-gui/src/gui/window.rs:2532
+msgid "Close Tab"
+msgstr ""
+
+#: crates/gtkterm-gui/src/gui/window.rs:2623
+msgid "New tab with a new profile"
+msgstr ""
+
+#: crates/gtkterm-gui/src/gui/window.rs:2630
+msgid "Open"
+msgstr ""
+
+#: crates/gtkterm-gui/src/gui/window.rs:2707
 msgid "Send Hex Data…"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2274
+#: crates/gtkterm-gui/src/gui/window.rs:2708
 msgid "Send File…"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2275
+#: crates/gtkterm-gui/src/gui/window.rs:2709
 msgid "Receive File…"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2277
+#: crates/gtkterm-gui/src/gui/window.rs:2711
 msgid "Cancel File Transfer"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2280
+#: crates/gtkterm-gui/src/gui/window.rs:2714
 msgid "Save Received Data…"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2282
+#: crates/gtkterm-gui/src/gui/window.rs:2716
 msgid "Start Logging…"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2283
+#: crates/gtkterm-gui/src/gui/window.rs:2717
 msgid "Pause / Resume"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2284
+#: crates/gtkterm-gui/src/gui/window.rs:2718
 msgid "Clear Log File"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2285
+#: crates/gtkterm-gui/src/gui/window.rs:2719
 msgid "Stop Logging"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2286
+#: crates/gtkterm-gui/src/gui/window.rs:2720
 msgid "Logging"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2290
+#: crates/gtkterm-gui/src/gui/window.rs:2724
 msgid "Send Break"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2291
+#: crates/gtkterm-gui/src/gui/window.rs:2725
 msgid "Flush Buffers"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2292
+#: crates/gtkterm-gui/src/gui/window.rs:2726
 msgid "Detect Baud Rate"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2298
+#: crates/gtkterm-gui/src/gui/window.rs:2732
 msgid "Local Echo"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2299
+#: crates/gtkterm-gui/src/gui/window.rs:2733
 msgid "Auto CR (LF → CR LF)"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2300
+#: crates/gtkterm-gui/src/gui/window.rs:2734
 msgid "Auto LF (CR → CR LF)"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2302
+#: crates/gtkterm-gui/src/gui/window.rs:2736
 msgid "Show Byte Index"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2312
+#: crates/gtkterm-gui/src/gui/window.rs:2746
 msgid "View Mode"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2315
+#: crates/gtkterm-gui/src/gui/window.rs:2749
 msgid "{n} bytes"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2319
+#: crates/gtkterm-gui/src/gui/window.rs:2753
 msgid "Hex Width"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2321
+#: crates/gtkterm-gui/src/gui/window.rs:2755
 msgid "Zoom In"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2322
+#: crates/gtkterm-gui/src/gui/window.rs:2756
 msgid "Zoom Out"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2323
+#: crates/gtkterm-gui/src/gui/window.rs:2757
 msgid "Normal Size"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2325
+#: crates/gtkterm-gui/src/gui/window.rs:2759
 msgid "Zoom"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2327
+#: crates/gtkterm-gui/src/gui/window.rs:2761
 msgid "Clear Scrollback"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2328
+#: crates/gtkterm-gui/src/gui/window.rs:2762
 msgid "Remove All Charts"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2332
+#: crates/gtkterm-gui/src/gui/window.rs:2766
 msgid "Decoded Frames"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2341
+#: crates/gtkterm-gui/src/gui/window.rs:2775
 msgid "Record Modem Line Changes"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2344
+#: crates/gtkterm-gui/src/gui/window.rs:2778
 msgid "Clear Frames"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2348
+#: crates/gtkterm-gui/src/gui/window.rs:2782
 msgid "Scripts…"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2353
+#: crates/gtkterm-gui/src/gui/window.rs:2787
 msgid "Import Presets…"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2354
+#: crates/gtkterm-gui/src/gui/window.rs:2788
 msgid "MCP Server for AI Agents"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2355
+#: crates/gtkterm-gui/src/gui/window.rs:2789
 msgid "Keyboard Shortcuts"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2356
+#: crates/gtkterm-gui/src/gui/window.rs:2790
 msgid "About GTKTerm Sunshine"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2377
+#: crates/gtkterm-gui/src/gui/window.rs:2805
+msgid "Open profile in a new tab"
+msgstr ""
+
+#: crates/gtkterm-gui/src/gui/window.rs:2807
+msgid "New Profile…"
+msgstr ""
+
+#: crates/gtkterm-gui/src/gui/window.rs:2827
 msgid "Play"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2379
+#: crates/gtkterm-gui/src/gui/window.rs:2829
 msgid "Record"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2380
+#: crates/gtkterm-gui/src/gui/window.rs:2830
 msgid "Stop Running Macro"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2381
+#: crates/gtkterm-gui/src/gui/window.rs:2831
 msgid "Edit Macros…"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2382
+#: crates/gtkterm-gui/src/gui/window.rs:2832
 msgid "Show Macro Bar"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2409
+#: crates/gtkterm-gui/src/gui/window.rs:2859
 msgid "Control characters (Ctrl+C, Ctrl+A, …) go to the device"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2431
+#: crates/gtkterm-gui/src/gui/window.rs:2881
 msgid "An AI agent"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2433
+#: crates/gtkterm-gui/src/gui/window.rs:2883
 msgid "Allow {tool}?"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2435
+#: crates/gtkterm-gui/src/gui/window.rs:2885
 msgid ""
 "{client} wants to run {tool} with {arguments}.\n"
 "It can send data to the device, change the connection or write files."
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2446
+#: crates/gtkterm-gui/src/gui/window.rs:2896
 msgid "Deny"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2447
+#: crates/gtkterm-gui/src/gui/window.rs:2897
 msgid "Allow Once"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2448
+#: crates/gtkterm-gui/src/gui/window.rs:2898
 msgid "Allow Until the Server Stops"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2491
+#: crates/gtkterm-gui/src/gui/window.rs:2941
 msgid ""
 "Serial, TCP and UDP terminal with live Sunshine data plots and an MCP server for AI agents.\n"
 "Rust rewrite of the GTKTerm fork."
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/window.rs:2494
+#: crates/gtkterm-gui/src/gui/window.rs:2944
 msgid "© 2025-2026 Philipp; GTKTerm © Julien Schmitt and contributors"
 msgstr ""
 

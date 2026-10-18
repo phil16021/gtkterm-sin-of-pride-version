@@ -44,6 +44,18 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str)] = &[
     ),
     (
         crate::n_!("Connection"),
+        crate::n_!("New tab"),
+        "win.new-tab-menu",
+        "<Control><Shift>t",
+    ),
+    (
+        crate::n_!("Connection"),
+        crate::n_!("Close tab"),
+        "win.close-tab",
+        "<Control><Shift>w",
+    ),
+    (
+        crate::n_!("Connection"),
         crate::n_!("Connect / disconnect"),
         "win.toggle-connection",
         "F5",

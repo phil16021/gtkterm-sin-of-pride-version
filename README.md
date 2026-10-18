@@ -41,8 +41,11 @@ cargo build --release -p gtkterm-gui --no-default-features
 
 ## The window
 
-- Header bar: port (live udev list), baud rate, Connect, view mode (ASCII, hex, binary,
-  decimal and mixed dumps), search, chart panel, menu.
+- Header bar: port (live udev list), baud rate, Connect, new tab, view mode (ASCII, hex,
+  binary, decimal and mixed dumps), search, chart panel, menu.
+- Tabs: one connection per tab (Ctrl+Shift+T or "+" opens a profile in a new tab,
+  Ctrl+Shift+W closes it, Ctrl+PgUp/PgDn switch). The header, menus and shortcuts act on the
+  selected tab; open tabs come back at the next start. Agents (MCP) see every tab's session.
 - Charts: one tab per packet ID; scroll to zoom, drag to pan, double-click to follow, click a
   legend entry to hide a series, hover for values; pause, time axis, chart type, history
   length, CSV/PNG export.

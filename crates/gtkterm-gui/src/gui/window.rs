@@ -1,9 +1,10 @@
-//! The main window: header bar, terminal, chart panel, status bar and all actions.
+//! The main window: header bar, one tab per connection (terminal, chart panel, frames pane,
+//! status bar) and all actions. Window actions and header controls act on the selected tab.
 
 use std::cell::{Cell, RefCell};
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -30,7 +31,8 @@ use super::statusbar::StatusBar;
 use super::terminal::TerminalView;
 use super::{APP_ID, prefs};
 
-/// Window controller.
+/// One tab: a session with its terminal, charts, frames pane and status bar. The window-wide
+/// parts (header, toasts, UI state, MCP) are shared handles, the same in every tab.
 pub struct Win {
     /// The window.
     pub window: adw::ApplicationWindow,
@@ -43,34 +45,82 @@ pub struct Win {
     term_paned: gtk::Paned,
     status: StatusBar,
     port_drop: gtk::DropDown,
-    port_paths: RefCell<Vec<String>>,
+    port_paths: Rc<RefCell<Vec<String>>>,
     baud_drop: gtk::DropDown,
-    bauds: RefCell<Vec<u32>>,
+    bauds: Rc<RefCell<Vec<u32>>>,
     connect: gtk::ToggleButton,
     view_drop: gtk::DropDown,
+    new_tab: gtk::MenuButton,
     manager: Arc<SessionManager>,
     session: Session,
     profile_name: RefCell<String>,
     profile: RefCell<Profile>,
-    state: RefCell<UiState>,
-    mcp: RefCell<Option<HttpHandle>>,
-    mcp_url: RefCell<Option<String>>,
-    updating: Cell<bool>,
+    state: Rc<RefCell<UiState>>,
+    mcp: Rc<RefCell<Option<HttpHandle>>>,
+    mcp_url: Rc<RefCell<Option<String>>>,
+    updating: Rc<Cell<bool>>,
     watcher: RefCell<Option<PortWatcher>>,
     macro_bar: gtk::FlowBox,
-    shortcut_ctl: RefCell<Option<gtk::ShortcutController>>,
+    shortcut_ctl: Rc<RefCell<Option<gtk::ShortcutController>>>,
     recorder: RefCell<Option<super::macros::Recorder>>,
     running_macro: RefCell<Option<String>>,
     /// A raw file send in progress (cancelled by the transfer cancel button).
     raw_send: RefCell<Option<tokio_util::sync::CancellationToken>>,
     /// A save of the active profile is scheduled (changes from the header and menus).
     autosave_pending: Cell<bool>,
-    macro_editor: RefCell<Option<Rc<super::macros::MacroEditor>>>,
-    mcp_allow_dirs: RefCell<Vec<PathBuf>>,
+    macro_editor: Rc<RefCell<Option<Rc<super::macros::MacroEditor>>>>,
+    mcp_allow_dirs: Rc<RefCell<Vec<PathBuf>>>,
     script_window: RefCell<Option<Rc<super::scripts::ScriptWindow>>>,
     signal_window: RefCell<Option<Rc<super::signals::SignalMonitor>>>,
     pending_script: RefCell<Option<PathBuf>>,
     cli_allow_exec: Cell<bool>,
+    tabs: Rc<Tabs>,
+    /// This tab's page in the tab view.
+    page: adw::TabPage,
+}
+
+/// The tabs of a window.
+struct Tabs {
+    view: adw::TabView,
+    current: RefCell<Weak<Win>>,
+    /// Owns the tabs; cleared when the window closes (the tabs point back here).
+    all: RefCell<Vec<Rc<Win>>>,
+}
+
+/// Resolves to the selected tab when used; window actions and header controls hold this
+/// instead of a reference to one tab.
+/// Weak: closures that outlive the window (futures, signal handlers) must not keep it.
+#[derive(Clone)]
+struct CurrentTab(Weak<Tabs>);
+
+impl CurrentTab {
+    fn upgrade(&self) -> Option<Rc<Win>> {
+        self.0.upgrade()?.current.borrow().upgrade()
+    }
+}
+
+/// The window-wide parts a new tab shares.
+struct Chrome {
+    window: adw::ApplicationWindow,
+    toast: adw::ToastOverlay,
+    port_drop: gtk::DropDown,
+    port_paths: Rc<RefCell<Vec<String>>>,
+    baud_drop: gtk::DropDown,
+    bauds: Rc<RefCell<Vec<u32>>>,
+    connect: gtk::ToggleButton,
+    view_drop: gtk::DropDown,
+    new_tab: gtk::MenuButton,
+    manager: Arc<SessionManager>,
+    state: Rc<RefCell<UiState>>,
+    mcp: Rc<RefCell<Option<HttpHandle>>>,
+    mcp_url: Rc<RefCell<Option<String>>>,
+    updating: Rc<Cell<bool>>,
+    macro_bar: gtk::FlowBox,
+    shortcut_ctl: Rc<RefCell<Option<gtk::ShortcutController>>>,
+    macro_editor: Rc<RefCell<Option<Rc<super::macros::MacroEditor>>>>,
+    mcp_allow_dirs: Rc<RefCell<Vec<PathBuf>>>,
+    cli_allow_exec: bool,
+    tabs: Rc<Tabs>,
 }
 
 /// Startup options passed from the command line.
@@ -104,7 +154,7 @@ fn icon_button(icon: &str, tooltip: &str, action: &str) -> gtk::Button {
 }
 
 impl Win {
-    /// Build and show the window.
+    /// Build and show the window with one tab for `session`.
     pub fn new(
         app: &adw::Application,
         manager: Arc<SessionManager>,
@@ -178,52 +228,23 @@ impl Win {
             "win.search",
         ));
 
-        // Content.
-        let term = TerminalView::new(&session, &profile.terminal);
-        let toast = adw::ToastOverlay::new();
-        let panel = VizPanel::new(&session, &toast);
-        let frames = FramesView::new(&session);
-        let term_paned = gtk::Paned::builder()
-            .orientation(gtk::Orientation::Vertical)
-            .start_child(&term.widget)
-            .end_child(&frames.widget)
-            .wide_handle(true)
+        let new_tab = gtk::MenuButton::builder()
+            .icon_name("tab-new-symbolic")
+            .tooltip_text(gettext("New tab (Ctrl+Shift+T)"))
             .build();
-        term_paned.set_resize_start_child(true);
-        term_paned.set_resize_end_child(false);
-        term_paned.set_shrink_start_child(false);
-        term_paned.set_shrink_end_child(false);
-        frames.widget.set_visible(state.frames_visible);
-        if let Some(p) = state.frames_position {
-            term_paned.set_position(p);
-        }
-        let paned = gtk::Paned::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .start_child(&term_paned)
-            .end_child(&panel.widget)
-            .wide_handle(true)
-            .build();
-        paned.set_resize_start_child(true);
-        paned.set_shrink_start_child(false);
-        paned.set_shrink_end_child(false);
-        panel.widget.set_visible(state.panel_visible);
-        if let Some(p) = state.pane_position {
-            paned.set_position(p);
-        }
-        let banner = adw::Banner::builder()
-            .button_label(gettext("Reconnect"))
-            .revealed(false)
-            .build();
-        banner.set_action_name(Some("win.open-port"));
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        content.append(&banner);
-        content.append(&paned);
-        paned.set_vexpand(true);
-        toast.set_child(Some(&content));
+        header.pack_start(&new_tab);
 
-        let status = StatusBar::new();
+        // Tabs, one connection each.
+        let tab_view = adw::TabView::new();
+        // Only page switching: Alt+digit and friends belong to the device.
+        tab_view
+            .set_shortcuts(adw::TabViewShortcuts::CONTROL_PAGE_UP | adw::TabViewShortcuts::CONTROL_PAGE_DOWN);
+        let tab_bar = adw::TabBar::builder().view(&tab_view).autohide(true).build();
+        let toast = adw::ToastOverlay::new();
+        toast.set_child(Some(&tab_view));
         let toolbar_view = adw::ToolbarView::new();
         toolbar_view.add_top_bar(&header);
+        toolbar_view.add_top_bar(&tab_bar);
         toolbar_view.set_content(Some(&toast));
         let macro_bar = gtk::FlowBox::builder()
             .selection_mode(gtk::SelectionMode::None)
@@ -232,57 +253,42 @@ impl Win {
             .margin_end(6)
             .build();
         macro_bar.set_visible(state.macro_bar);
-        let bottom = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        bottom.append(&macro_bar);
-        bottom.append(&status.widget);
-        toolbar_view.add_bottom_bar(&bottom);
+        toolbar_view.add_bottom_bar(&macro_bar);
         window.set_content(Some(&toolbar_view));
 
-        let win = Rc::new(Self {
+        let chrome = Chrome {
             window,
             toast,
-            banner,
-            term,
-            panel,
-            paned,
-            frames,
-            term_paned,
-            status,
             port_drop,
-            port_paths: RefCell::default(),
+            port_paths: Rc::default(),
             baud_drop,
-            bauds: RefCell::default(),
+            bauds: Rc::default(),
             connect,
             view_drop,
+            new_tab,
             manager,
-            session,
-            profile_name: RefCell::new(profile_name),
-            profile: RefCell::new(profile),
-            state: RefCell::new(state),
-            mcp: RefCell::default(),
-            mcp_url: RefCell::default(),
-            updating: Cell::new(false),
-            watcher: RefCell::default(),
+            state: Rc::new(RefCell::new(state)),
+            mcp: Rc::default(),
+            mcp_url: Rc::default(),
+            updating: Rc::default(),
             macro_bar,
-            shortcut_ctl: RefCell::default(),
-            recorder: RefCell::default(),
-            running_macro: RefCell::default(),
-            raw_send: RefCell::default(),
-            autosave_pending: Cell::new(false),
-            macro_editor: RefCell::default(),
-            mcp_allow_dirs: RefCell::new(start.mcp_allow_dirs.clone()),
-            script_window: RefCell::default(),
-            signal_window: RefCell::default(),
-            pending_script: RefCell::new(start.script.clone()),
-            cli_allow_exec: Cell::new(start.allow_exec),
-        });
+            shortcut_ctl: Rc::default(),
+            macro_editor: Rc::default(),
+            mcp_allow_dirs: Rc::new(RefCell::new(start.mcp_allow_dirs.clone())),
+            cli_allow_exec: start.allow_exec,
+            tabs: Rc::new(Tabs {
+                view: tab_view,
+                current: RefCell::default(),
+                all: RefCell::default(),
+            }),
+        };
+        let win = Self::add_tab(&chrome, session, profile_name, profile);
+        win.pending_script.borrow_mut().clone_from(&start.script);
         win.install_actions(app);
         win.rebuild_macros();
-        win.pump_manager_events();
         win.wire_header(&refresh);
-        win.wire_status();
+        win.wire_tabs();
         win.refresh_header();
-        win.pump_events();
         win.watch_hotplug();
         win.window.present();
 
@@ -293,10 +299,12 @@ impl Win {
             }
             glib::Propagation::Proceed
         });
-        let w = Rc::downgrade(&win);
+        let tabs = Rc::downgrade(&win.tabs);
         adw::StyleManager::default().connect_dark_notify(move |_| {
-            if let Some(w) = w.upgrade() {
-                w.panel.redraw_all();
+            if let Some(tabs) = tabs.upgrade() {
+                for t in tabs.all.borrow().iter() {
+                    t.panel.redraw_all();
+                }
             }
         });
 
@@ -345,6 +353,147 @@ impl Win {
             win.open_port();
         }
         win
+    }
+
+    /// A new tab for `session` in the window of `chrome`, selected.
+    fn add_tab(chrome: &Chrome, session: Session, profile_name: String, profile: Profile) -> Rc<Self> {
+        let st = chrome.state.borrow().clone();
+        let term = TerminalView::new(&session, &profile.terminal);
+        term.term.set_font_scale(st.font_scale.clamp(0.25, 4.0));
+        let panel = VizPanel::new(&session, &chrome.toast);
+        let frames = FramesView::new(&session);
+        let term_paned = gtk::Paned::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .start_child(&term.widget)
+            .end_child(&frames.widget)
+            .wide_handle(true)
+            .build();
+        term_paned.set_resize_start_child(true);
+        term_paned.set_resize_end_child(false);
+        term_paned.set_shrink_start_child(false);
+        term_paned.set_shrink_end_child(false);
+        frames.widget.set_visible(st.frames_visible);
+        if let Some(p) = st.frames_position {
+            term_paned.set_position(p);
+        }
+        let paned = gtk::Paned::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .start_child(&term_paned)
+            .end_child(&panel.widget)
+            .wide_handle(true)
+            .build();
+        paned.set_resize_start_child(true);
+        paned.set_shrink_start_child(false);
+        paned.set_shrink_end_child(false);
+        panel.widget.set_visible(st.panel_visible);
+        if let Some(p) = st.pane_position {
+            paned.set_position(p);
+        }
+        let banner = adw::Banner::builder()
+            .button_label(gettext("Reconnect"))
+            .revealed(false)
+            .build();
+        banner.set_action_name(Some("win.open-port"));
+        let status = StatusBar::new();
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        content.append(&banner);
+        content.append(&paned);
+        content.append(&status.widget);
+        paned.set_vexpand(true);
+        let page = chrome.tabs.view.append(&content);
+        page.set_title(&format!("[{profile_name}]"));
+
+        let win = Rc::new(Self {
+            window: chrome.window.clone(),
+            toast: chrome.toast.clone(),
+            banner,
+            term,
+            panel,
+            paned,
+            frames,
+            term_paned,
+            status,
+            port_drop: chrome.port_drop.clone(),
+            port_paths: Rc::clone(&chrome.port_paths),
+            baud_drop: chrome.baud_drop.clone(),
+            bauds: Rc::clone(&chrome.bauds),
+            connect: chrome.connect.clone(),
+            view_drop: chrome.view_drop.clone(),
+            new_tab: chrome.new_tab.clone(),
+            manager: Arc::clone(&chrome.manager),
+            session,
+            profile_name: RefCell::new(profile_name),
+            profile: RefCell::new(profile),
+            state: Rc::clone(&chrome.state),
+            mcp: Rc::clone(&chrome.mcp),
+            mcp_url: Rc::clone(&chrome.mcp_url),
+            updating: Rc::clone(&chrome.updating),
+            watcher: RefCell::default(),
+            macro_bar: chrome.macro_bar.clone(),
+            shortcut_ctl: Rc::clone(&chrome.shortcut_ctl),
+            recorder: RefCell::default(),
+            running_macro: RefCell::default(),
+            raw_send: RefCell::default(),
+            autosave_pending: Cell::new(false),
+            macro_editor: Rc::clone(&chrome.macro_editor),
+            mcp_allow_dirs: Rc::clone(&chrome.mcp_allow_dirs),
+            script_window: RefCell::default(),
+            signal_window: RefCell::default(),
+            pending_script: RefCell::default(),
+            cli_allow_exec: Cell::new(chrome.cli_allow_exec),
+            tabs: Rc::clone(&chrome.tabs),
+            page,
+        });
+        chrome.tabs.all.borrow_mut().push(Rc::clone(&win));
+        if chrome.tabs.current.borrow().upgrade().is_none() {
+            *chrome.tabs.current.borrow_mut() = Rc::downgrade(&win);
+        }
+        win.status.set_mcp(chrome.mcp_url.borrow().as_deref());
+        win.pump_manager_events();
+        win.wire_status();
+        win.pump_events();
+        chrome.tabs.view.set_selected_page(&win.page);
+        win
+    }
+
+    /// The window-wide parts, for another tab.
+    fn chrome(&self) -> Chrome {
+        Chrome {
+            window: self.window.clone(),
+            toast: self.toast.clone(),
+            port_drop: self.port_drop.clone(),
+            port_paths: Rc::clone(&self.port_paths),
+            baud_drop: self.baud_drop.clone(),
+            bauds: Rc::clone(&self.bauds),
+            connect: self.connect.clone(),
+            view_drop: self.view_drop.clone(),
+            new_tab: self.new_tab.clone(),
+            manager: Arc::clone(&self.manager),
+            state: Rc::clone(&self.state),
+            mcp: Rc::clone(&self.mcp),
+            mcp_url: Rc::clone(&self.mcp_url),
+            updating: Rc::clone(&self.updating),
+            macro_bar: self.macro_bar.clone(),
+            shortcut_ctl: Rc::clone(&self.shortcut_ctl),
+            macro_editor: Rc::clone(&self.macro_editor),
+            mcp_allow_dirs: Rc::clone(&self.mcp_allow_dirs),
+            cli_allow_exec: self.cli_allow_exec.get(),
+            tabs: Rc::clone(&self.tabs),
+        }
+    }
+
+    /// The selected tab, resolved when used.
+    fn current(&self) -> CurrentTab {
+        CurrentTab(Rc::downgrade(&self.tabs))
+    }
+
+    /// This tab is the selected one (window-wide controls show it).
+    fn is_current(&self) -> bool {
+        self.tabs
+            .current
+            .borrow()
+            .upgrade()
+            .is_some_and(|c| std::ptr::eq(Rc::as_ptr(&c), self))
     }
 
     fn toast(&self, text: &str) {
@@ -407,13 +556,18 @@ impl Win {
     }
 
     fn wire_header(self: &Rc<Self>, refresh: &gtk::Button) {
-        let w = Rc::downgrade(self);
+        let manager = Arc::clone(&self.manager);
+        self.new_tab.set_create_popup_func(move |b| {
+            let names: Vec<String> = manager.with_config(|c| c.profiles.keys().cloned().collect());
+            b.set_menu_model(Some(&new_tab_menu(&names)));
+        });
+        let w = self.current();
         refresh.connect_clicked(move |_| {
             if let Some(w) = w.upgrade() {
                 w.refresh_header();
             }
         });
-        let w = Rc::downgrade(self);
+        let w = self.current();
         self.port_drop.connect_selected_notify(move |d| {
             let Some(w) = w.upgrade() else { return };
             if w.updating.get() {
@@ -428,7 +582,7 @@ impl Win {
                 w.open_port();
             }
         });
-        let w = Rc::downgrade(self);
+        let w = self.current();
         self.baud_drop.connect_selected_notify(move |d| {
             let Some(w) = w.upgrade() else { return };
             if w.updating.get() {
@@ -443,7 +597,7 @@ impl Win {
                 w.open_port();
             }
         });
-        let w = Rc::downgrade(self);
+        let w = self.current();
         self.connect.connect_toggled(move |b| {
             let Some(w) = w.upgrade() else { return };
             if w.updating.get() {
@@ -455,7 +609,7 @@ impl Win {
                 w.close_port();
             }
         });
-        let w = Rc::downgrade(self);
+        let w = self.current();
         self.view_drop.connect_selected_notify(move |d| {
             let Some(w) = w.upgrade() else { return };
             if w.updating.get() {
@@ -480,6 +634,35 @@ impl Win {
     }
 
     fn reflect_state(&self, state: &PortState) {
+        // This tab's page: title and a state icon.
+        let endpoint = match state {
+            PortState::Open => self.session.status().description,
+            _ => self.profile.borrow().connection.summary(),
+        };
+        self.page
+            .set_title(&format!("[{}] {endpoint}", self.profile_name.borrow()));
+        self.page.set_tooltip(&endpoint);
+        let icon = match state {
+            PortState::Open => Some("network-transmit-receive-symbolic"),
+            PortState::Error(_) => Some("dialog-warning-symbolic"),
+            PortState::Opening => Some("content-loading-symbolic"),
+            PortState::Closed => None,
+        };
+        self.page.set_icon(
+            icon.map(|i| gio::ThemedIcon::new(i).upcast::<gio::Icon>())
+                .as_ref(),
+        );
+        match state {
+            PortState::Error(e) => {
+                self.banner
+                    .set_title(&gettext_f("Connection error: {error}", &[("error", e)]));
+                self.banner.set_revealed(true);
+            }
+            _ => self.banner.set_revealed(false),
+        }
+        if !self.is_current() {
+            return;
+        }
         self.updating.set(true);
         let open = matches!(state, PortState::Open | PortState::Opening);
         self.connect.set_active(open);
@@ -494,14 +677,6 @@ impl Win {
             self.connect.add_css_class("suggested-action");
         }
         self.updating.set(false);
-        match state {
-            PortState::Error(e) => {
-                self.banner
-                    .set_title(&gettext_f("Connection error: {error}", &[("error", e)]));
-                self.banner.set_revealed(true);
-            }
-            _ => self.banner.set_revealed(false),
-        }
         let title = match state {
             PortState::Open => format!(
                 "GTKTerm Sunshine — [{}] {}",
@@ -623,6 +798,9 @@ impl Win {
     /// Grey out what cannot run now (no port, nothing to cancel, no log), instead of letting
     /// it fail with a toast.
     fn update_action_states(&self, st: &gtkterm_core::session::SessionStatus) {
+        if !self.is_current() {
+            return;
+        }
         let open = matches!(st.state, PortState::Open);
         let serial = open && matches!(self.session.connection(), Some(Connection::Serial(_)));
         let transfer = self
@@ -719,7 +897,7 @@ impl Win {
         let (_, placeholder) = tokio::sync::mpsc::channel(1);
         let rx = forward(std::mem::replace(&mut watcher.changes, placeholder));
         *self.watcher.borrow_mut() = Some(watcher);
-        let w = Rc::downgrade(self);
+        let w = self.current();
         glib::spawn_future_local(async move {
             while rx.recv().await.is_ok() {
                 let Some(w) = w.upgrade() else { break };
@@ -753,7 +931,7 @@ impl Win {
             let Some(trigger) = gtk::ShortcutTrigger::parse_string(&accel) else {
                 continue;
             };
-            let w = Rc::downgrade(self);
+            let w = self.current();
             let name = name.clone();
             let action = gtk::CallbackAction::new(move |_, _| {
                 if let Some(w) = w.upgrade() {
@@ -846,7 +1024,11 @@ impl Win {
                 }
             }
         }
-        if let Some(a) = self.window.lookup_action("record-macro") {
+        if let Some(a) = self
+            .window
+            .lookup_action("record-macro")
+            .filter(|_| self.is_current())
+        {
             a.change_state(&on.to_variant());
         }
         self.status
@@ -860,8 +1042,8 @@ impl Win {
     }
 
     fn open_macro_editor(self: &Rc<Self>, select: Option<String>) {
-        let w = Rc::downgrade(self);
-        let w2 = Rc::downgrade(self);
+        let w = self.current();
+        let w2 = self.current();
         let editor = super::macros::MacroEditor::present(
             &self.window,
             Arc::clone(&self.manager),
@@ -964,6 +1146,9 @@ impl Win {
                     .set_position((f64::from(self.paned.width()) * 0.55) as i32);
             }
         }
+        if !self.is_current() {
+            return;
+        }
         self.state.borrow_mut().panel_visible = visible;
         if let Some(a) = self.window.lookup_action("visualization") {
             a.change_state(&visible.to_variant());
@@ -978,6 +1163,9 @@ impl Win {
                 self.term_paned.set_position((f64::from(h) * 0.6) as i32);
             }
         }
+        if !self.is_current() {
+            return;
+        }
         self.state.borrow_mut().frames_visible = visible;
         if let Some(a) = self.window.lookup_action("frames") {
             a.change_state(&visible.to_variant());
@@ -986,6 +1174,9 @@ impl Win {
 
     fn on_decoder_status(&self, st: &DecoderStatus) {
         self.frames.set_status(st);
+        if !self.is_current() {
+            return;
+        }
         if let Some(a) = self.window.lookup_action("decoder") {
             a.change_state(&st.mode.to_string().to_variant());
         }
@@ -1058,7 +1249,7 @@ impl Win {
     fn install_actions(self: &Rc<Self>, app: &adw::Application) {
         let add = |name: &str, f: Box<dyn Fn(&Rc<Self>)>| {
             let action = gio::SimpleAction::new(name, None);
-            let w = Rc::downgrade(self);
+            let w = self.current();
             action.connect_activate(move |_, _| {
                 if let Some(w) = w.upgrade() {
                     f(&w);
@@ -1180,9 +1371,6 @@ impl Win {
                 }),
             );
         }
-        self.term
-            .term
-            .set_font_scale(self.state.borrow().font_scale.clamp(0.25, 4.0));
         let action =
             gio::SimpleAction::new_stateful("fullscreen", None, &self.window.is_fullscreen().to_variant());
         let w = self.window.downgrade();
@@ -1206,6 +1394,27 @@ impl Win {
             }),
         );
         add("save-profile-as", Box::new(Self::save_profile_as));
+        let action = gio::SimpleAction::new("new-tab", Some(glib::VariantTy::STRING));
+        let w = self.current();
+        action.connect_activate(move |_, param| {
+            if let (Some(w), Some(name)) = (w.upgrade(), param.and_then(glib::Variant::get::<String>)) {
+                w.open_tab(&name, false);
+            }
+        });
+        self.window.add_action(&action);
+        add("new-profile-tab", Box::new(Self::new_profile_tab));
+        add(
+            "new-tab-menu",
+            Box::new(|w| {
+                w.new_tab.popup();
+            }),
+        );
+        add(
+            "close-tab",
+            Box::new(|w| {
+                w.tabs.view.close_page(&w.page);
+            }),
+        );
         add("delete-profile", Box::new(Self::delete_profile));
 
         // Stateful toggles of terminal options.
@@ -1219,7 +1428,7 @@ impl Win {
         for (name, field) in toggles {
             let initial = *field(&mut self.profile.borrow_mut().terminal);
             let action = gio::SimpleAction::new_stateful(name, None, &initial.to_variant());
-            let w = Rc::downgrade(self);
+            let w = self.current();
             action.connect_activate(move |a, _| {
                 let Some(w) = w.upgrade() else { return };
                 let on = !a.state().and_then(|v| v.get::<bool>()).unwrap_or(false);
@@ -1239,7 +1448,7 @@ impl Win {
         let mode = format!("{:?}", self.profile.borrow().terminal.view_mode).to_lowercase();
         let action =
             gio::SimpleAction::new_stateful("view-mode", Some(glib::VariantTy::STRING), &mode.to_variant());
-        let w = Rc::downgrade(self);
+        let w = self.current();
         action.connect_activate(move |a, param| {
             let (Some(w), Some(p)) = (w.upgrade(), param.and_then(glib::Variant::get::<String>)) else {
                 return;
@@ -1257,7 +1466,7 @@ impl Win {
         let width = i32::from(self.profile.borrow().terminal.hex_chars);
         let action =
             gio::SimpleAction::new_stateful("hex-width", Some(glib::VariantTy::INT32), &width.to_variant());
-        let w = Rc::downgrade(self);
+        let w = self.current();
         action.connect_activate(move |a, param| {
             let (Some(w), Some(n)) = (w.upgrade(), param.and_then(glib::Variant::get::<i32>)) else {
                 return;
@@ -1276,7 +1485,7 @@ impl Win {
 
         let visible = self.state.borrow().panel_visible;
         let action = gio::SimpleAction::new_stateful("visualization", None, &visible.to_variant());
-        let w = Rc::downgrade(self);
+        let w = self.current();
         action.connect_activate(move |a, _| {
             let Some(w) = w.upgrade() else { return };
             let on = !a.state().and_then(|v| v.get::<bool>()).unwrap_or(false);
@@ -1286,7 +1495,7 @@ impl Win {
 
         let visible = self.state.borrow().frames_visible;
         let action = gio::SimpleAction::new_stateful("frames", None, &visible.to_variant());
-        let w = Rc::downgrade(self);
+        let w = self.current();
         action.connect_activate(move |a, _| {
             let Some(w) = w.upgrade() else { return };
             let on = !a.state().and_then(|v| v.get::<bool>()).unwrap_or(false);
@@ -1300,7 +1509,7 @@ impl Win {
             Some(glib::VariantTy::STRING),
             &st.mode.to_string().to_variant(),
         );
-        let w = Rc::downgrade(self);
+        let w = self.current();
         action.connect_activate(move |_, param| {
             let (Some(w), Some(p)) = (w.upgrade(), param.and_then(glib::Variant::get::<String>)) else {
                 return;
@@ -1319,7 +1528,7 @@ impl Win {
         });
         self.window.add_action(&action);
         let action = gio::SimpleAction::new_stateful("decoder-signals", None, &st.signals.to_variant());
-        let w = Rc::downgrade(self);
+        let w = self.current();
         action.connect_activate(move |a, _| {
             let Some(w) = w.upgrade() else { return };
             // The session is the source of truth: the action state follows its events later.
@@ -1333,7 +1542,7 @@ impl Win {
 
         let enabled = self.state.borrow().mcp.enabled;
         let action = gio::SimpleAction::new_stateful("mcp", None, &enabled.to_variant());
-        let w = Rc::downgrade(self);
+        let w = self.current();
         action.connect_activate(move |a, _| {
             let Some(w) = w.upgrade() else { return };
             let on = !a.state().and_then(|v| v.get::<bool>()).unwrap_or(false);
@@ -1354,7 +1563,7 @@ impl Win {
         );
         add("import-presets", Box::new(Self::import_presets));
         let action = gio::SimpleAction::new("play-macro", Some(glib::VariantTy::STRING));
-        let w = Rc::downgrade(self);
+        let w = self.current();
         action.connect_activate(move |_, param| {
             if let (Some(w), Some(name)) = (w.upgrade(), param.and_then(glib::Variant::get::<String>)) {
                 w.play_macro(&name);
@@ -1362,7 +1571,7 @@ impl Win {
         });
         self.window.add_action(&action);
         let action = gio::SimpleAction::new_stateful("record-macro", None, &false.to_variant());
-        let w = Rc::downgrade(self);
+        let w = self.current();
         action.connect_activate(move |a, _| {
             let Some(w) = w.upgrade() else { return };
             let on = !a.state().and_then(|v| v.get::<bool>()).unwrap_or(false);
@@ -1371,7 +1580,7 @@ impl Win {
         self.window.add_action(&action);
         let visible = self.state.borrow().macro_bar;
         let action = gio::SimpleAction::new_stateful("macro-bar", None, &visible.to_variant());
-        let w = Rc::downgrade(self);
+        let w = self.current();
         action.connect_activate(move |a, _| {
             let Some(w) = w.upgrade() else { return };
             let on = !a.state().and_then(|v| v.get::<bool>()).unwrap_or(false);
@@ -1382,7 +1591,7 @@ impl Win {
         self.window.add_action(&action);
 
         let action = gio::SimpleAction::new("load-profile", Some(glib::VariantTy::STRING));
-        let w = Rc::downgrade(self);
+        let w = self.current();
         action.connect_activate(move |_, param| {
             if let (Some(w), Some(name)) = (w.upgrade(), param.and_then(glib::Variant::get::<String>)) {
                 w.load_profile(&name);
@@ -1396,6 +1605,9 @@ impl Win {
     }
 
     fn sync_toggle_states(&self) {
+        if !self.is_current() {
+            return;
+        }
         let t = self.profile.borrow().terminal.clone();
         for (name, v) in [
             ("echo", t.echo),
@@ -1996,6 +2208,7 @@ impl Win {
         self.sync_toggle_states();
         self.status.update(&self.session.status());
         self.status.profile.set_label(&format!("[{name}]"));
+        self.reflect_state(&self.session.status().state);
         if reconnect {
             self.open_port();
         }
@@ -2033,6 +2246,7 @@ impl Win {
             w.profile_name.borrow_mut().clone_from(&name);
             w.session.set_name(&name);
             w.status.profile.set_label(&format!("[{name}]"));
+            w.reflect_state(&w.session.status().state);
         });
         dialog.present(Some(&self.window));
     }
@@ -2120,7 +2334,9 @@ impl Win {
                     Ok(handle) => {
                         let url = handle.url.clone();
                         let token = settings.token.unwrap_or_default();
-                        w.status.set_mcp(Some(&url));
+                        for t in w.tabs.all.borrow().iter() {
+                            t.status.set_mcp(Some(&url));
+                        }
                         *w.mcp_url.borrow_mut() = Some(url.clone());
                         *w.mcp.borrow_mut() = Some(handle);
                         let command = format!(
@@ -2198,10 +2414,65 @@ impl Win {
             spawn_io(h.shutdown());
         }
         self.mcp_url.replace(None);
-        self.status.set_mcp(None);
+        for t in self.tabs.all.borrow().iter() {
+            t.status.set_mcp(None);
+        }
     }
 
+    /// The window closes: save the window state and the open tabs, close every session.
     fn shutdown(&self) {
+        let current = self.current().upgrade();
+        let tabs: Vec<Rc<Win>> = self.tabs.all.borrow().clone();
+        {
+            let mut st = self.state.borrow_mut();
+            st.maximized = self.window.is_maximized();
+            st.fullscreen = self.window.is_fullscreen();
+            if !st.maximized && !st.fullscreen {
+                st.width = self.window.width();
+                st.height = self.window.height();
+            }
+            if let Some(t) = &current {
+                st.font_scale = t.term.term.font_scale();
+                st.pane_position = Some(t.paned.position());
+                st.panel_visible = t.panel.widget.is_visible();
+                st.frames_visible = t.frames.widget.is_visible();
+                if st.frames_visible {
+                    st.frames_position = Some(t.term_paned.position());
+                }
+            }
+            // Tabs in their visible order.
+            let view = &self.tabs.view;
+            st.open_tabs = (0..view.n_pages())
+                .filter_map(|i| {
+                    let page = view.nth_page(i);
+                    tabs.iter()
+                        .find(|t| t.page == page)
+                        .map(|t| t.profile_name.borrow().clone())
+                })
+                .collect();
+            st.save();
+        }
+        self.stop_mcp();
+        self.watcher.borrow_mut().take();
+        for t in &tabs {
+            t.close_tab_resources();
+        }
+        // Close synchronously enough that device locks and termios are released.
+        let sessions: Vec<Session> = tabs.iter().map(|t| t.session.clone()).collect();
+        let _ = rt().block_on(async move {
+            tokio::time::timeout(Duration::from_secs(2), async {
+                for s in sessions {
+                    let _ = s.close().await;
+                }
+            })
+            .await
+        });
+        // The tabs point back to the list; break the cycle.
+        self.tabs.all.borrow_mut().clear();
+    }
+
+    /// Pending saves and helper windows of this tab.
+    fn close_tab_resources(&self) {
         self.flush_autosave();
         if let Some(w) = self.script_window.borrow_mut().take() {
             w.window.destroy();
@@ -2209,29 +2480,192 @@ impl Win {
         if let Some(w) = self.signal_window.borrow_mut().take() {
             w.window.destroy();
         }
-        {
-            let mut st = self.state.borrow_mut();
-            st.maximized = self.window.is_maximized();
-            st.fullscreen = self.window.is_fullscreen();
-            st.font_scale = self.term.term.font_scale();
-            if !st.maximized && !st.fullscreen {
-                st.width = self.window.width();
-                st.height = self.window.height();
-            }
-            st.pane_position = Some(self.paned.position());
-            st.panel_visible = self.panel.widget.is_visible();
-            st.frames_visible = self.frames.widget.is_visible();
-            if st.frames_visible {
-                st.frames_position = Some(self.term_paned.position());
-            }
-            st.save();
-        }
-        self.stop_mcp();
-        self.watcher.borrow_mut().take();
-        let s = self.session.clone();
-        // Close synchronously enough that the device lock and termios are released.
-        let _ = rt().block_on(async move { tokio::time::timeout(Duration::from_secs(2), s.close()).await });
     }
+
+    // ----- tabs -----
+
+    /// Follow the selected tab; ask before closing a busy one; the last tab closes the window.
+    fn wire_tabs(&self) {
+        let tabs = Rc::downgrade(&self.tabs);
+        self.tabs.view.connect_selected_page_notify(move |view| {
+            let (Some(tabs), Some(page)) = (tabs.upgrade(), view.selected_page()) else {
+                return;
+            };
+            let found = tabs.all.borrow().iter().find(|t| t.page == page).cloned();
+            if let Some(t) = found {
+                *tabs.current.borrow_mut() = Rc::downgrade(&t);
+                t.on_activated();
+            }
+        });
+        let tabs = Rc::downgrade(&self.tabs);
+        self.tabs.view.connect_close_page(move |view, page| {
+            let Some(tabs) = tabs.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
+            let Some(t) = tabs.all.borrow().iter().find(|t| t.page == *page).cloned() else {
+                return glib::Propagation::Proceed;
+            };
+            if view.n_pages() <= 1 {
+                // Closing the last tab closes the window (which saves and shuts down).
+                view.close_page_finish(page, false);
+                t.window.close();
+                return glib::Propagation::Stop;
+            }
+            let st = t.session.status();
+            let busy = matches!(st.state, PortState::Open) || st.log.is_some();
+            if !busy {
+                t.close_tab();
+                view.close_page_finish(page, true);
+                return glib::Propagation::Stop;
+            }
+            let dialog = adw::AlertDialog::builder()
+                .heading(gettext_f(
+                    "Close [{name}]?",
+                    &[("name", &*t.profile_name.borrow())],
+                ))
+                .body(gettext("The connection is closed and a running log is stopped."))
+                .close_response("cancel")
+                .default_response("close")
+                .build();
+            dialog.add_responses(&[
+                ("cancel", gettext("Cancel").as_str()),
+                ("close", gettext("Close Tab").as_str()),
+            ]);
+            dialog.set_response_appearance("close", adw::ResponseAppearance::Destructive);
+            let (view, page) = (view.clone(), page.clone());
+            let tab = Rc::clone(&t);
+            dialog.connect_response(None, move |_, resp| {
+                let close = resp == "close";
+                if close {
+                    tab.close_tab();
+                }
+                view.close_page_finish(&page, close);
+            });
+            dialog.present(Some(&t.window));
+            glib::Propagation::Stop
+        });
+    }
+
+    /// Close this tab's session and forget the tab.
+    fn close_tab(&self) {
+        self.close_tab_resources();
+        self.tabs
+            .all
+            .borrow_mut()
+            .retain(|t| !std::ptr::eq(Rc::as_ptr(t), self));
+        let (manager, id) = (Arc::clone(&self.manager), self.session.id());
+        spawn_io(async move {
+            manager.remove(id).await;
+        });
+    }
+
+    /// The tab became the selected one: window-wide controls show it.
+    fn on_activated(self: &Rc<Self>) {
+        self.refresh_header();
+        self.sync_toggle_states();
+        let st = self.session.status();
+        self.reflect_state(&st.state);
+        self.update_action_states(&st);
+        self.on_decoder_status(&self.session.decoder_status());
+        for (name, on) in [
+            ("visualization", self.panel.widget.is_visible()),
+            ("frames", self.frames.widget.is_visible()),
+            ("record-macro", self.recorder.borrow().is_some()),
+        ] {
+            if let Some(a) = self.window.lookup_action(name) {
+                a.change_state(&on.to_variant());
+            }
+        }
+        let mode = format!("{:?}", self.profile.borrow().terminal.view_mode).to_lowercase();
+        if let Some(a) = self.window.lookup_action("view-mode") {
+            a.change_state(&mode.to_variant());
+        }
+        self.term.term.grab_focus();
+    }
+
+    /// Reopen the tabs of the last session after the first one (which the command line chose).
+    pub fn restore_tabs(self: &Rc<Self>) {
+        let names = self.state.borrow().open_tabs.clone();
+        let known: Vec<String> = self.manager.with_config(|c| c.profiles.keys().cloned().collect());
+        for name in names.iter().skip(1).filter(|n| known.contains(n)) {
+            self.open_tab(name, true);
+        }
+        self.tabs.view.set_selected_page(&self.page);
+    }
+
+    /// Open profile `name` in a new tab (connecting if `connect`).
+    pub fn open_tab(&self, name: &str, connect: bool) -> Rc<Self> {
+        let profile = self
+            .manager
+            .with_config(|c| c.profile(name).cloned())
+            .unwrap_or_default();
+        // The session's actor runs on the I/O runtime.
+        let session = {
+            let _rt = rt().enter();
+            self.manager.create(name, profile.terminal.clone())
+        };
+        session.apply_decoder_config(profile.decoder);
+        let tab = Self::add_tab(&self.chrome(), session, name.to_owned(), profile);
+        tab.reflect_state(&PortState::Closed);
+        if connect {
+            tab.open_port();
+        }
+        tab
+    }
+
+    /// Ask for a profile name, create it from the default settings and open it in a tab.
+    fn new_profile_tab(self: &Rc<Self>) {
+        let entry = gtk::Entry::builder()
+            .placeholder_text(gettext("Profile name"))
+            .activates_default(true)
+            .build();
+        let dialog = adw::AlertDialog::builder()
+            .heading(gettext("New tab with a new profile"))
+            .extra_child(&entry)
+            .default_response("open")
+            .close_response("cancel")
+            .build();
+        dialog.add_responses(&[
+            ("cancel", gettext("Cancel").as_str()),
+            ("open", gettext("Open").as_str()),
+        ]);
+        dialog.set_response_appearance("open", adw::ResponseAppearance::Suggested);
+        let w = Rc::downgrade(self);
+        dialog.connect_response(None, move |_, resp| {
+            let Some(w) = w.upgrade() else { return };
+            if resp != "open" {
+                return;
+            }
+            let name = entry.text().trim().to_owned();
+            if let Err(e) = gtkterm_core::config::check_profile_name(&name) {
+                w.toast(&e.to_string());
+                return;
+            }
+            let created = w.manager.with_config_mut(|c| {
+                if c.profiles.contains_key(&name) {
+                    false
+                } else {
+                    c.profiles.insert(name.clone(), Profile::default());
+                    true
+                }
+            });
+            if created && let Err(e) = w.manager.save_config() {
+                w.toast(&e.to_string());
+            }
+            w.open_tab(&name, false);
+        });
+        dialog.present(Some(&self.window));
+    }
+}
+
+/// Close `window` even while dialogs are open (closing would only close the top dialog).
+pub fn close_window(window: &adw::ApplicationWindow) {
+    // Bounded: a dialog that refuses to go must not hang the quit.
+    for _ in 0..16 {
+        let Some(d) = window.visible_dialog() else { break };
+        d.force_close();
+    }
+    window.close();
 }
 
 /// Dropdown item factory with middle-ellipsized labels (long device paths).
@@ -2356,6 +2790,22 @@ fn main_menu() -> gio::Menu {
     app.append(Some(&gettext("About GTKTerm Sunshine")), Some("win.about"));
     app.append(Some(&gettext("Quit")), Some("app.quit"));
     menu.append_section(None, &app);
+    menu
+}
+
+/// "+": one entry per profile, then a new profile.
+fn new_tab_menu(names: &[String]) -> gio::Menu {
+    let menu = gio::Menu::new();
+    let profiles = gio::Menu::new();
+    for name in names {
+        let item = gio::MenuItem::new(Some(name), None);
+        item.set_action_and_target_value(Some("win.new-tab"), Some(&name.to_variant()));
+        profiles.append_item(&item);
+    }
+    menu.append_section(Some(&gettext("Open profile in a new tab")), &profiles);
+    let more = gio::Menu::new();
+    more.append(Some(&gettext("New Profile…")), Some("win.new-profile-tab"));
+    menu.append_section(None, &more);
     menu
 }
 
@@ -2991,8 +3441,11 @@ mod tests {
         win.term.term.feed_child(b"lost");
         assert!(win.term.input_was_refused());
 
-        win.window.close();
+        // Quit with dialogs still open (the transfer dialogs above): they must not keep the
+        // window open.
+        close_window(&win.window);
         pump_until(Duration::from_millis(200), || false);
+        assert_eq!(UiState::load().open_tabs, ["default"], "open tabs are remembered");
         // Tear everything down: finalizing widgets must not warn (e.g. popovers still parented).
         let window = win.window.clone();
         let term = win.term.term.downgrade();
@@ -3069,10 +3522,98 @@ mod tests {
         let worst = ticks.windows(2).map(|w| w[1] - w[0]).max().unwrap_or_default();
         eprintln!("high-rate: {} ticks, worst gap {worst:?}", ticks.len());
         assert!(ticks.len() > 10, "main loop ran");
+        // Timing means nothing on an oversubscribed machine (other jobs starve this process).
+        let load: f64 = std::fs::read_to_string("/proc/loadavg")
+            .ok()
+            .and_then(|l| l.split_whitespace().next()?.parse().ok())
+            .unwrap_or(0.0);
+        let cores = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+        #[allow(clippy::cast_precision_loss)]
+        if load < cores as f64 {
+            assert!(
+                worst < Duration::from_millis(500),
+                "main loop stalled for {worst:?}"
+            );
+        } else {
+            eprintln!("load {load} on {cores} cores: not judging the stall time");
+        }
+        assert_eq!(UNEXPECTED_LOGS.load(Ordering::SeqCst), 0, "GTK warnings");
+    }
+
+    /// Two tabs on two devices: data, charts and counters stay apart; actions and the header
+    /// follow the selected tab; a closed tab is freed together with its session.
+    #[gtk::test]
+    fn tabs_keep_connections_apart() {
+        if std::env::var_os("GTKTERM_GUI_TESTS").is_none() {
+            return;
+        }
+        let (one, mut dev1, _dir) = setup();
+        let two = one.open_tab("default", false);
+        let (port, mut dev2) = loopback::pair_with_lines("second");
+        rt().block_on(two.session.attach(port)).unwrap();
+        assert!(pump_until(Duration::from_secs(3), || two.is_open()));
+        assert_eq!(one.tabs.view.n_pages(), 2);
+        assert!(two.is_current(), "a new tab is selected");
+        assert_ne!(one.session.id(), two.session.id());
+
+        // Keystrokes go to the selected tab's device only.
+        two.term.term.feed_child(b"to-two");
+        let got = rt().block_on(async { tokio::time::timeout(Duration::from_secs(2), dev2.recv()).await });
+        assert_eq!(got.ok().flatten().as_deref(), Some(&b"to-two"[..]));
+        assert!(dev1.drain().is_empty());
+
+        // Data and charts per tab.
+        rt().block_on(dev1.send(&b"{only1|x|1}\n"[..])).unwrap();
+        assert!(pump_until(Duration::from_secs(2), || one.panel.len() == 1));
+        pump_until(Duration::from_millis(100), || false);
+        assert_eq!(two.panel.len(), 0);
+        assert_eq!(two.session.status().rx_bytes, 0);
+
+        // Window actions act on the selected tab.
+        let echo = |t: &Rc<Win>| t.term.config().echo;
+        let before = (echo(&one), echo(&two));
+        gio::prelude::ActionGroupExt::activate_action(&one.window, "echo", None);
+        assert_eq!((echo(&one), echo(&two)), (before.0, !before.1));
+        one.tabs.view.set_selected_page(&one.page);
+        assert!(pump_until(Duration::from_secs(1), || one.is_current()));
+        gio::prelude::ActionGroupExt::activate_action(&one.window, "echo", None);
+        assert_eq!((echo(&one), echo(&two)), (!before.0, !before.1));
+
+        // The header follows the selection: close tab two's port, the button shows tab one.
+        rt().block_on(two.session.close()).unwrap();
+        pump_until(Duration::from_millis(300), || false);
+        assert!(one.connect.is_active(), "tab one is still connected");
+        one.tabs.view.set_selected_page(&two.page);
+        assert!(pump_until(Duration::from_secs(1), || !one.connect.is_active()));
+
+        // Closing tab two (not connected: no question) frees it and its session.
+        let id = two.session.id();
+        let term = two.term.term.downgrade();
+        let weak = Rc::downgrade(&two);
+        gio::prelude::ActionGroupExt::activate_action(&one.window, "close-tab", None);
+        drop(two);
         assert!(
-            worst < Duration::from_millis(500),
-            "main loop stalled for {worst:?}"
+            pump_until(Duration::from_secs(3), || one.manager.get(id).is_none()),
+            "session removed"
         );
+        pump_until(Duration::from_millis(300), || false);
+        assert_eq!(one.tabs.view.n_pages(), 1);
+        assert!(weak.upgrade().is_none(), "tab freed");
+        assert!(term.upgrade().is_none(), "tab widgets finalized");
+        assert!(one.is_current());
+
+        // Tabs of the last session come back (after the first, which the command line chose).
+        one.manager.with_config_mut(|c| {
+            c.profiles.insert("lab".into(), Profile::default());
+        });
+        one.state.borrow_mut().open_tabs = vec!["default".into(), "lab".into(), "gone".into()];
+        one.restore_tabs();
+        assert_eq!(one.tabs.view.n_pages(), 2, "unknown profiles are skipped");
+        assert!(one.is_current(), "the first tab stays selected");
+        let titles: Vec<String> = (0..2)
+            .map(|i| one.tabs.view.nth_page(i).title().to_string())
+            .collect();
+        assert!(titles[1].starts_with("[lab]"), "{titles:?}");
         assert_eq!(UNEXPECTED_LOGS.load(Ordering::SeqCst), 0, "GTK warnings");
     }
 

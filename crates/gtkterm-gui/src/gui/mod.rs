@@ -65,7 +65,10 @@ pub fn run(cli: Cli, resolved: Resolved) -> ExitCode {
     let a = app.clone();
     quit.connect_activate(move |_, _| {
         for w in a.windows() {
-            w.close();
+            match w.downcast::<adw::ApplicationWindow>() {
+                Ok(w) => window::close_window(&w),
+                Err(w) => w.close(),
+            }
         }
     });
     app.add_action(&quit);
@@ -100,6 +103,7 @@ pub fn run(cli: Cli, resolved: Resolved) -> ExitCode {
             start,
         );
         win.watch_unix_signals();
+        win.restore_tabs();
         *h.borrow_mut() = Some(win);
     });
     let status = app.run_with_args::<&str>(&["gtkterm-sunshine"]);

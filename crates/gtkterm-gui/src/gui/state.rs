@@ -72,6 +72,8 @@ pub struct UiState {
     pub script_allow_exec: bool,
     /// Last script file.
     pub script_path: Option<PathBuf>,
+    /// Profiles open in tabs at the last exit, in tab order.
+    pub open_tabs: Vec<String>,
 }
 
 impl Default for UiState {
@@ -93,6 +95,7 @@ impl Default for UiState {
             transfer_dir: None,
             script_allow_exec: false,
             script_path: None,
+            open_tabs: Vec::new(),
         }
     }
 }
