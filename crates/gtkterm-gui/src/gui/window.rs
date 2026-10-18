@@ -608,10 +608,53 @@ impl Win {
             let Some(w) = w.upgrade() else {
                 return glib::ControlFlow::Break;
             };
-            w.status.update(&w.session.status());
+            let st = w.session.status();
+            w.status.update(&st);
+            w.update_action_states(&st);
             w.panel.update_footer();
             glib::ControlFlow::Continue
         });
+    }
+
+    fn refresh_actions(&self) {
+        self.update_action_states(&self.session.status());
+    }
+
+    /// Grey out what cannot run now (no port, nothing to cancel, no log), instead of letting
+    /// it fail with a toast.
+    fn update_action_states(&self, st: &gtkterm_core::session::SessionStatus) {
+        let open = matches!(st.state, PortState::Open);
+        let serial = open && matches!(self.session.connection(), Some(Connection::Serial(_)));
+        let transfer = self
+            .session
+            .transfer_status()
+            .is_some_and(|t| t.state == gtkterm_core::transfer::TransferState::Running);
+        let logging = st.log.is_some();
+        let rules = [
+            ("send-break", serial),
+            ("dtr", serial),
+            ("rts", serial),
+            ("auto-baud", serial && !transfer),
+            ("flush", open),
+            ("send-hex", open && !transfer),
+            ("send-file", open && !transfer),
+            ("receive-file", open && !transfer),
+            ("cancel-transfer", transfer || self.raw_send.borrow().is_some()),
+            ("close-port", open || matches!(st.state, PortState::Opening)),
+            ("log-pause", logging),
+            ("log-clear", logging),
+            ("log-stop", logging),
+        ];
+        for (name, enabled) in rules {
+            if let Some(a) = self
+                .window
+                .lookup_action(name)
+                .and_then(|a| a.downcast::<gio::SimpleAction>().ok())
+                && a.is_enabled() != enabled
+            {
+                a.set_enabled(enabled);
+            }
+        }
     }
 
     fn handle(self: &Rc<Self>, ev: &SessionEvent) {
@@ -619,6 +662,7 @@ impl Win {
             SessionEvent::Data(chunk) => self.term.show(chunk),
             SessionEvent::State(state) => {
                 self.reflect_state(state);
+                self.refresh_actions();
                 self.status.update(&self.session.status());
                 match state {
                     PortState::Open => {
@@ -657,7 +701,10 @@ impl Win {
             SessionEvent::Cleared => self.panel.sync(),
             SessionEvent::Frames(f) => self.frames.append(f),
             SessionEvent::Decoder(st) => self.on_decoder_status(st),
-            SessionEvent::Transfer(st) => self.on_transfer(st),
+            SessionEvent::Transfer(st) => {
+                self.on_transfer(st);
+                self.refresh_actions();
+            }
             SessionEvent::Signals(_) => {
                 if let Some(m) = self.signal_window.borrow().as_ref() {
                     m.update();
@@ -1365,6 +1412,7 @@ impl Win {
             async move { s.log(op).await.map_err(|e| e.to_string()) },
             move |r| {
                 let Some(w) = w.upgrade() else { return };
+                w.refresh_actions();
                 match r {
                     Ok(Some(st)) if w.session.status().log.is_none() => {
                         w.toast(&gettext_f(
@@ -1562,6 +1610,7 @@ impl Win {
         };
         let token = tokio_util::sync::CancellationToken::new();
         *self.raw_send.borrow_mut() = Some(token.clone());
+        self.refresh_actions();
         let name = path
             .file_name()
             .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
@@ -1625,6 +1674,7 @@ impl Win {
             move |r| {
                 if let Some(w) = ww.upgrade() {
                     w.raw_send.borrow_mut().take();
+                    w.refresh_actions();
                     w.status.set_progress(None);
                     w.toast(&r.unwrap_or_else(|e| e));
                 }
@@ -2889,6 +2939,11 @@ mod tests {
             pump_until(Duration::from_secs(5), || !win.is_open()),
             "SIGUSR2 closes"
         );
+        // Actions that need an open port are greyed out.
+        let enabled = |name: &str| win.window.lookup_action(name).is_some_and(|a| a.is_enabled());
+        assert!(pump_until(Duration::from_secs(2), || !enabled("send-break")));
+        assert!(!enabled("send-file") && !enabled("flush") && !enabled("cancel-transfer"));
+        assert!(enabled("open-port") && enabled("preferences"));
         // Typing while disconnected says that the input is not sent.
         assert!(!win.term.input_was_refused());
         win.term.term.feed_child(b"lost");
