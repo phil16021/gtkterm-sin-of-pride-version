@@ -11,6 +11,8 @@ use gtkterm_core::session::Session;
 use gtkterm_protocols::decode::Check;
 use jiff::tz::TimeZone;
 
+use super::i18n::{gettext, gettext_f};
+
 /// The frames pane.
 pub struct FramesView {
     /// Root widget.
@@ -111,7 +113,7 @@ impl FramesView {
             .build();
         view.add_css_class("data-table");
         view.append_column(&column(
-            "Time",
+            &gettext("Time"),
             |f| {
                 let t = f
                     .time
@@ -123,7 +125,7 @@ impl FramesView {
             false,
         ));
         view.append_column(&column(
-            "Dir",
+            &gettext("Dir"),
             |f| {
                 let class = match f.source {
                     FrameSource::Rx => None,
@@ -135,7 +137,7 @@ impl FramesView {
             false,
         ));
         view.append_column(&column(
-            "Check",
+            &gettext("Check"),
             |f| match f.frame.check {
                 Check::None => (String::new(), None),
                 Check::Ok => ("✓".into(), Some("success")),
@@ -143,7 +145,11 @@ impl FramesView {
             },
             false,
         ));
-        view.append_column(&column("Frame", |f| (f.frame.summary.clone(), None), true));
+        view.append_column(&column(
+            &gettext("Frame"),
+            |f| (f.frame.summary.clone(), None),
+            true,
+        ));
 
         let scroller = gtk::ScrolledWindow::builder()
             .child(&view)
@@ -160,7 +166,7 @@ impl FramesView {
             .margin_end(8)
             .margin_top(4)
             .margin_bottom(4)
-            .label("Select a frame to see its fields and bytes.")
+            .label(gettext("Select a frame to see its fields and bytes."))
             .build();
         details.add_css_class("monospace");
         details.add_css_class("dim-label");
@@ -173,33 +179,34 @@ impl FramesView {
             .build();
 
         let modes: Vec<DecoderMode> = DecoderMode::all().collect();
-        let labels: Vec<&str> = modes.iter().map(|m| m.label()).collect();
+        let labels: Vec<String> = modes.iter().map(|m| gettext(m.label())).collect();
+        let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
         let mode_drop = gtk::DropDown::builder()
             .model(&gtk::StringList::new(&labels))
-            .tooltip_text("Protocol decoder")
+            .tooltip_text(gettext("Protocol decoder"))
             .build();
         let signals = gtk::ToggleButton::builder()
             .icon_name("network-wired-symbolic")
-            .tooltip_text("Record modem line changes")
+            .tooltip_text(gettext("Record modem line changes"))
             .build();
         let follow = gtk::ToggleButton::builder()
             .icon_name("go-bottom-symbolic")
-            .tooltip_text("Follow new frames")
+            .tooltip_text(gettext("Follow new frames"))
             .active(true)
             .build();
         let search = gtk::SearchEntry::builder()
-            .placeholder_text("Filter")
+            .placeholder_text(gettext("Filter"))
             .hexpand(true)
             .build();
         let clear = gtk::Button::builder()
             .icon_name("edit-clear-all-symbolic")
-            .tooltip_text("Clear frames")
+            .tooltip_text(gettext("Clear frames"))
             .build();
         let count = gtk::Label::new(None);
         count.add_css_class("dim-label");
         let toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         toolbar.add_css_class("chart-toolbar");
-        toolbar.append(&gtk::Label::new(Some("Decoder")));
+        toolbar.append(&gtk::Label::new(Some(&gettext("Decoder"))));
         toolbar.append(&mode_drop);
         toolbar.append(&signals);
         toolbar.append(&search);
@@ -273,7 +280,7 @@ impl FramesView {
     fn show_details(&self, item: Option<&glib::Object>) {
         let Some(obj) = item else {
             self.details
-                .set_text("Select a frame to see its fields and bytes.");
+                .set_text(&gettext("Select a frame to see its fields and bytes."));
             return;
         };
         let f = frame_of(obj);
@@ -288,15 +295,21 @@ impl FramesView {
             let _ = writeln!(text, "{} = {}", field.name, field.value);
         }
         if let Check::Failed { received, computed } = &f.frame.check {
-            let _ = writeln!(text, "check failed: received {received}, computed {computed}");
+            let line = gettext_f(
+                "check failed: received {received}, computed {computed}",
+                &[("received", received), ("computed", computed)],
+            );
+            let _ = writeln!(text, "{line}");
         }
         if !f.frame.bytes.is_empty() {
-            let _ = write!(
-                text,
-                "bytes ({}): {}",
-                f.frame.bytes.len(),
-                gtkterm_protocols::hex::to_hex(&f.frame.bytes)
+            let line = gettext_f(
+                "bytes ({count}): {hex}",
+                &[
+                    ("count", &f.frame.bytes.len()),
+                    ("hex", &gtkterm_protocols::hex::to_hex(&f.frame.bytes)),
+                ],
             );
+            text.push_str(&line);
         }
         self.details.set_text(text.trim_end());
     }
@@ -338,12 +351,16 @@ impl FramesView {
             self.store.remove_all();
         }
         let label = match (st.mode, st.protocol) {
-            (DecoderMode::Auto, Some(p)) => format!("Auto-detect ({})", p.label()),
-            (DecoderMode::Auto, None) => "Auto-detect (waiting for data)".to_owned(),
-            (m, _) => m.label().to_owned(),
+            (DecoderMode::Auto, Some(p)) => {
+                gettext_f("Auto-detect ({protocol})", &[("protocol", &gettext(p.label()))])
+            }
+            (DecoderMode::Auto, None) => gettext("Auto-detect (waiting for data)"),
+            (m, _) => gettext(m.label()),
         };
-        self.mode_drop
-            .set_tooltip_text(Some(&format!("Protocol decoder: {label}")));
+        self.mode_drop.set_tooltip_text(Some(&gettext_f(
+            "Protocol decoder: {label}",
+            &[("label", &label)],
+        )));
         self.update_count();
     }
 
@@ -352,12 +369,15 @@ impl FramesView {
         let shown = self.selection.n_items();
         let failures = self.session.decoder_status().check_failures;
         let mut text = if shown == total {
-            format!("{total} frames")
+            gettext_f("{total} frames", &[("total", &total)])
         } else {
-            format!("{shown} of {total} frames")
+            gettext_f(
+                "{shown} of {total} frames",
+                &[("shown", &shown), ("total", &total)],
+            )
         };
         if failures > 0 {
-            let _ = write!(text, ", {failures} bad");
+            text.push_str(&gettext_f(", {failures} bad", &[("failures", &failures)]));
         }
         self.count.set_text(&text);
     }

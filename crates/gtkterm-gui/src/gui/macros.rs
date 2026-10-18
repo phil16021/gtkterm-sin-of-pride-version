@@ -12,6 +12,7 @@ use gtkterm_core::manager::SessionManager;
 use gtkterm_protocols::escape;
 use sourceview::prelude::*;
 
+use super::i18n::{gettext, gettext_f};
 use super::shortcuts::SHORTCUTS;
 
 /// Keystrokes closer together than this are merged into one `send` step.
@@ -20,15 +21,17 @@ const MERGE_MS: u64 = 300;
 /// Check that `accel` (GTK accelerator syntax) can be used as a macro shortcut.
 pub fn validate_shortcut(accel: &str) -> Result<String, String> {
     let Some((key, mods)) = gtk::accelerator_parse(accel) else {
-        return Err(format!("{accel:?} is not a valid shortcut"));
+        let accel = format!("{accel:?}");
+        return Err(gettext_f("{accel} is not a valid shortcut", &[("accel", &accel)]));
     };
     let name = gtk::accelerator_name(key, mods).to_string();
     let mods = mods & gtk::accelerator_get_default_mod_mask();
     let key_name = key.name().map(|n| n.to_string()).unwrap_or_default();
     let is_fkey = key_name.starts_with('F') && key_name[1..].parse::<u8>().is_ok();
     if mods.is_empty() && !is_fkey {
-        return Err(format!(
-            "{name}: a key without modifier would stop that key from reaching the device"
+        return Err(gettext_f(
+            "{name}: a key without modifier would stop that key from reaching the device",
+            &[("name", &name)],
         ));
     }
     if mods == gtk::gdk::ModifierType::CONTROL_MASK
@@ -36,18 +39,23 @@ pub fn validate_shortcut(accel: &str) -> Result<String, String> {
             .to_unicode()
             .is_some_and(|c| c.is_ascii_alphabetic() || c == '[' || c == ']' || c == '\\')
     {
-        return Err(format!(
-            "{name}: Ctrl+letter sends a control character to the device"
+        return Err(gettext_f(
+            "{name}: Ctrl+letter sends a control character to the device",
+            &[("name", &name)],
         ));
     }
     if mods.contains(gtk::gdk::ModifierType::SUPER_MASK) && key_name == "space" {
-        return Err("Super+Space switches the keyboard layout".into());
+        return Err(gettext("Super+Space switches the keyboard layout"));
     }
     for (_, title, _, app_accel) in SHORTCUTS {
         if let Some((k, m)) = gtk::accelerator_parse(*app_accel)
             && gtk::accelerator_name(k, m) == name
         {
-            return Err(format!("{name} is already used for “{title}”"));
+            let title = gettext(*title);
+            return Err(gettext_f(
+                "{name} is already used for “{title}”",
+                &[("name", &name), ("title", &title)],
+            ));
         }
     }
     Ok(name)
@@ -149,11 +157,11 @@ impl MacroEditor {
             .build();
         let add = gtk::Button::builder()
             .icon_name("list-add-symbolic")
-            .tooltip_text("New macro")
+            .tooltip_text(gettext("New macro"))
             .build();
         let remove = gtk::Button::builder()
             .icon_name("list-remove-symbolic")
-            .tooltip_text("Delete macro")
+            .tooltip_text(gettext("Delete macro"))
             .build();
         let list_buttons = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         list_buttons.append(&add);
@@ -162,13 +170,15 @@ impl MacroEditor {
         sidebar.append(&scroller);
         sidebar.append(&list_buttons);
 
-        let name = adw::EntryRow::builder().title("Name").build();
+        let name = adw::EntryRow::builder().title(gettext("Name")).build();
         let shortcut_button = gtk::Button::builder()
-            .label("None")
+            .label(gettext("None"))
             .valign(gtk::Align::Center)
-            .tooltip_text("Click, then press the key combination (Backspace clears)")
+            .tooltip_text(gettext(
+                "Click, then press the key combination (Backspace clears)",
+            ))
             .build();
-        let shortcut_row = adw::ActionRow::builder().title("Shortcut").build();
+        let shortcut_row = adw::ActionRow::builder().title(gettext("Shortcut")).build();
         shortcut_row.add_suffix(&shortcut_button);
         let fields = adw::PreferencesGroup::new();
         fields.add(&name);
@@ -200,7 +210,7 @@ impl MacroEditor {
             .build();
         editor.add_css_class("card");
         let help = gtk::Label::builder()
-            .label("send: ATZ\\r   ·   send[250]: text (pause first)   ·   wait: 500 ms   ·   expect[2000]: OK\\r\\n   ·   # comment\nEscapes: \\r \\n \\t \\0 \\e \\\\ \\xHH — expect takes a regular expression")
+            .label(gettext("send: ATZ\\r   ·   send[250]: text (pause first)   ·   wait: 500 ms   ·   expect[2000]: OK\\r\\n   ·   # comment\nEscapes: \\r \\n \\t \\0 \\e \\\\ \\xHH — expect takes a regular expression"))
             .xalign(0.0)
             .wrap(true)
             .css_classes(["dim-label", "caption"])
@@ -211,12 +221,12 @@ impl MacroEditor {
             .css_classes(["error"])
             .build();
         let run_button = gtk::Button::builder()
-            .label("Run")
-            .tooltip_text("Save and run on the current connection")
+            .label(gettext("Run"))
+            .tooltip_text(gettext("Save and run on the current connection"))
             .build();
-        let stop_button = gtk::Button::builder().label("Stop").build();
+        let stop_button = gtk::Button::builder().label(gettext("Stop")).build();
         let save = gtk::Button::builder()
-            .label("Save")
+            .label(gettext("Save"))
             .css_classes(["suggested-action"])
             .build();
         let actions = gtk::Box::new(gtk::Orientation::Horizontal, 6);
@@ -246,7 +256,7 @@ impl MacroEditor {
         toolbar.add_top_bar(&adw::HeaderBar::new());
         toolbar.set_content(Some(&content));
         let dialog = adw::Dialog::builder()
-            .title("Macros")
+            .title(gettext("Macros"))
             .content_width(860)
             .content_height(560)
             .child(&toolbar)
@@ -277,7 +287,7 @@ impl MacroEditor {
         let w = Rc::downgrade(&me);
         add.connect_clicked(move |_| {
             let Some(me) = w.upgrade() else { return };
-            let name = me.manager.with_macros(|s| s.fresh_name("New macro"));
+            let name = me.manager.with_macros(|s| s.fresh_name(&gettext("New macro")));
             let m = Macro {
                 name: name.clone(),
                 shortcut: None,
@@ -324,7 +334,7 @@ impl MacroEditor {
         me.shortcut_button.connect_clicked(move |b| {
             if let Some(me) = w.upgrade() {
                 me.capturing.set(true);
-                b.set_label("Press keys…");
+                b.set_label(&gettext("Press keys…"));
             }
         });
         let keys = gtk::EventControllerKey::new();
@@ -437,7 +447,7 @@ impl MacroEditor {
             .shortcut
             .borrow()
             .as_deref()
-            .map_or_else(|| "None".to_owned(), shortcut_label);
+            .map_or_else(|| gettext("None"), shortcut_label);
         self.shortcut_button.set_label(&label);
     }
 

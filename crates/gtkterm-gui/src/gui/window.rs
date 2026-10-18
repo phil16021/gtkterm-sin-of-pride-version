@@ -22,6 +22,7 @@ use vte::prelude::TerminalExt as _;
 
 use super::charts::{VizPanel, save_dialog};
 use super::frames::FramesView;
+use super::i18n::{gettext, gettext_f, ngettext_f};
 use super::rt::{events, forward, rt, spawn, spawn_io};
 use super::shortcuts::SHORTCUTS;
 use super::state::{McpSettings, UiState};
@@ -121,19 +122,19 @@ impl Win {
 
         // Header bar.
         let header = adw::HeaderBar::new();
-        let port_drop = gtk::DropDown::builder().tooltip_text("Port").build();
+        let port_drop = gtk::DropDown::builder().tooltip_text(gettext("Port")).build();
         port_drop.set_factory(Some(&ellipsizing_factory(28)));
         port_drop.set_list_factory(Some(&ellipsizing_factory(60)));
         let refresh = gtk::Button::builder()
             .icon_name("view-refresh-symbolic")
-            .tooltip_text("Rescan ports")
+            .tooltip_text(gettext("Rescan ports"))
             .build();
         let baud_drop = gtk::DropDown::builder()
-            .tooltip_text("Baud rate (other rates: Preferences)")
+            .tooltip_text(gettext("Baud rate (other rates: Preferences)"))
             .build();
         let connect = gtk::ToggleButton::builder()
-            .label("Connect")
-            .tooltip_text("Connect / disconnect (F5)")
+            .label(gettext("Connect"))
+            .tooltip_text(gettext("Connect / disconnect (F5)"))
             .build();
         connect.add_css_class("suggested-action");
         header.pack_start(&port_drop);
@@ -145,30 +146,31 @@ impl Win {
             .icon_name("open-menu-symbolic")
             .menu_model(&main_menu())
             .primary(true)
-            .tooltip_text("Main menu")
+            .tooltip_text(gettext("Main menu"))
             .build();
         header.pack_end(&menu_button);
         let macro_button = gtk::MenuButton::builder()
             .icon_name("input-keyboard-symbolic")
-            .tooltip_text("Macros")
+            .tooltip_text(gettext("Macros"))
             .build();
         macro_button.set_create_popup_func(|b| b.set_menu_model(Some(&macro_menu())));
         header.pack_end(&macro_button);
         let viz_button = gtk::ToggleButton::builder()
             .icon_name("utilities-system-monitor-symbolic")
-            .tooltip_text("Visualization panel (Ctrl+Shift+G)")
+            .tooltip_text(gettext("Visualization panel (Ctrl+Shift+G)"))
             .action_name("win.visualization")
             .build();
         header.pack_end(&viz_button);
-        let mode_labels: Vec<&str> = ViewMode::ALL.iter().map(|m| m.label()).collect();
+        let mode_labels: Vec<String> = ViewMode::ALL.iter().map(|m| gettext(m.label())).collect();
+        let mode_refs: Vec<&str> = mode_labels.iter().map(String::as_str).collect();
         let view_drop = gtk::DropDown::builder()
-            .model(&gtk::StringList::new(&mode_labels))
-            .tooltip_text("View mode")
+            .model(&gtk::StringList::new(&mode_refs))
+            .tooltip_text(gettext("View mode"))
             .build();
         header.pack_end(&view_drop);
         header.pack_end(&icon_button(
             "edit-find-symbolic",
-            "Search (Ctrl+Shift+F)",
+            &gettext("Search (Ctrl+Shift+F)"),
             "win.search",
         ));
 
@@ -205,7 +207,7 @@ impl Win {
             paned.set_position(p);
         }
         let banner = adw::Banner::builder()
-            .button_label("Reconnect")
+            .button_label(gettext("Reconnect"))
             .revealed(false)
             .build();
         banner.set_action_name(Some("win.open-port"));
@@ -311,7 +313,7 @@ impl Win {
                 },
                 move |r| {
                     if let (Some(w), Err(e)) = (w.upgrade(), r) {
-                        w.toast(&format!("Cannot start logging: {e}"));
+                        w.toast(&gettext_f("Cannot start logging: {error}", &[("error", &e)]));
                     }
                 },
             );
@@ -361,7 +363,7 @@ impl Win {
                     let label = if exists {
                         s.port.clone()
                     } else {
-                        format!("{} (not found)", s.port)
+                        gettext_f("{port} (not found)", &[("port", &s.port)])
                     };
                     ports.insert(0, (s.port.clone(), label));
                 }
@@ -469,8 +471,11 @@ impl Win {
         self.updating.set(true);
         let open = matches!(state, PortState::Open | PortState::Opening);
         self.connect.set_active(open);
-        self.connect
-            .set_label(if open { "Disconnect" } else { "Connect" });
+        self.connect.set_label(&if open {
+            gettext("Disconnect")
+        } else {
+            gettext("Connect")
+        });
         if open {
             self.connect.remove_css_class("suggested-action");
         } else {
@@ -479,7 +484,8 @@ impl Win {
         self.updating.set(false);
         match state {
             PortState::Error(e) => {
-                self.banner.set_title(&format!("Connection error: {e}"));
+                self.banner
+                    .set_title(&gettext_f("Connection error: {error}", &[("error", e)]));
                 self.banner.set_revealed(true);
             }
             _ => self.banner.set_revealed(false),
@@ -604,8 +610,11 @@ impl Win {
                 self.status.update(&self.session.status());
                 match state {
                     PortState::Open => {
-                        self.term
-                            .notice(&format!("connected: {}", self.session.status().description));
+                        let description = self.session.status().description;
+                        self.term.notice(&gettext_f(
+                            "connected: {description}",
+                            &[("description", &description)],
+                        ));
                         if let Some(path) = self.pending_script.borrow_mut().take() {
                             let sw = self.script_window();
                             match sw.load(&path) {
@@ -617,8 +626,8 @@ impl Win {
                             }
                         }
                     }
-                    PortState::Closed => self.term.notice("disconnected"),
-                    PortState::Error(e) => self.term.notice(&format!("error: {e}")),
+                    PortState::Closed => self.term.notice(&gettext("disconnected")),
+                    PortState::Error(e) => self.term.notice(&gettext_f("error: {error}", &[("error", e)])),
                     PortState::Opening => {}
                 }
             }
@@ -717,7 +726,7 @@ impl Win {
         }
         let edit = gtk::Button::builder()
             .icon_name("document-edit-symbolic")
-            .tooltip_text("Edit macros")
+            .tooltip_text(gettext("Edit macros"))
             .action_name("win.edit-macros")
             .build();
         edit.add_css_class("flat");
@@ -732,13 +741,16 @@ impl Win {
             move |r| {
                 let Some(w) = w.upgrade() else { return };
                 match r {
-                    Ok((name, report)) => w.toast(&format!(
-                        "Macro {name} finished ({} steps, {} ms)",
-                        report.steps.len(),
-                        report.duration_ms
+                    Ok((name, report)) => w.toast(&gettext_f(
+                        "Macro {name} finished ({steps} steps, {ms} ms)",
+                        &[
+                            ("name", &name),
+                            ("steps", &report.steps.len()),
+                            ("ms", &report.duration_ms),
+                        ],
                     )),
-                    Err(gtkterm_core::macros::MacroError::Cancelled) => w.toast("Macro stopped"),
-                    Err(e) => w.toast(&format!("Macro: {e}")),
+                    Err(gtkterm_core::macros::MacroError::Cancelled) => w.toast(&gettext("Macro stopped")),
+                    Err(e) => w.toast(&gettext_f("Macro: {error}", &[("error", &e)])),
                 }
             },
         );
@@ -760,9 +772,9 @@ impl Win {
             if let Some(rec) = self.recorder.borrow_mut().take() {
                 let commands = rec.finish();
                 if commands.is_empty() {
-                    self.toast("Nothing was recorded");
+                    self.toast(&gettext("Nothing was recorded"));
                 } else {
-                    let name = self.manager.with_macros(|s| s.fresh_name("Recorded"));
+                    let name = self.manager.with_macros(|s| s.fresh_name(&gettext("Recorded")));
                     let m = gtkterm_core::macros::Macro {
                         name: name.clone(),
                         shortcut: None,
@@ -833,7 +845,7 @@ impl Win {
                     gtkterm_core::manager::ManagerEvent::ScriptStarted { session, ref name }
                         if session == me =>
                     {
-                        *w.running_macro.borrow_mut() = Some(format!("script {name}"));
+                        *w.running_macro.borrow_mut() = Some(gettext_f("script {name}", &[("name", name)]));
                         w.status
                             .set_activity(w.recorder.borrow().is_some(), w.running_macro.borrow().as_deref());
                     }
@@ -853,7 +865,7 @@ impl Win {
 
     fn import_presets(self: &Rc<Self>) {
         let dialog = gtk::FileDialog::builder()
-            .title("Import presets (GTKTerm JSON)")
+            .title(gettext("Import presets (GTKTerm JSON)"))
             .modal(true)
             .build();
         let w = Rc::downgrade(self);
@@ -870,11 +882,16 @@ impl Win {
                     let n = list.len();
                     w.manager.with_config_mut(|c| c.presets.extend(list));
                     match w.manager.save_config() {
-                        Ok(()) => w.toast(&format!("Imported {n} preset(s)")),
+                        Ok(()) => w.toast(&ngettext_f(
+                            "Imported {n} preset",
+                            "Imported {n} presets",
+                            u32::try_from(n).unwrap_or(u32::MAX),
+                            &[],
+                        )),
                         Err(e) => w.toast(&e.to_string()),
                     }
                 }
-                Err(e) => w.toast(&format!("Cannot import presets: {e}")),
+                Err(e) => w.toast(&gettext_f("Cannot import presets: {error}", &[("error", &e)])),
             }
         });
     }
@@ -956,7 +973,7 @@ impl Win {
             {
                 let current = *w.profile_name.borrow() == name;
                 let label = if current {
-                    format!("{name}  (current)")
+                    gettext_f("{name}  (current)", &[("name", &name)])
                 } else {
                     name.clone()
                 };
@@ -964,11 +981,14 @@ impl Win {
                 item.set_action_and_target_value(Some("win.load-profile"), Some(&name.to_variant()));
                 load.append_item(&item);
             }
-            menu.append_section(Some("Load profile"), &load);
+            menu.append_section(Some(&gettext("Load profile")), &load);
             let ops = gio::Menu::new();
-            ops.append(Some("Save current settings"), Some("win.save-profile"));
-            ops.append(Some("Save as new profile…"), Some("win.save-profile-as"));
-            ops.append(Some("Delete this profile…"), Some("win.delete-profile"));
+            ops.append(Some(&gettext("Save current settings")), Some("win.save-profile"));
+            ops.append(
+                Some(&gettext("Save as new profile…")),
+                Some("win.save-profile-as"),
+            );
+            ops.append(Some(&gettext("Delete this profile…")), Some("win.delete-profile"));
             menu.append_section(None, &ops);
             button.set_menu_model(Some(&menu));
         });
@@ -1015,7 +1035,7 @@ impl Win {
                     async move { s.send_default_break().await.map_err(|e| e.to_string()) },
                     move |r| {
                         if let Some(w) = ww.upgrade() {
-                            w.toast(&r.map_or_else(|e| e, |()| "Break sent".into()));
+                            w.toast(&r.map_or_else(|e| e, |()| gettext("Break sent")));
                         }
                     },
                 );
@@ -1037,7 +1057,7 @@ impl Win {
                     async move { s.flush().await.map_err(|e| e.to_string()) },
                     move |r| {
                         if let Some(w) = ww.upgrade() {
-                            w.toast(&r.map_or_else(|e| e, |()| "Buffers flushed".into()));
+                            w.toast(&r.map_or_else(|e| e, |()| gettext("Buffers flushed")));
                         }
                     },
                 );
@@ -1089,12 +1109,11 @@ impl Win {
                 }),
             );
         }
-        self.term.term.set_font_scale(self.state.borrow().font_scale.clamp(0.25, 4.0));
-        let action = gio::SimpleAction::new_stateful(
-            "fullscreen",
-            None,
-            &self.window.is_fullscreen().to_variant(),
-        );
+        self.term
+            .term
+            .set_font_scale(self.state.borrow().font_scale.clamp(0.25, 4.0));
+        let action =
+            gio::SimpleAction::new_stateful("fullscreen", None, &self.window.is_fullscreen().to_variant());
         let w = self.window.downgrade();
         action.connect_activate(move |_, _| {
             if let Some(w) = w.upgrade() {
@@ -1254,7 +1273,7 @@ impl Win {
             "stop-macro",
             Box::new(|w| {
                 if !w.manager.stop_macro(w.session.id()) {
-                    w.toast("No macro is running");
+                    w.toast(&gettext("No macro is running"));
                 }
             }),
         );
@@ -1328,7 +1347,10 @@ impl Win {
                 let Some(w) = w.upgrade() else { return };
                 match r {
                     Ok(Some(st)) if w.session.status().log.is_none() => {
-                        w.toast(&format!("Log saved: {} ({} bytes)", st.path.display(), st.bytes));
+                        w.toast(&gettext_f(
+                            "Log saved: {path} ({bytes} bytes)",
+                            &[("path", &st.path.display()), ("bytes", &st.bytes)],
+                        ));
                     }
                     Ok(_) => {}
                     Err(e) => w.toast(&e),
@@ -1350,7 +1372,7 @@ impl Win {
             filters.append(&filter);
         }
         let dialog = gtk::FileDialog::builder()
-            .title("Log to file — format follows the extension")
+            .title(gettext("Log to file — format follows the extension"))
             .initial_name(name)
             .filters(&filters)
             .modal(true)
@@ -1376,7 +1398,7 @@ impl Win {
 
     fn send_hex(self: &Rc<Self>) {
         let entry = gtk::Entry::builder()
-            .placeholder_text("DE AD BE EF, 0x01 0x02 or \\x41\\x42")
+            .placeholder_text(gettext("DE AD BE EF, 0x01 0x02 or \\x41\\x42"))
             .activates_default(true)
             .build();
         let history = gtk::FlowBox::builder()
@@ -1395,12 +1417,15 @@ impl Win {
         body.append(&entry);
         body.append(&history);
         let dialog = adw::AlertDialog::builder()
-            .heading("Send hex data")
+            .heading(gettext("Send hex data"))
             .extra_child(&body)
             .default_response("send")
             .close_response("cancel")
             .build();
-        dialog.add_responses(&[("cancel", "Cancel"), ("send", "Send")]);
+        dialog.add_responses(&[
+            ("cancel", gettext("Cancel").as_str()),
+            ("send", gettext("Send").as_str()),
+        ]);
         dialog.set_response_appearance("send", adw::ResponseAppearance::Suggested);
         let w = Rc::downgrade(self);
         let input = entry.clone();
@@ -1421,13 +1446,15 @@ impl Win {
                         async move { s.send(bytes).await.map_err(|e| e.to_string()) },
                         move |r| {
                             if let Some(w) = ww.upgrade() {
-                                w.toast(&r.map_or_else(|e| e, |()| format!("Sent {n} bytes")));
+                                w.toast(
+                                    &r.map_or_else(|e| e, |()| gettext_f("Sent {n} bytes", &[("n", &n)])),
+                                );
                             }
                         },
                     );
                 }
                 Ok(_) => {}
-                Err(e) => w.toast(&format!("Invalid hex: {e}")),
+                Err(e) => w.toast(&gettext_f("Invalid hex: {error}", &[("error", &e)])),
             }
         });
         dialog.present(Some(&self.window));
@@ -1448,7 +1475,11 @@ impl Win {
         use super::transfer::Choice;
         let multiple = matches!(choice, Choice::Protocol(p, _) if p.batch());
         let dialog = gtk::FileDialog::builder()
-            .title(if multiple { "Send files" } else { "Send file" })
+            .title(if multiple {
+                gettext("Send files")
+            } else {
+                gettext("Send file")
+            })
             .modal(true)
             .build();
         let w = Rc::downgrade(self);
@@ -1496,7 +1527,10 @@ impl Win {
                     .map_err(|e| format!("{}: {e}", path.display()))?;
                 let n = data.len();
                 s.send(data).await.map_err(|e| e.to_string())?;
-                Ok::<_, String>(format!("Sent {} ({n} bytes)", path.display()))
+                Ok::<_, String>(gettext_f(
+                    "Sent {path} ({n} bytes)",
+                    &[("path", &path.display()), ("n", &n)],
+                ))
             },
             move |r| {
                 if let Some(w) = ww.upgrade() {
@@ -1514,7 +1548,7 @@ impl Win {
                 return;
             };
             let dialog = gtk::FileDialog::builder()
-                .title("Save received files in")
+                .title(gettext("Save received files in"))
                 .modal(true)
                 .build();
             let initial = w
@@ -1586,10 +1620,12 @@ impl Win {
 
     fn auto_baud(self: &Rc<Self>) {
         if !matches!(self.session.connection(), Some(Connection::Serial(_))) || !self.is_open() {
-            self.toast("Open a serial port first; the device must be sending text");
+            self.toast(&gettext(
+                "Open a serial port first; the device must be sending text",
+            ));
             return;
         }
-        self.toast("Detecting the baud rate…");
+        self.toast(&gettext("Detecting the baud rate…"));
         let s = self.session.clone();
         let ww = Rc::downgrade(self);
         spawn(
@@ -1612,11 +1648,11 @@ impl Win {
                             }
                             w.refresh_header();
                             w.status.update(&w.session.status());
-                            w.toast(&format!("Detected {b} baud"));
+                            w.toast(&gettext_f("Detected {baud} baud", &[("baud", &b)]));
                         }
-                        None => w.toast("No rate gave readable text; the original rate is kept"),
+                        None => w.toast(&gettext("No rate gave readable text; the original rate is kept")),
                     },
-                    Err(e) => w.toast(&format!("Auto-baud failed: {e}")),
+                    Err(e) => w.toast(&gettext_f("Auto-baud failed: {error}", &[("error", &e)])),
                 }
             },
         );
@@ -1627,7 +1663,7 @@ impl Win {
         let ww = Rc::downgrade(self);
         spawn(async move { s.start_transfer(req).await }, move |r| {
             if let (Some(w), Err(e)) = (ww.upgrade(), r) {
-                w.toast(&format!("Cannot start the transfer: {e}"));
+                w.toast(&gettext_f("Cannot start the transfer: {error}", &[("error", &e)]));
             }
         });
     }
@@ -1643,7 +1679,7 @@ impl Win {
             && st.state == TransferState::Finished
             && let Some(f) = st.files.first()
         {
-            toast.set_button_label(Some("Show"));
+            toast.set_button_label(Some(&gettext("Show")));
             let (file, window) = (gio::File::for_path(&f.path), self.window.downgrade());
             toast.connect_button_clicked(move |_| {
                 let window = window.upgrade();
@@ -1660,7 +1696,7 @@ impl Win {
     fn save_raw(self: &Rc<Self>) {
         let data = self.session.read_rx(0, usize::MAX).data;
         if data.is_empty() {
-            self.toast("Nothing received yet");
+            self.toast(&gettext("Nothing received yet"));
             return;
         }
         save_dialog(&self.window, "received.bin", data, self.toast.clone());
@@ -1689,7 +1725,7 @@ impl Win {
             w.manager
                 .with_config_mut(|c| c.presets.insert(name.clone(), preset));
             match w.manager.save_config() {
-                Ok(()) => w.toast(&format!("Preset {name} saved")),
+                Ok(()) => w.toast(&gettext_f("Preset {name} saved", &[("name", &name)])),
                 Err(e) => w.toast(&e.to_string()),
             }
         };
@@ -1713,7 +1749,7 @@ impl Win {
 
     fn apply_settings(self: &Rc<Self>, p: Profile, m: McpSettings) {
         if let Err(e) = p.validate() {
-            self.toast(&format!("Settings not applied: {e}"));
+            self.toast(&gettext_f("Settings not applied: {error}", &[("error", &e)]));
             return;
         }
         let reconnect = self.is_open() && p.connection != self.profile.borrow().connection;
@@ -1752,14 +1788,14 @@ impl Win {
             .with_config_mut(|c| c.profile_mut(name).map(|slot| *slot = p))
             .and_then(|()| self.manager.save_config());
         match result {
-            Ok(()) => self.toast(&format!("Profile [{name}] saved")),
-            Err(e) => self.toast(&format!("Cannot save profile: {e}")),
+            Ok(()) => self.toast(&gettext_f("Profile [{name}] saved", &[("name", &name)])),
+            Err(e) => self.toast(&gettext_f("Cannot save profile: {error}", &[("error", &e)])),
         }
     }
 
     fn load_profile(self: &Rc<Self>, name: &str) {
         let Ok(p) = self.manager.with_config(|c| c.profile(name).cloned()) else {
-            self.toast(&format!("No profile [{name}]"));
+            self.toast(&gettext_f("No profile [{name}]", &[("name", &name)]));
             return;
         };
         name.clone_into(&mut self.profile_name.borrow_mut());
@@ -1775,21 +1811,24 @@ impl Win {
         if reconnect {
             self.open_port();
         }
-        self.toast(&format!("Profile [{name}] loaded"));
+        self.toast(&gettext_f("Profile [{name}] loaded", &[("name", &name)]));
     }
 
     fn save_profile_as(self: &Rc<Self>) {
         let entry = gtk::Entry::builder()
-            .placeholder_text("Profile name")
+            .placeholder_text(gettext("Profile name"))
             .activates_default(true)
             .build();
         let dialog = adw::AlertDialog::builder()
-            .heading("Save profile as")
+            .heading(gettext("Save profile as"))
             .extra_child(&entry)
             .default_response("save")
             .close_response("cancel")
             .build();
-        dialog.add_responses(&[("cancel", "Cancel"), ("save", "Save")]);
+        dialog.add_responses(&[
+            ("cancel", gettext("Cancel").as_str()),
+            ("save", gettext("Save").as_str()),
+        ]);
         dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);
         let w = Rc::downgrade(self);
         dialog.connect_response(None, move |_, resp| {
@@ -1812,15 +1851,18 @@ impl Win {
     fn delete_profile(self: &Rc<Self>) {
         let name = self.profile_name.borrow().clone();
         let dialog = adw::AlertDialog::builder()
-            .heading(format!("Delete profile [{name}]?"))
+            .heading(gettext_f("Delete profile [{name}]?", &[("name", &name)]))
             .body(if name == gtkterm_core::config::DEFAULT_PROFILE {
-                "The default profile is reset to default settings."
+                gettext("The default profile is reset to default settings.")
             } else {
-                "The profile is removed from the configuration file."
+                gettext("The profile is removed from the configuration file.")
             })
             .close_response("cancel")
             .build();
-        dialog.add_responses(&[("cancel", "Cancel"), ("delete", "Delete")]);
+        dialog.add_responses(&[
+            ("cancel", gettext("Cancel").as_str()),
+            ("delete", gettext("Delete").as_str()),
+        ]);
         dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
         let w = Rc::downgrade(self);
         dialog.connect_response(None, move |_, resp| {
@@ -1884,8 +1926,8 @@ impl Win {
                             "claude mcp add --transport http gtkterm {url} --header \"Authorization: Bearer {token}\""
                         );
                         let toast = adw::Toast::builder()
-                            .title(format!("MCP server on {url}"))
-                            .button_label("Copy setup command")
+                            .title(gettext_f("MCP server on {url}", &[("url", &url)]))
+                            .button_label(gettext("Copy setup command"))
                             .timeout(8)
                             .build();
                         let win = w.window.clone();
@@ -1893,7 +1935,10 @@ impl Win {
                         w.toast.add_toast(toast);
                     }
                     Err(e) => {
-                        w.toast(&format!("MCP server could not start: {e}"));
+                        w.toast(&gettext_f(
+                            "MCP server could not start: {error}",
+                            &[("error", &e)],
+                        ));
                         if let Some(a) = w.window.lookup_action("mcp") {
                             a.change_state(&false.to_variant());
                         }
@@ -1975,88 +2020,94 @@ fn ellipsizing_factory(max_chars: i32) -> gtk::SignalListItemFactory {
 fn main_menu() -> gio::Menu {
     let menu = gio::Menu::new();
     let s = gio::Menu::new();
-    s.append(Some("Preferences"), Some("win.preferences"));
+    s.append(Some(&gettext("Preferences")), Some("win.preferences"));
     menu.append_section(None, &s);
 
     let data = gio::Menu::new();
-    data.append(Some("Send Hex Data…"), Some("win.send-hex"));
-    data.append(Some("Send File…"), Some("win.send-file"));
-    data.append(Some("Receive File…"), Some("win.receive-file"));
-    data.append(Some("Cancel File Transfer"), Some("win.cancel-transfer"));
-    data.append(Some("Save Received Data…"), Some("win.save-raw"));
+    data.append(Some(&gettext("Send Hex Data…")), Some("win.send-hex"));
+    data.append(Some(&gettext("Send File…")), Some("win.send-file"));
+    data.append(Some(&gettext("Receive File…")), Some("win.receive-file"));
+    data.append(
+        Some(&gettext("Cancel File Transfer")),
+        Some("win.cancel-transfer"),
+    );
+    data.append(Some(&gettext("Save Received Data…")), Some("win.save-raw"));
     let log = gio::Menu::new();
-    log.append(Some("Start Logging…"), Some("win.log-start"));
-    log.append(Some("Pause / Resume"), Some("win.log-pause"));
-    log.append(Some("Clear Log File"), Some("win.log-clear"));
-    log.append(Some("Stop Logging"), Some("win.log-stop"));
-    data.append_submenu(Some("Logging"), &log);
+    log.append(Some(&gettext("Start Logging…")), Some("win.log-start"));
+    log.append(Some(&gettext("Pause / Resume")), Some("win.log-pause"));
+    log.append(Some(&gettext("Clear Log File")), Some("win.log-clear"));
+    log.append(Some(&gettext("Stop Logging")), Some("win.log-stop"));
+    data.append_submenu(Some(&gettext("Logging")), &log);
     menu.append_section(None, &data);
 
     let control = gio::Menu::new();
-    control.append(Some("Send Break"), Some("win.send-break"));
-    control.append(Some("Flush Buffers"), Some("win.flush"));
-    control.append(Some("Detect Baud Rate"), Some("win.auto-baud"));
-    control.append(Some("Toggle DTR"), Some("win.dtr"));
-    control.append(Some("Toggle RTS"), Some("win.rts"));
+    control.append(Some(&gettext("Send Break")), Some("win.send-break"));
+    control.append(Some(&gettext("Flush Buffers")), Some("win.flush"));
+    control.append(Some(&gettext("Detect Baud Rate")), Some("win.auto-baud"));
+    control.append(Some(&gettext("Toggle DTR")), Some("win.dtr"));
+    control.append(Some(&gettext("Toggle RTS")), Some("win.rts"));
     menu.append_section(None, &control);
 
     let view = gio::Menu::new();
-    view.append(Some("Local Echo"), Some("win.echo"));
-    view.append(Some("Auto CR (LF → CR LF)"), Some("win.auto-cr"));
-    view.append(Some("Auto LF (CR → CR LF)"), Some("win.auto-lf"));
-    view.append(Some("Timestamps"), Some("win.timestamps"));
-    view.append(Some("Show Byte Index"), Some("win.show-index"));
+    view.append(Some(&gettext("Local Echo")), Some("win.echo"));
+    view.append(Some(&gettext("Auto CR (LF → CR LF)")), Some("win.auto-cr"));
+    view.append(Some(&gettext("Auto LF (CR → CR LF)")), Some("win.auto-lf"));
+    view.append(Some(&gettext("Timestamps")), Some("win.timestamps"));
+    view.append(Some(&gettext("Show Byte Index")), Some("win.show-index"));
     let modes = gio::Menu::new();
     for m in ViewMode::ALL {
-        let item = gio::MenuItem::new(Some(m.label()), None);
+        let item = gio::MenuItem::new(Some(&gettext(m.label())), None);
         item.set_action_and_target_value(
             Some("win.view-mode"),
             Some(&format!("{m:?}").to_lowercase().to_variant()),
         );
         modes.append_item(&item);
     }
-    view.append_submenu(Some("View Mode"), &modes);
+    view.append_submenu(Some(&gettext("View Mode")), &modes);
     let widths = gio::Menu::new();
     for n in HEX_WIDTHS {
-        let item = gio::MenuItem::new(Some(&format!("{n} bytes")), None);
+        let item = gio::MenuItem::new(Some(&gettext_f("{n} bytes", &[("n", &n)])), None);
         item.set_action_and_target_value(Some("win.hex-width"), Some(&(n as i32).to_variant()));
         widths.append_item(&item);
     }
-    view.append_submenu(Some("Hex Width"), &widths);
+    view.append_submenu(Some(&gettext("Hex Width")), &widths);
     let zoom = gio::Menu::new();
-    zoom.append(Some("Zoom In"), Some("win.zoom-in"));
-    zoom.append(Some("Zoom Out"), Some("win.zoom-out"));
-    zoom.append(Some("Normal Size"), Some("win.zoom-reset"));
-    zoom.append(Some("Fullscreen"), Some("win.fullscreen"));
-    view.append_submenu(Some("Zoom"), &zoom);
-    view.append(Some("Clear Screen"), Some("win.clear-screen"));
-    view.append(Some("Remove All Charts"), Some("win.clear-charts"));
+    zoom.append(Some(&gettext("Zoom In")), Some("win.zoom-in"));
+    zoom.append(Some(&gettext("Zoom Out")), Some("win.zoom-out"));
+    zoom.append(Some(&gettext("Normal Size")), Some("win.zoom-reset"));
+    zoom.append(Some(&gettext("Fullscreen")), Some("win.fullscreen"));
+    view.append_submenu(Some(&gettext("Zoom")), &zoom);
+    view.append(Some(&gettext("Clear Screen")), Some("win.clear-screen"));
+    view.append(Some(&gettext("Remove All Charts")), Some("win.clear-charts"));
     menu.append_section(None, &view);
 
     let decode = gio::Menu::new();
-    decode.append(Some("Decoded Frames"), Some("win.frames"));
+    decode.append(Some(&gettext("Decoded Frames")), Some("win.frames"));
     let decoders = gio::Menu::new();
     for m in DecoderMode::all() {
-        let item = gio::MenuItem::new(Some(m.label()), None);
+        let item = gio::MenuItem::new(Some(&gettext(m.label())), None);
         item.set_action_and_target_value(Some("win.decoder"), Some(&m.to_string().to_variant()));
         decoders.append_item(&item);
     }
-    decode.append_submenu(Some("Decoder"), &decoders);
-    decode.append(Some("Record Modem Line Changes"), Some("win.decoder-signals"));
-    decode.append(Some("Clear Frames"), Some("win.clear-frames"));
+    decode.append_submenu(Some(&gettext("Decoder")), &decoders);
+    decode.append(
+        Some(&gettext("Record Modem Line Changes")),
+        Some("win.decoder-signals"),
+    );
+    decode.append(Some(&gettext("Clear Frames")), Some("win.clear-frames"));
     menu.append_section(None, &decode);
 
     let auto = gio::Menu::new();
-    auto.append(Some("Scripts…"), Some("win.scripts"));
-    auto.append(Some("Signal Monitor"), Some("win.signal-monitor"));
+    auto.append(Some(&gettext("Scripts…")), Some("win.scripts"));
+    auto.append(Some(&gettext("Signal Monitor")), Some("win.signal-monitor"));
     menu.append_section(None, &auto);
 
     let app = gio::Menu::new();
-    app.append(Some("Import Presets…"), Some("win.import-presets"));
-    app.append(Some("MCP Server for AI Agents"), Some("win.mcp"));
-    app.append(Some("Keyboard Shortcuts"), Some("win.shortcuts"));
-    app.append(Some("About GTKTerm Sunshine"), Some("win.about"));
-    app.append(Some("Quit"), Some("app.quit"));
+    app.append(Some(&gettext("Import Presets…")), Some("win.import-presets"));
+    app.append(Some(&gettext("MCP Server for AI Agents")), Some("win.mcp"));
+    app.append(Some(&gettext("Keyboard Shortcuts")), Some("win.shortcuts"));
+    app.append(Some(&gettext("About GTKTerm Sunshine")), Some("win.about"));
+    app.append(Some(&gettext("Quit")), Some("app.quit"));
     menu.append_section(None, &app);
     menu
 }
@@ -2076,12 +2127,12 @@ fn macro_menu() -> gio::Menu {
             list.append_item(&item);
         }
     });
-    menu.append_section(Some("Play"), &list);
+    menu.append_section(Some(&gettext("Play")), &list);
     let ops = gio::Menu::new();
-    ops.append(Some("Record"), Some("win.record-macro"));
-    ops.append(Some("Stop Running Macro"), Some("win.stop-macro"));
-    ops.append(Some("Edit Macros…"), Some("win.edit-macros"));
-    ops.append(Some("Show Macro Bar"), Some("win.macro-bar"));
+    ops.append(Some(&gettext("Record")), Some("win.record-macro"));
+    ops.append(Some(&gettext("Stop Running Macro")), Some("win.stop-macro"));
+    ops.append(Some(&gettext("Edit Macros…")), Some("win.edit-macros"));
+    ops.append(Some(&gettext("Show Macro Bar")), Some("win.macro-bar"));
     menu.append_section(None, &ops);
     menu
 }
@@ -2098,14 +2149,16 @@ fn shortcuts_dialog() -> adw::ShortcutsDialog {
             .iter()
             .position(|(s, _)| s == section)
             .unwrap_or_else(|| {
-                sections.push((section, adw::ShortcutsSection::new(Some(section))));
+                sections.push((section, adw::ShortcutsSection::new(Some(&gettext(*section)))));
                 sections.len() - 1
             });
-        sections[pos].1.add(adw::ShortcutsItem::new(title, accel));
+        sections[pos]
+            .1
+            .add(adw::ShortcutsItem::new(&gettext(*title), accel));
     }
-    let typing = adw::ShortcutsSection::new(Some("Device"));
+    let typing = adw::ShortcutsSection::new(Some(&gettext("Device")));
     typing.add(adw::ShortcutsItem::new(
-        "Control characters (Ctrl+C, Ctrl+A, …) go to the device",
+        &gettext("Control characters (Ctrl+C, Ctrl+A, …) go to the device"),
         "<Control>c",
     ));
     sections.push(("Device", typing));
@@ -2150,9 +2203,11 @@ fn about_dialog() -> adw::AboutDialog {
         .version(env!("CARGO_PKG_VERSION"))
         .developer_name("Philipp")
         .license_type(gtk::License::Gpl30)
-        .comments("Serial, TCP and UDP terminal with live Sunshine data plots and an MCP server for AI agents.\nRust rewrite of the GTKTerm fork.")
+        .comments(gettext(
+            "Serial, TCP and UDP terminal with live Sunshine data plots and an MCP server for AI agents.\nRust rewrite of the GTKTerm fork.",
+        ))
         .website("http://192.168.1.100:8460/philipp/gtkterm-sin-of-pride-version")
-        .copyright("© 2025-2026 Philipp; GTKTerm © Julien Schmitt and contributors")
+        .copyright(gettext("© 2025-2026 Philipp; GTKTerm © Julien Schmitt and contributors"))
         .build()
 }
 
@@ -2588,7 +2643,10 @@ mod tests {
         // SIGUSR2 closes the port (C GTKTerm compatibility).
         win.watch_unix_signals();
         nix::sys::signal::raise(nix::sys::signal::Signal::SIGUSR2).unwrap();
-        assert!(pump_until(Duration::from_secs(5), || !win.is_open()), "SIGUSR2 closes");
+        assert!(
+            pump_until(Duration::from_secs(5), || !win.is_open()),
+            "SIGUSR2 closes"
+        );
 
         win.window.close();
         pump_until(Duration::from_millis(200), || false);

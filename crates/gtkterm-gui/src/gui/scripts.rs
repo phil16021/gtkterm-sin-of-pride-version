@@ -13,6 +13,7 @@ use gtkterm_core::script::{Script, ScriptError, ScriptOptions};
 use gtkterm_core::session::Session;
 use sourceview::prelude::*;
 
+use super::i18n::{gettext, gettext_f};
 use super::rt::spawn;
 
 const TEMPLATE: &str = "# GTKTerm script — see the help button for all commands\n\
@@ -118,30 +119,33 @@ impl ScriptWindow {
             .margin_end(8)
             .margin_top(4)
             .margin_bottom(4)
-            .label("Ready")
+            .label(gettext("Ready"))
             .build();
 
         let header = adw::HeaderBar::new();
-        let title = adw::WindowTitle::new("Script", "unsaved");
+        let title = adw::WindowTitle::new(&gettext("Script"), &gettext("unsaved"));
         header.set_title_widget(Some(&title));
         let open = gtk::Button::builder()
             .icon_name("document-open-symbolic")
-            .tooltip_text("Open script…")
+            .tooltip_text(gettext("Open script…"))
             .build();
         let save = gtk::Button::builder()
             .icon_name("document-save-symbolic")
-            .tooltip_text("Save (Ctrl+S)")
+            .tooltip_text(gettext("Save (Ctrl+S)"))
             .build();
         let save_as = gtk::Button::builder()
             .icon_name("document-save-as-symbolic")
-            .tooltip_text("Save as…")
+            .tooltip_text(gettext("Save as…"))
             .build();
         let run = gtk::Button::builder()
-            .label("Run")
-            .tooltip_text("Run on this window's port (Ctrl+Return)")
+            .label(gettext("Run"))
+            .tooltip_text(gettext("Run on this window's port (Ctrl+Return)"))
             .build();
         run.add_css_class("suggested-action");
-        let stop = gtk::Button::builder().label("Stop").sensitive(false).build();
+        let stop = gtk::Button::builder()
+            .label(gettext("Stop"))
+            .sensitive(false)
+            .build();
         stop.add_css_class("destructive-action");
         let help_text = gtk::Label::builder()
             .label(gtkterm_mcp::SCRIPT_LANGUAGE)
@@ -158,7 +162,7 @@ impl ScriptWindow {
             .build();
         let help = gtk::MenuButton::builder()
             .icon_name("help-about-symbolic")
-            .tooltip_text("Language reference")
+            .tooltip_text(gettext("Language reference"))
             .popover(&gtk::Popover::builder().child(&help_scroll).build())
             .build();
         header.pack_start(&open);
@@ -175,7 +179,7 @@ impl ScriptWindow {
         toolbar.add_top_bar(&header);
         toolbar.set_content(Some(&content));
         let window = adw::Window::builder()
-            .title("Script")
+            .title(gettext("Script"))
             .transient_for(parent)
             .default_width(760)
             .default_height(620)
@@ -286,7 +290,8 @@ impl ScriptWindow {
         let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
         self.buffer.set_text(&text);
         self.set_path(path.to_owned());
-        self.set_status(&format!("Opened {}", path.display()), false);
+        let path_name = path.display();
+        self.set_status(&gettext_f("Opened {path}", &[("path", &path_name)]), false);
         Ok(())
     }
 
@@ -314,11 +319,11 @@ impl ScriptWindow {
     fn choose_open(self: &Rc<Self>) {
         let filter = gtk::FileFilter::new();
         filter.add_pattern("*.script");
-        filter.set_name(Some("GTKTerm scripts"));
+        filter.set_name(Some(&gettext("GTKTerm scripts")));
         let filters = gio::ListStore::new::<gtk::FileFilter>();
         filters.append(&filter);
         let dialog = gtk::FileDialog::builder()
-            .title("Open script")
+            .title(gettext("Open script"))
             .filters(&filters)
             .modal(true)
             .build();
@@ -339,14 +344,18 @@ impl ScriptWindow {
     fn save(self: &Rc<Self>, choose: bool) {
         let current = self.path.borrow().clone();
         if let (false, Some(path)) = (choose, current) {
+            let shown = path.display();
             match std::fs::write(&path, self.text()) {
-                Ok(()) => self.set_status(&format!("Saved {}", path.display()), false),
-                Err(e) => self.set_status(&format!("Cannot save {}: {e}", path.display()), true),
+                Ok(()) => self.set_status(&gettext_f("Saved {path}", &[("path", &shown)]), false),
+                Err(e) => self.set_status(
+                    &gettext_f("Cannot save {path}: {error}", &[("path", &shown), ("error", &e)]),
+                    true,
+                ),
             }
             return;
         }
         let dialog = gtk::FileDialog::builder()
-            .title("Save script")
+            .title(gettext("Save script"))
             .initial_name("untitled.script")
             .modal(true)
             .build();
@@ -418,7 +427,7 @@ impl ScriptWindow {
         };
         self.log.set_text("");
         self.set_running(true);
-        self.set_status(&format!("Running {name}…"), false);
+        self.set_status(&gettext_f("Running {name}…", &[("name", &name)]), false);
         let (m, s) = (Arc::clone(&self.manager), self.session.clone());
         let w = Rc::downgrade(self);
         spawn(async move { m.run_script(&s, &script, &opts).await }, move |r| {
@@ -427,20 +436,25 @@ impl ScriptWindow {
             let b = &w.buffer;
             b.remove_tag(&w.running_tag, &b.start_iter(), &b.end_iter());
             match r {
-                Ok(report) => w.set_status(
-                    &format!(
-                        "Finished: {} steps in {:.1} s",
-                        report.steps,
-                        report.duration_ms as f64 / 1000.0
-                    ),
-                    false,
-                ),
+                Ok(report) => {
+                    let seconds = format!("{:.1}", report.duration_ms as f64 / 1000.0);
+                    w.set_status(
+                        &gettext_f(
+                            "Finished: {steps} steps in {seconds} s",
+                            &[("steps", &report.steps), ("seconds", &seconds)],
+                        ),
+                        false,
+                    );
+                }
                 Err(ScriptError::Failed { at, message, .. }) => {
                     if at.file == w.name() {
                         w.mark_line(&w.error_tag, at.line);
                     }
                     w.append_log(&format!("✗ {at}: {message}"));
-                    w.set_status(&format!("Failed at {at}: {message}"), true);
+                    w.set_status(
+                        &gettext_f("Failed at {at}: {message}", &[("at", &at), ("message", &message)]),
+                        true,
+                    );
                 }
                 Err(e) => w.set_status(&e.to_string(), !matches!(e, ScriptError::Cancelled)),
             }

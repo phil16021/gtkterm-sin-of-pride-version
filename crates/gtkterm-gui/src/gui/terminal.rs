@@ -11,6 +11,8 @@ use gtkterm_protocols::transform::{Transform, TransformOptions};
 use gtkterm_protocols::view::{ViewFormatter, ViewMode, ViewSettings};
 use vte::prelude::*;
 
+use super::i18n::gettext;
+
 /// PCRE2 compile flags used by VTE searches.
 const PCRE2_CASELESS: u32 = 0x0000_0008;
 const PCRE2_MULTILINE: u32 = 0x0000_0400;
@@ -68,16 +70,16 @@ impl TerminalView {
         row.append(&scrollbar);
 
         let search_entry = gtk::SearchEntry::builder()
-            .placeholder_text("Search text, regex or hex bytes")
+            .placeholder_text(gettext("Search text, regex or hex bytes"))
             .hexpand(true)
             .build();
-        let search_case = gtk::CheckButton::with_label("Case");
-        let search_regex = gtk::CheckButton::with_label("Regex");
-        let search_hex = gtk::CheckButton::with_label("Hex");
+        let search_case = gtk::CheckButton::with_label(&gettext("Case"));
+        let search_regex = gtk::CheckButton::with_label(&gettext("Regex"));
+        let search_hex = gtk::CheckButton::with_label(&gettext("Hex"));
         let prev = gtk::Button::from_icon_name("go-up-symbolic");
-        prev.set_tooltip_text(Some("Previous match"));
+        prev.set_tooltip_text(Some(&gettext("Previous match")));
         let next = gtk::Button::from_icon_name("go-down-symbolic");
-        next.set_tooltip_text(Some("Next match (Enter)"));
+        next.set_tooltip_text(Some(&gettext("Next match (Enter)")));
         search_entry.set_width_chars(8);
         let options = gtk::Box::new(gtk::Orientation::Vertical, 4);
         for w in [&search_case, &search_regex, &search_hex] {
@@ -85,7 +87,7 @@ impl TerminalView {
         }
         let options_button = gtk::MenuButton::builder()
             .icon_name("view-more-symbolic")
-            .tooltip_text("Search options")
+            .tooltip_text(gettext("Search options"))
             .popover(&gtk::Popover::builder().child(&options).build())
             .build();
         let search_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
@@ -168,12 +170,12 @@ impl TerminalView {
 
     fn install_context_menu(&self) {
         let menu = gio::Menu::new();
-        menu.append(Some("Copy"), Some("win.copy"));
-        menu.append(Some("Paste"), Some("win.paste"));
-        menu.append(Some("Select All"), Some("win.select-all"));
+        menu.append(Some(&gettext("Copy")), Some("win.copy"));
+        menu.append(Some(&gettext("Paste")), Some("win.paste"));
+        menu.append(Some(&gettext("Select All")), Some("win.select-all"));
         let section = gio::Menu::new();
-        section.append(Some("Clear Screen"), Some("win.clear-screen"));
-        section.append(Some("Search…"), Some("win.search"));
+        section.append(Some(&gettext("Clear Screen")), Some("win.clear-screen"));
+        section.append(Some(&gettext("Search…")), Some("win.search"));
         menu.append_section(None, &section);
         let popover = gtk::PopoverMenu::from_model(Some(&menu));
         popover.set_parent(&self.term);

@@ -6,6 +6,8 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtkterm_core::transfer::TransferProtocol;
 
+use super::i18n::gettext;
+
 /// What the user picked in the protocol dialog.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Choice {
@@ -28,7 +30,7 @@ pub fn choose(
         .collect();
     let mut labels: Vec<String> = Vec::new();
     if sending {
-        labels.push("Raw (send the bytes as they are)".into());
+        labels.push(gettext("Raw (send the bytes as they are)"));
     }
     labels.extend(available.iter().map(|p| p.label().to_owned()));
     let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
@@ -42,7 +44,7 @@ pub fn choose(
         drop.set_selected(offset + u32::try_from(i).unwrap_or(0));
     }
     let name = gtk::Entry::builder()
-        .placeholder_text("File name (XMODEM carries none)")
+        .placeholder_text(gettext("File name (XMODEM carries none)"))
         .build();
     let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
     content.append(&drop);
@@ -53,9 +55,9 @@ pub fn choose(
         .wrap(true)
         .xalign(0.0)
         .label(if TransferProtocol::Zmodem.available() {
-            ""
+            String::new()
         } else {
-            "ZMODEM needs the lrzsz package (sz/rz)."
+            gettext("ZMODEM needs the lrzsz package (sz/rz).")
         })
         .build();
     note.add_css_class("dim-label");
@@ -76,25 +78,24 @@ pub fn choose(
     drop.connect_selected_notify(update);
 
     let dialog = adw::AlertDialog::builder()
-        .heading(if sending { "Send File" } else { "Receive File" })
-        .body(if sending {
-            "Start the receiver on the device first (e.g. rx, rb, rz, or the bootloader's upload prompt)."
+        .heading(if sending {
+            gettext("Send File")
         } else {
-            "Choose the protocol and the folder; then start the sender on the device."
+            gettext("Receive File")
+        })
+        .body(if sending {
+            gettext("Start the receiver on the device first (e.g. rx, rb, rz, or the bootloader's upload prompt).")
+        } else {
+            gettext("Choose the protocol and the folder; then start the sender on the device.")
         })
         .extra_child(&content)
         .build();
-    dialog.add_responses(&[
-        ("cancel", "Cancel"),
-        (
-            "go",
-            if sending {
-                "Choose Files…"
-            } else {
-                "Choose Folder…"
-            },
-        ),
-    ]);
+    let go = if sending {
+        gettext("Choose Files…")
+    } else {
+        gettext("Choose Folder…")
+    };
+    dialog.add_responses(&[("cancel", gettext("Cancel").as_str()), ("go", go.as_str())]);
     dialog.set_response_appearance("go", adw::ResponseAppearance::Suggested);
     dialog.set_default_response(Some("go"));
     dialog.set_close_response("cancel");

@@ -2,7 +2,11 @@
 //!
 //! * `cargo xtask check` — fmt, clippy and every test that can run here.
 //! * `cargo xtask install [--prefix DIR] [--destdir DIR]` — release build and installation of the
-//!   binary, desktop file, metainfo, icons, man page and shell completions (default prefix ~/.local).
+//!   binary, desktop file, metainfo, icons, man page, shell completions and translations
+//!   (default prefix ~/.local).
+//! * `cargo xtask po` — update the translation template and merge it into `po/*.po`.
+mod po;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -35,6 +39,7 @@ fn have_gtk() -> bool {
 
 fn check() -> Result<()> {
     run("cargo", &["fmt", "--all", "--check"])?;
+    po::check(&root())?;
     run("cargo", &["clippy", "--all-targets", "--", "-D", "warnings"])?;
     for krate in ["gtkterm-gui", "gtkterm-charts"] {
         run(
@@ -132,22 +137,24 @@ fn install(args: &[String]) -> Result<()> {
     let bin = root.join("target/release").join(BIN);
     install_file(&bin, &base.join("bin").join(BIN), 0o755)?;
     let data = root.join("data");
-    install_file(
-        &data.join(format!("{APP_ID}.desktop")),
-        &base.join(format!("share/applications/{APP_ID}.desktop")),
-        0o644,
-    )?;
-    install_file(
-        &data.join(format!("{APP_ID}.metainfo.xml")),
-        &base.join(format!("share/metainfo/{APP_ID}.metainfo.xml")),
-        0o644,
-    )?;
+    let tmp = root.join("target/xtask-install");
+    std::fs::create_dir_all(&tmp)?;
+    for (kind, file, dir) in [
+        ("--desktop", format!("{APP_ID}.desktop"), "applications"),
+        ("--xml", format!("{APP_ID}.metainfo.xml"), "metainfo"),
+    ] {
+        let translated = tmp.join(&file);
+        po::translate_data(&root, kind, &data.join(&file), &translated)?;
+        install_file(&translated, &base.join(format!("share/{dir}/{file}")), 0o644)?;
+    }
+    for mo in po::compile(&root, &tmp.join("share"))? {
+        let rel = mo.strip_prefix(tmp.join("share")).context("path")?;
+        install_file(&mo, &base.join("share").join(rel), 0o644)?;
+    }
     for size in [48, 64, 128, 256] {
         let rel = format!("icons/hicolor/{size}x{size}/apps/{APP_ID}.png");
         install_file(&data.join(&rel), &base.join("share").join(&rel), 0o644)?;
     }
-    let tmp = root.join("target/xtask-install");
-    std::fs::create_dir_all(&tmp)?;
     run(
         bin.to_str().context("path")?,
         &["--generate-man", tmp.to_str().context("path")?],
@@ -212,6 +219,7 @@ fn main() -> Result<()> {
     match args.first().map(String::as_str) {
         Some("check") => check(),
         Some("install") => install(&args[1..]),
-        _ => bail!("usage: cargo xtask check | cargo xtask install [--prefix DIR] [--destdir DIR]"),
+        Some("po") => po::update(&root()),
+        _ => bail!("usage: cargo xtask check | po | install [--prefix DIR] [--destdir DIR]"),
     }
 }

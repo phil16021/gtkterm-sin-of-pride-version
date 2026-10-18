@@ -12,6 +12,8 @@ use gtkterm_core::session::Session;
 use gtkterm_core::sunshine::SunshineUpdate;
 use gtkterm_protocols::sunshine::ChartKind;
 
+use super::i18n::{gettext, gettext_f};
+
 fn style_for(widget: &impl IsA<gtk::Widget>) -> Style {
     let dark = adw::StyleManager::default().is_dark();
     let mut s = if dark { Style::dark() } else { Style::light() };
@@ -45,30 +47,31 @@ impl ChartView {
             .build();
         let pause = gtk::ToggleButton::builder()
             .icon_name("media-playback-pause-symbolic")
-            .tooltip_text("Pause")
+            .tooltip_text(gettext("Pause"))
             .build();
         let axis = gtk::ToggleButton::builder()
             .icon_name("preferences-system-time-symbolic")
-            .tooltip_text("Time axis instead of sample number")
+            .tooltip_text(gettext("Time axis instead of sample number"))
             .build();
-        let kinds = gtk::StringList::new(&ChartKind::ALL.map(ChartKind::label));
+        let kind_labels = ChartKind::ALL.map(|k| gettext(k.label()));
+        let kinds = gtk::StringList::new(&kind_labels.each_ref().map(String::as_str));
         let kind = gtk::DropDown::builder()
             .model(&kinds)
-            .tooltip_text("Chart type")
+            .tooltip_text(gettext("Chart type"))
             .build();
         let history = gtk::SpinButton::with_range(10.0, 1_000_000.0, 100.0);
-        history.set_tooltip_text(Some("Samples kept per series"));
+        history.set_tooltip_text(Some(&gettext("Samples kept per series")));
         let csv = gtk::Button::builder()
             .icon_name("x-office-spreadsheet-symbolic")
-            .tooltip_text("Export CSV")
+            .tooltip_text(gettext("Export CSV"))
             .build();
         let png = gtk::Button::builder()
             .icon_name("image-x-generic-symbolic")
-            .tooltip_text("Export PNG")
+            .tooltip_text(gettext("Export PNG"))
             .build();
         let clear = gtk::Button::builder()
             .icon_name("edit-clear-all-symbolic")
-            .tooltip_text("Clear data")
+            .tooltip_text(gettext("Clear data"))
             .build();
         let toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         toolbar.add_css_class("chart-toolbar");
@@ -320,7 +323,10 @@ impl ChartView {
             let Some(toast) = toast.upgrade() else { return };
             match render_png(&chart, &me.view.borrow(), &style_for(&me.area), width, height) {
                 Ok(bytes) => save_dialog(b, &format!("{}.png", me.id), bytes, toast),
-                Err(e) => toast.add_toast(adw::Toast::new(&format!("PNG export failed: {e}"))),
+                Err(e) => toast.add_toast(adw::Toast::new(&gettext_f(
+                    "PNG export failed: {error}",
+                    &[("error", &e)],
+                ))),
             }
         });
         me
@@ -354,7 +360,7 @@ impl ChartView {
 /// Save `bytes` through a file dialog.
 pub fn save_dialog(parent: &impl IsA<gtk::Widget>, name: &str, bytes: Vec<u8>, toast: adw::ToastOverlay) {
     let dialog = gtk::FileDialog::builder()
-        .title("Export")
+        .title(gettext("Export"))
         .initial_name(name)
         .modal(true)
         .build();
@@ -363,8 +369,14 @@ pub fn save_dialog(parent: &impl IsA<gtk::Widget>, name: &str, bytes: Vec<u8>, t
         let Ok(file) = res else { return };
         let Some(path) = file.path() else { return };
         match std::fs::write(&path, &bytes) {
-            Ok(()) => toast.add_toast(adw::Toast::new(&format!("Saved {}", path.display()))),
-            Err(e) => toast.add_toast(adw::Toast::new(&format!("Cannot save {}: {e}", path.display()))),
+            Ok(()) => toast.add_toast(adw::Toast::new(&gettext_f(
+                "Saved {path}",
+                &[("path", &path.display())],
+            ))),
+            Err(e) => toast.add_toast(adw::Toast::new(&gettext_f(
+                "Cannot save {path}: {error}",
+                &[("path", &path.display()), ("error", &e)],
+            ))),
         }
     });
 }
@@ -385,8 +397,8 @@ impl VizPanel {
     pub fn new(session: &Session, toast: &adw::ToastOverlay) -> Rc<Self> {
         let empty = adw::StatusPage::builder()
             .icon_name("utilities-system-monitor-symbolic")
-            .title("No Sunshine data yet")
-            .description("Lines like <tt>{temp|Inside|21.5}</tt> are plotted here.\nPrefixes B:, P: and S: select bar, pie and scatter charts.")
+            .title(gettext("No Sunshine data yet"))
+            .description(gettext("Lines like <tt>{temp|Inside|21.5}</tt> are plotted here.\nPrefixes B:, P: and S: select bar, pie and scatter charts."))
             .build();
         if let Some(label) = empty.first_child().and_then(|c| c.downcast::<gtk::Label>().ok()) {
             label.set_use_markup(true);
@@ -463,7 +475,7 @@ impl VizPanel {
         let view = ChartView::new(&self.session, id, toast);
         let page = self.tab_view.append(&view.widget);
         page.set_title(id);
-        page.set_tooltip(&format!("Packet ID {id}"));
+        page.set_tooltip(&gettext_f("Packet ID {id}", &[("id", &id)]));
         self.tabs.borrow_mut().insert(id.to_owned(), (page, view));
         self.widget.set_visible_child_name("tabs");
     }
@@ -500,10 +512,13 @@ impl VizPanel {
         let (stats, last) = self
             .session
             .with_sunshine(|s| (s.stats(), s.last_error().map(str::to_owned)));
-        let mut text = format!("{} packets · {} rejected", stats.packets, stats.errors);
+        let mut text = gettext_f(
+            "{packets} packets · {rejected} rejected",
+            &[("packets", &stats.packets), ("rejected", &stats.errors)],
+        );
         if let Some(e) = last {
-            text.push_str(" · last: ");
-            text.extend(e.chars().take(80));
+            let error: String = e.chars().take(80).collect();
+            text.push_str(&gettext_f(" · last: {error}", &[("error", &error)]));
         }
         self.footer.set_text(&text);
     }

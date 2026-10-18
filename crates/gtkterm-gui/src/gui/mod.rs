@@ -10,6 +10,7 @@
 
 mod charts;
 mod frames;
+pub mod i18n;
 mod macros;
 mod prefs;
 mod rt;
@@ -36,6 +37,7 @@ pub const APP_ID: &str = "at.philipp.GtkTermSunshine";
 
 /// Start the GUI and run until the window is closed.
 pub fn run(cli: Cli, resolved: Resolved) -> ExitCode {
+    i18n::init();
     gio::resources_register_include!("gtkterm.gresource").expect("embedded resources");
     let _guard = rt::rt().enter();
     let manager = SessionManager::new(resolved.config.clone(), Some(resolved.config_path.clone()));

@@ -5,6 +5,8 @@ use gtkterm_core::port::ModemLines;
 use gtkterm_core::session::{PortState, SessionStatus};
 use gtkterm_core::transfer::{TransferState, TransferStatus};
 
+use super::i18n::{gettext, gettext_f};
+
 /// Status bar widgets.
 pub struct StatusBar {
     /// Top-level widget.
@@ -42,16 +44,16 @@ impl StatusBar {
         widget.add_css_class("statusbar");
         let profile = gtk::MenuButton::builder()
             .label("[default]")
-            .tooltip_text("Profiles")
+            .tooltip_text(gettext("Profiles"))
             .build();
         profile.add_css_class("flat");
         let endpoint = gtk::Label::builder()
-            .label("No open port")
+            .label(gettext("No open port"))
             .ellipsize(pango::EllipsizeMode::Middle)
             .max_width_chars(48)
             .build();
         let state = gtk::Label::builder()
-            .label("Disconnected")
+            .label(gettext("Disconnected"))
             .ellipsize(pango::EllipsizeMode::End)
             .max_width_chars(40)
             .build();
@@ -60,12 +62,12 @@ impl StatusBar {
         let spacer = gtk::Box::builder().hexpand(true).build();
         let dtr = gtk::ToggleButton::builder()
             .label("DTR")
-            .tooltip_text("Data Terminal Ready (F7)")
+            .tooltip_text(gettext("Data Terminal Ready (F7)"))
             .sensitive(false)
             .build();
         let rts = gtk::ToggleButton::builder()
             .label("RTS")
-            .tooltip_text("Request To Send (F8)")
+            .tooltip_text(gettext("Request To Send (F8)"))
             .sensitive(false)
             .build();
         for b in [&dtr, &rts] {
@@ -93,7 +95,7 @@ impl StatusBar {
             .build();
         let cancel = gtk::Button::builder()
             .icon_name("process-stop-symbolic")
-            .tooltip_text("Cancel the file transfer")
+            .tooltip_text(gettext("Cancel the file transfer"))
             .action_name("win.cancel-transfer")
             .build();
         cancel.add_css_class("flat");
@@ -142,8 +144,10 @@ impl StatusBar {
         };
         self.transfer.set_visible(true);
         self.transfer_label.set_text(&st.summary());
-        self.transfer_label
-            .set_tooltip_text(Some(&format!("{} · {} retries", st.summary(), st.retries)));
+        self.transfer_label.set_tooltip_text(Some(&gettext_f(
+            "{summary} · {retries} retries",
+            &[("summary", &st.summary()), ("retries", &st.retries)],
+        )));
         match st.fraction() {
             Some(f) => self.transfer_bar.set_fraction(f),
             None => self.transfer_bar.pulse(),
@@ -159,17 +163,17 @@ impl StatusBar {
     /// Show a session status.
     pub fn update(&self, st: &SessionStatus) {
         self.profile.set_label(&format!("[{}]", st.name));
-        self.endpoint.set_text(if st.description.is_empty() {
-            "No open port"
+        if st.description.is_empty() {
+            self.endpoint.set_text(&gettext("No open port"));
         } else {
-            &st.description
-        });
+            self.endpoint.set_text(&st.description);
+        }
         self.endpoint.set_tooltip_text(Some(&st.description));
         let (text, class) = match &st.state {
-            PortState::Open => ("Connected".to_owned(), Some("state-open")),
-            PortState::Opening => ("Connecting…".to_owned(), None),
-            PortState::Closed => ("Disconnected".to_owned(), None),
-            PortState::Error(e) => (format!("Error: {e}"), Some("state-error")),
+            PortState::Open => (gettext("Connected"), Some("state-open")),
+            PortState::Opening => (gettext("Connecting…"), None),
+            PortState::Closed => (gettext("Disconnected"), None),
+            PortState::Error(e) => (gettext_f("Error: {error}", &[("error", e)]), Some("state-error")),
         };
         self.state.set_text(&text);
         self.state.set_tooltip_text(Some(&text));
@@ -180,7 +184,7 @@ impl StatusBar {
             self.state.add_css_class(c);
         }
         let queue = if st.tx_queue > 0 {
-            format!(" · queue {}", st.tx_queue)
+            gettext_f(" · queue {count}", &[("count", &st.tx_queue)])
         } else {
             String::new()
         };
@@ -192,11 +196,12 @@ impl StatusBar {
         match &st.log {
             Some(l) => {
                 let paused = matches!(l.state, gtkterm_core::logging::LogState::Paused);
-                self.log.set_text(&format!(
-                    "● LOG{} {}",
-                    if paused { " (paused)" } else { "" },
-                    human(l.bytes)
-                ));
+                let paused = if paused {
+                    gettext(" (paused)")
+                } else {
+                    String::new()
+                };
+                self.log.set_text(&format!("● LOG{paused} {}", human(l.bytes)));
                 self.log.set_tooltip_text(Some(&l.path.display().to_string()));
             }
             None => self.log.set_text(""),
@@ -232,8 +237,11 @@ impl StatusBar {
             (false, None) => String::new(),
         };
         self.activity.set_text(&text);
-        self.activity
-            .set_tooltip_text(running.map(|n| format!("Macro {n} is running")).as_deref());
+        self.activity.set_tooltip_text(
+            running
+                .map(|n| gettext_f("Macro {name} is running", &[("name", &n)]))
+                .as_deref(),
+        );
     }
 
     /// Show the embedded MCP endpoint state.
@@ -242,7 +250,7 @@ impl StatusBar {
             Some(u) => {
                 self.mcp.set_text("◆ MCP");
                 self.mcp
-                    .set_tooltip_text(Some(&format!("MCP server listening on {u}")));
+                    .set_tooltip_text(Some(&gettext_f("MCP server listening on {url}", &[("url", &u)])));
             }
             None => self.mcp.set_text(""),
         }

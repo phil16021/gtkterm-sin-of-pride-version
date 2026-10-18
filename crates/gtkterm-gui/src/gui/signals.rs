@@ -9,6 +9,8 @@ use gtkterm_core::session::Session;
 use gtkterm_core::signals::{NAMES, SignalSample, levels};
 use jiff::{SignedDuration, Timestamp};
 
+use super::i18n::{gettext, gettext_f};
+
 const SPANS: [i64; 4] = [10, 30, 60, 300];
 const LABEL_W: f64 = 48.0;
 const VALUE_W: f64 = 28.0;
@@ -34,29 +36,32 @@ impl SignalMonitor {
             .vexpand(true)
             .hexpand(true)
             .build();
-        let labels: Vec<String> = SPANS.iter().map(|s| format!("{s} s")).collect();
+        let labels: Vec<String> = SPANS
+            .iter()
+            .map(|s| gettext_f("{seconds} s", &[("seconds", s)]))
+            .collect();
         let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
         let span_drop = gtk::DropDown::builder()
             .model(&gtk::StringList::new(&refs))
             .selected(1)
-            .tooltip_text("Time window")
+            .tooltip_text(gettext("Time window"))
             .build();
         let pause = gtk::ToggleButton::builder()
             .icon_name("media-playback-pause-symbolic")
-            .tooltip_text("Freeze the view (recording continues)")
+            .tooltip_text(gettext("Freeze the view (recording continues)"))
             .build();
         let clear = gtk::Button::builder()
             .icon_name("edit-clear-all-symbolic")
-            .tooltip_text("Clear the history")
+            .tooltip_text(gettext("Clear the history"))
             .build();
         let export = gtk::Button::builder()
             .icon_name("document-save-symbolic")
-            .tooltip_text("Export CSV")
+            .tooltip_text(gettext("Export CSV"))
             .build();
         let header = adw::HeaderBar::new();
         header.set_title_widget(Some(&adw::WindowTitle::new(
-            "Signal Monitor",
-            "polled every 50 ms; short pulses from the driver's counters",
+            &gettext("Signal Monitor"),
+            &gettext("polled every 50 ms; short pulses from the driver's counters"),
         )));
         header.pack_start(&span_drop);
         header.pack_start(&pause);
@@ -74,7 +79,7 @@ impl SignalMonitor {
         toolbar.add_top_bar(&header);
         toolbar.set_content(Some(&toast));
         let window = adw::Window::builder()
-            .title("Signal Monitor")
+            .title(gettext("Signal Monitor"))
             .transient_for(parent)
             .default_width(760)
             .default_height(330)
@@ -211,7 +216,7 @@ impl SignalMonitor {
         }
         if samples.is_empty() {
             cr.move_to(LABEL_W + 8.0, (height - AXIS_H) / 2.0);
-            let _ = cr.show_text("No modem lines (open a serial port with modem lines)");
+            let _ = cr.show_text(&gettext("No modem lines (open a serial port with modem lines)"));
             return;
         }
         for (row, name) in NAMES.iter().enumerate() {
