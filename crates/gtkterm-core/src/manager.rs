@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
@@ -70,6 +70,51 @@ pub enum ManagerEvent {
     },
 }
 
+/// Lock, recovering from poisoning (a panic elsewhere must not take the manager down).
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The per-session "one macro or script at a time" slot. Released when the run ends, also
+/// when its future is dropped (an MCP call that timed out or was cancelled).
+struct RunSlot<'a> {
+    manager: &'a SessionManager,
+    session: SessionId,
+    name: String,
+    script: bool,
+    token: CancellationToken,
+    released: bool,
+}
+
+impl RunSlot<'_> {
+    fn finish(mut self, error: Option<String>) {
+        self.release(error);
+    }
+
+    fn release(&mut self, error: Option<String>) {
+        if std::mem::replace(&mut self.released, true) {
+            return;
+        }
+        lock(&self.manager.running).remove(&self.session);
+        let (session, name) = (self.session, self.name.clone());
+        let ev = if self.script {
+            ManagerEvent::ScriptFinished { session, name, error }
+        } else {
+            ManagerEvent::MacroFinished { session, name, error }
+        };
+        let _ = self.manager.events.send(ev);
+    }
+}
+
+impl Drop for RunSlot<'_> {
+    fn drop(&mut self) {
+        if !self.released {
+            self.token.cancel();
+            self.release(Some("cancelled".into()));
+        }
+    }
+}
+
 /// Registry of sessions plus the shared configuration.
 #[derive(Debug)]
 pub struct SessionManager {
@@ -101,14 +146,14 @@ impl SessionManager {
 
     /// Use `store`, persisted at `path` (`None`: memory only).
     pub fn set_macros(&self, store: MacroStore, path: Option<PathBuf>) {
-        *self.macros.lock().expect("macros poisoned") = store;
-        *self.macros_path.lock().expect("macros poisoned") = path;
+        *lock(&self.macros) = store;
+        *lock(&self.macros_path) = path;
         let _ = self.events.send(ManagerEvent::MacrosChanged);
     }
 
     /// Run `f` with the macro store.
     pub fn with_macros<R>(&self, f: impl FnOnce(&MacroStore) -> R) -> R {
-        f(&self.macros.lock().expect("macros poisoned"))
+        f(&lock(&self.macros))
     }
 
     /// Change the macro store and persist it; notifies subscribers.
@@ -117,11 +162,11 @@ impl SessionManager {
         f: impl FnOnce(&mut MacroStore) -> Result<R, MacroError>,
     ) -> Result<R, MacroError> {
         let (result, snapshot) = {
-            let mut store = self.macros.lock().expect("macros poisoned");
+            let mut store = lock(&self.macros);
             let r = f(&mut store)?;
             (r, store.clone())
         };
-        if let Some(path) = self.macros_path.lock().expect("macros poisoned").clone() {
+        if let Some(path) = lock(&self.macros_path).clone() {
             snapshot.save(&path)?;
         }
         let _ = self.events.send(ManagerEvent::MacrosChanged);
@@ -130,21 +175,48 @@ impl SessionManager {
 
     /// Name of the macro running in `session`, if any.
     pub fn running_macro(&self, session: SessionId) -> Option<String> {
-        self.running
-            .lock()
-            .expect("running poisoned")
-            .get(&session)
-            .map(|(n, _)| n.clone())
+        lock(&self.running).get(&session).map(|(n, _)| n.clone())
     }
 
     /// Cancel the macro or script running in `session`. Returns false if none runs.
     pub fn stop_macro(&self, session: SessionId) -> bool {
-        self.running
-            .lock()
-            .expect("running poisoned")
+        lock(&self.running)
             .get(&session)
             .map(|(_, t)| t.cancel())
             .is_some()
+    }
+
+    /// Take the session's run slot for `name`, or return the name of what already runs.
+    fn acquire(&self, session: SessionId, name: &str, script: bool) -> Result<RunSlot<'_>, String> {
+        let token = CancellationToken::new();
+        {
+            let mut running = lock(&self.running);
+            if let Some((other, _)) = running.get(&session) {
+                return Err(other.clone());
+            }
+            running.insert(session, (name.to_owned(), token.clone()));
+        }
+        let name = name.to_owned();
+        let ev = if script {
+            ManagerEvent::ScriptStarted {
+                session,
+                name: name.clone(),
+            }
+        } else {
+            ManagerEvent::MacroStarted {
+                session,
+                name: name.clone(),
+            }
+        };
+        let _ = self.events.send(ev);
+        Ok(RunSlot {
+            manager: self,
+            session,
+            name,
+            script,
+            token,
+            released: false,
+        })
     }
 
     /// Run the macro `name` in `session` (one at a time per session) and wait for the result.
@@ -152,26 +224,11 @@ impl SessionManager {
         let m = self
             .with_macros(|s| s.get(name).cloned())
             .ok_or_else(|| MacroError::NotFound(name.to_owned()))?;
-        let id = session.id();
-        let token = CancellationToken::new();
-        {
-            let mut running = self.running.lock().expect("running poisoned");
-            if let Some((other, _)) = running.get(&id) {
-                return Err(MacroError::Busy(other.clone()));
-            }
-            running.insert(id, (m.name.clone(), token.clone()));
-        }
-        let _ = self.events.send(ManagerEvent::MacroStarted {
-            session: id,
-            name: m.name.clone(),
-        });
-        let result = run_macro(session, &m, &token).await;
-        self.running.lock().expect("running poisoned").remove(&id);
-        let _ = self.events.send(ManagerEvent::MacroFinished {
-            session: id,
-            name: m.name.clone(),
-            error: result.as_ref().err().map(ToString::to_string),
-        });
+        let slot = self
+            .acquire(session.id(), &m.name, false)
+            .map_err(MacroError::Busy)?;
+        let result = run_macro(session, &m, &slot.token).await;
+        slot.finish(result.as_ref().err().map(ToString::to_string));
         result
     }
 
@@ -183,18 +240,8 @@ impl SessionManager {
         opts: &ScriptOptions,
     ) -> Result<ScriptReport, ScriptError> {
         let id = session.id();
-        let token = CancellationToken::new();
-        {
-            let mut running = self.running.lock().expect("running poisoned");
-            if let Some((other, _)) = running.get(&id) {
-                return Err(ScriptError::Busy(other.clone()));
-            }
-            running.insert(id, (script.name().to_owned(), token.clone()));
-        }
-        let _ = self.events.send(ManagerEvent::ScriptStarted {
-            session: id,
-            name: script.name().to_owned(),
-        });
+        let slot = self.acquire(id, script.name(), true).map_err(ScriptError::Busy)?;
+        let token = slot.token.clone();
         let events = self.events.clone();
         let mut last_line: Option<std::time::Instant> = None;
         let result = run_script(session, script, opts, &token, |ev| match ev {
@@ -209,12 +256,7 @@ impl SessionManager {
             }
         })
         .await;
-        self.running.lock().expect("running poisoned").remove(&id);
-        let _ = self.events.send(ManagerEvent::ScriptFinished {
-            session: id,
-            name: script.name().to_owned(),
-            error: result.as_ref().err().map(ToString::to_string),
-        });
+        slot.finish(result.as_ref().err().map(ToString::to_string));
         result
     }
 
@@ -227,10 +269,7 @@ impl SessionManager {
     pub fn create(&self, name: &str, terminal: TerminalConfig) -> Session {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let session = Session::spawn(id, name, terminal);
-        self.sessions
-            .lock()
-            .expect("sessions poisoned")
-            .insert(id, session.clone());
+        lock(&self.sessions).insert(id, session.clone());
         let _ = self.events.send(ManagerEvent::Added(id));
         session
     }
@@ -240,12 +279,7 @@ impl SessionManager {
         &self,
         profile: &str,
     ) -> Result<(Session, crate::config::Connection), ConfigError> {
-        let p = self
-            .config
-            .lock()
-            .expect("config poisoned")
-            .profile(profile)?
-            .clone();
+        let p = lock(&self.config).profile(profile)?.clone();
         let session = self.create(profile, p.terminal);
         session.apply_decoder_config(p.decoder);
         Ok((session, p.connection))
@@ -253,17 +287,12 @@ impl SessionManager {
 
     /// Session by ID.
     pub fn get(&self, id: SessionId) -> Option<Session> {
-        self.sessions.lock().expect("sessions poisoned").get(&id).cloned()
+        lock(&self.sessions).get(&id).cloned()
     }
 
     /// All sessions in creation order.
     pub fn list(&self) -> Vec<Session> {
-        self.sessions
-            .lock()
-            .expect("sessions poisoned")
-            .values()
-            .cloned()
-            .collect()
+        lock(&self.sessions).values().cloned().collect()
     }
 
     /// The session with the lowest ID, or a new one for the default profile.
@@ -271,10 +300,7 @@ impl SessionManager {
         if let Some(s) = self.list().into_iter().next() {
             return s;
         }
-        let terminal = self
-            .config
-            .lock()
-            .expect("config poisoned")
+        let terminal = lock(&self.config)
             .profile(DEFAULT_PROFILE)
             .map(|p| p.terminal.clone())
             .unwrap_or_default();
@@ -283,7 +309,7 @@ impl SessionManager {
 
     /// Close and remove a session.
     pub async fn remove(&self, id: SessionId) -> bool {
-        let Some(s) = self.sessions.lock().expect("sessions poisoned").remove(&id) else {
+        let Some(s) = lock(&self.sessions).remove(&id) else {
             return false;
         };
         let _ = s.close().await;
@@ -293,18 +319,18 @@ impl SessionManager {
 
     /// Run `f` with the configuration.
     pub fn with_config<R>(&self, f: impl FnOnce(&Config) -> R) -> R {
-        f(&self.config.lock().expect("config poisoned"))
+        f(&lock(&self.config))
     }
 
     /// Run `f` with mutable configuration (call [`SessionManager::save_config`] afterwards).
     pub fn with_config_mut<R>(&self, f: impl FnOnce(&mut Config) -> R) -> R {
-        f(&mut self.config.lock().expect("config poisoned"))
+        f(&mut lock(&self.config))
     }
 
     /// Persist the configuration, if a path is set.
     pub fn save_config(&self) -> Result<(), ConfigError> {
         match &self.config_path {
-            Some(path) => self.config.lock().expect("config poisoned").save(path),
+            Some(path) => lock(&self.config).save(path),
             None => Ok(()),
         }
     }

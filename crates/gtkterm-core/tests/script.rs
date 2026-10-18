@@ -250,3 +250,33 @@ async fn file_paths_respect_the_sandbox() {
     let err = run(&s, &script, &opts).await.unwrap_err();
     assert!(err.to_string().contains("outside the allowed"), "{err}");
 }
+
+/// A run whose future is dropped (an MCP call that timed out) frees the session's slot and
+/// reports the end, so the next macro or script can start.
+#[tokio::test]
+async fn dropping_a_running_script_frees_the_slot() {
+    let m = SessionManager::new(Config::default(), None);
+    let s = m.create("t", TerminalConfig::default());
+    let (port, _dev) = loopback::pair("loop");
+    s.attach(port).await.unwrap();
+    let mut events = m.subscribe();
+    let slow = Script::parse("slow", "delay 5000\n", None).unwrap();
+    let r = tokio::time::timeout(
+        Duration::from_millis(100),
+        m.run_script(&s, &slow, &ScriptOptions::default()),
+    )
+    .await;
+    assert!(r.is_err(), "timed out");
+    assert_eq!(m.running_macro(s.id()), None);
+    let mut finished = false;
+    while let Ok(ev) = events.try_recv() {
+        if let gtkterm_core::manager::ManagerEvent::ScriptFinished { error, .. } = ev {
+            assert_eq!(error.as_deref(), Some("cancelled"));
+            finished = true;
+        }
+    }
+    assert!(finished, "ScriptFinished was sent");
+    let quick = Script::parse("quick", "log hi\n", None).unwrap();
+    let report = m.run_script(&s, &quick, &ScriptOptions::default()).await.unwrap();
+    assert_eq!(report.log, ["hi"]);
+}

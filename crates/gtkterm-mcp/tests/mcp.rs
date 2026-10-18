@@ -806,6 +806,17 @@ async fn scripts_signals_and_port_control() {
     assert!(msg.contains("<script>:2: timed out after 100 ms"), "{msg}");
     assert!(msg.contains("start"), "{msg}");
 
+    // A script that outlives the call's timeout is stopped and frees the session.
+    let msg = tool_error(
+        &f.client,
+        "script_run",
+        json!({"script": "delay 5000\n", "timeout_ms": 100}),
+    )
+    .await;
+    assert!(msg.contains("did not finish within 100 ms"), "{msg}");
+    let report = ok(&f.client, "script_run", json!({"script": "log again\n"})).await;
+    assert_eq!(report["log"], json!(["again"]));
+
     // Signals: DTR from the script, CTS from the device.
     dev.set_inputs(InputLines {
         cts: true,

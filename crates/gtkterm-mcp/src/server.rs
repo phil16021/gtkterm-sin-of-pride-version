@@ -1435,8 +1435,14 @@ impl GtkTermMcp {
         let mut events = self.manager.subscribe();
         let id = session.id();
         let forward = tokio::spawn(async move {
+            use tokio::sync::broadcast::error::RecvError;
             let mut n = 0u32;
-            while let Ok(ev) = events.recv().await {
+            loop {
+                let ev = match events.recv().await {
+                    Ok(ev) => ev,
+                    Err(RecvError::Lagged(_)) => continue,
+                    Err(RecvError::Closed) => break,
+                };
                 match ev {
                     gtkterm_core::manager::ManagerEvent::ScriptLog { session, message } if session == id => {
                         n += 1;
@@ -1458,16 +1464,16 @@ impl GtkTermMcp {
         });
         let timeout = Duration::from_millis(p.timeout_ms.unwrap_or(600_000));
         let run = self.manager.run_script(&session, &script, &opts);
+        // Dropping `run` (timeout, cancel) releases the session's script slot.
         let result = tokio::select! {
             r = tokio::time::timeout(timeout, run) => r,
             () = ctx.ct.cancelled() => {
-                self.manager.stop_macro(id);
+                forward.abort();
                 return Err("cancelled".into());
             }
         };
         let Ok(result) = result else {
-            self.manager.stop_macro(id);
-            let _ = forward.await;
+            forward.abort();
             return Err(format!(
                 "the script did not finish within {} ms",
                 timeout.as_millis()
