@@ -2795,6 +2795,56 @@ mod tests {
         );
     }
 
+    /// 3 MB at full speed in 64-byte reads, hex view, charts updating: the main loop keeps running (output is fed to VTE in bounded
+    /// portions per frame) and no byte is lost from the session's count.
+    #[gtk::test]
+    fn high_rate_input_keeps_the_window_responsive() {
+        if std::env::var_os("GTKTERM_GUI_TESTS").is_none() {
+            return;
+        }
+        let (win, dev, _dir) = setup();
+        win.window.set_default_size(1280, 780);
+        gio::prelude::ActionGroupExt::activate_action(&win.window, "view-mode", Some(&"mixed".to_variant()));
+        const TOTAL: usize = 3 << 20;
+        let ticks = Rc::new(RefCell::new(Vec::<Instant>::new()));
+        let t = Rc::clone(&ticks);
+        let tick = glib::timeout_add_local(Duration::from_millis(10), move || {
+            t.borrow_mut().push(Instant::now());
+            glib::ControlFlow::Continue
+        });
+        let sender = rt().spawn(async move {
+            // USB serial adapters deliver small reads; a Sunshine packet keeps a chart busy too.
+            let line = b"{env|T|21.5|H|40.1}\r\n0123456789abcdef status=ok....\r\n";
+            let mut sent = 0;
+            while sent < TOTAL {
+                let n = (TOTAL - sent).min(64);
+                let chunk: Vec<u8> = line.iter().copied().cycle().take(n).collect();
+                dev.send(chunk).await.unwrap();
+                sent += n;
+            }
+            dev
+        });
+        assert!(
+            pump_until(Duration::from_secs(60), || win.session.status().rx_bytes
+                == TOTAL as u64),
+            "received {} of {TOTAL}",
+            win.session.status().rx_bytes
+        );
+        let _dev = rt().block_on(sender).unwrap();
+        pump_until(Duration::from_millis(200), || false);
+        win.term.flush_output();
+        tick.remove();
+        let ticks = ticks.borrow();
+        let worst = ticks.windows(2).map(|w| w[1] - w[0]).max().unwrap_or_default();
+        eprintln!("high-rate: {} ticks, worst gap {worst:?}", ticks.len());
+        assert!(ticks.len() > 10, "main loop ran");
+        assert!(
+            worst < Duration::from_millis(500),
+            "main loop stalled for {worst:?}"
+        );
+        assert_eq!(UNEXPECTED_LOGS.load(Ordering::SeqCst), 0, "GTK warnings");
+    }
+
     /// The README screenshots: realistic scenes rendered from the real window.
     /// `GTKTERM_SCREENSHOTS=docs/screenshots GSK_RENDERER=cairo xvfb-run -a cargo test -p gtkterm-gui readme_screenshots`,
     /// then in docs/screenshots: `for f in chart-*.png; do convert $f -crop 566x620+0+34 +repage $f; done;

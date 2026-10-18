@@ -110,23 +110,29 @@ impl ChartView {
         let w = Rc::downgrade(&me);
         me.area.set_draw_func(move |area, cr, width, height| {
             let Some(me) = w.upgrade() else { return };
-            let Some(chart) = me.session.with_sunshine(|s| s.chart(&me.id).cloned()) else {
-                return;
-            };
             let mut view = me.view.borrow_mut();
             view.max_points = usize::try_from(width).unwrap_or(400).max(100) * 2;
             let hover = me.hover.borrow();
-            match draw(
-                cr,
-                &chart,
-                &view,
-                &style_for(area),
-                f64::from(width),
-                f64::from(height),
-                hover.as_ref(),
-            ) {
-                Ok(l) => *me.layout.borrow_mut() = Some(l),
-                Err(e) => tracing::warn!(error = %e, "chart drawing failed"),
+            let style = style_for(area);
+            // Drawn from the store in place: copying a long history every frame would cost
+            // more than drawing it (the plot is downsampled to `max_points`).
+            let drawn = me.session.with_sunshine(|s| {
+                s.chart(&me.id).map(|chart| {
+                    draw(
+                        cr,
+                        chart,
+                        &view,
+                        &style,
+                        f64::from(width),
+                        f64::from(height),
+                        hover.as_ref(),
+                    )
+                })
+            });
+            match drawn {
+                Some(Ok(l)) => *me.layout.borrow_mut() = Some(l),
+                Some(Err(e)) => tracing::warn!(error = %e, "chart drawing failed"),
+                None => {}
             }
         });
 

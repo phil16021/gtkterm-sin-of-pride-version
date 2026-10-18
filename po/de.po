@@ -43,45 +43,43 @@ msgstr "Als PNG exportieren"
 msgid "Clear data"
 msgstr "Daten löschen"
 
-#: crates/gtkterm-gui/src/gui/charts.rs:327
+#: crates/gtkterm-gui/src/gui/charts.rs:333
 msgid "PNG export failed: {error}"
 msgstr "PNG-Export fehlgeschlagen: {error}"
 
-#: crates/gtkterm-gui/src/gui/charts.rs:363
+#: crates/gtkterm-gui/src/gui/charts.rs:369
 msgid "Export"
 msgstr "Exportieren"
 
-#: crates/gtkterm-gui/src/gui/charts.rs:373
+#: crates/gtkterm-gui/src/gui/charts.rs:379
 #: crates/gtkterm-gui/src/gui/scripts.rs:362
 msgid "Saved {path}"
 msgstr "{path} gespeichert"
 
-#: crates/gtkterm-gui/src/gui/charts.rs:377
+#: crates/gtkterm-gui/src/gui/charts.rs:383
 #: crates/gtkterm-gui/src/gui/scripts.rs:364
 msgid "Cannot save {path}: {error}"
 msgstr "{path} kann nicht gespeichert werden: {error}"
 
-#: crates/gtkterm-gui/src/gui/charts.rs:400
+#: crates/gtkterm-gui/src/gui/charts.rs:406
 msgid "No Sunshine data yet"
 msgstr "Noch keine Sunshine-Daten"
 
-#: crates/gtkterm-gui/src/gui/charts.rs:401
+#: crates/gtkterm-gui/src/gui/charts.rs:407
 msgid ""
 "Lines like <tt>{temp|Inside|21.5}</tt> are plotted here.\n"
 "Prefixes B:, P: and S: select bar, pie and scatter charts."
-msgstr ""
-"Zeilen wie <tt>{temp|Inside|21.5}</tt> werden hier dargestellt.\n"
-"Die Präfixe B:, P: und S: wählen Balken-, Torten- und Streudiagramme."
+msgstr "Zeilen wie <tt>{temp|Inside|21.5}</tt> werden hier dargestellt.\nDie Präfixe B:, P: und S: wählen Balken-, Torten- und Streudiagramme."
 
-#: crates/gtkterm-gui/src/gui/charts.rs:478
+#: crates/gtkterm-gui/src/gui/charts.rs:484
 msgid "Packet ID {id}"
 msgstr "Paket-ID {id}"
 
-#: crates/gtkterm-gui/src/gui/charts.rs:516
+#: crates/gtkterm-gui/src/gui/charts.rs:522
 msgid "{packets} packets · {rejected} rejected"
 msgstr "{packets} Pakete · {rejected} verworfen"
 
-#: crates/gtkterm-gui/src/gui/charts.rs:521
+#: crates/gtkterm-gui/src/gui/charts.rs:527
 msgid " · last: {error}"
 msgstr " · zuletzt: {error}"
 
@@ -279,9 +277,7 @@ msgstr "Tastenkürzel"
 msgid ""
 "send: ATZ\\r   ·   send[250]: text (pause first)   ·   wait: 500 ms   ·   expect[2000]: OK\\r\\n   ·   # comment\n"
 "Escapes: \\r \\n \\t \\0 \\e \\\\ \\xHH — expect takes a regular expression"
-msgstr ""
-"send: ATZ\\r   ·   send[250]: Text (vorher warten)   ·   wait: 500 ms   ·   expect[2000]: OK\\r\\n   ·   # Kommentar\n"
-"Escapes: \\r \\n \\t \\0 \\e \\\\ \\xHH — expect erwartet einen regulären Ausdruck"
+msgstr "send: ATZ\\r   ·   send[250]: Text (vorher warten)   ·   wait: 500 ms   ·   expect[2000]: OK\\r\\n   ·   # Kommentar\nEscapes: \\r \\n \\t \\0 \\e \\\\ \\xHH — expect erwartet einen regulären Ausdruck"
 
 #: crates/gtkterm-gui/src/gui/macros.rs:224
 #: crates/gtkterm-gui/src/gui/scripts.rs:154
@@ -696,6 +692,10 @@ msgstr "Skripte"
 msgid "Scripts: menu → Scripts… (Ctrl+Shift+J). The language reference is in the editor's help."
 msgstr "Skripte: Menü → Skripte … (Strg+Umschalt+J). Die Sprachreferenz steht in der Hilfe des Editors."
 
+#: crates/gtkterm-gui/src/gui/rt.rs:61
+msgid "{n} updates skipped: the window could not keep up"
+msgstr "{n} Aktualisierungen übersprungen: das Fenster kam nicht mit"
+
 #: crates/gtkterm-gui/src/gui/scripts.rs:135
 msgid "Ready"
 msgstr "Bereit"
@@ -758,12 +758,12 @@ msgid "Failed at {at}: {message}"
 msgstr "Fehler bei {at}: {message}"
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:11
-#: crates/gtkterm-gui/src/gui/terminal.rs:190
+#: crates/gtkterm-gui/src/gui/terminal.rs:242
 msgid "Copy"
 msgstr "Kopieren"
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:17
-#: crates/gtkterm-gui/src/gui/terminal.rs:191
+#: crates/gtkterm-gui/src/gui/terminal.rs:243
 msgid "Paste"
 msgstr "Einfügen"
 
@@ -988,44 +988,48 @@ msgstr "Makro {name} läuft"
 msgid "MCP server listening on {url}"
 msgstr "MCP-Server lauscht auf {url}"
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:74
+#: crates/gtkterm-gui/src/gui/terminal.rs:58
+msgid "{bytes} bytes not shown: the display could not keep up"
+msgstr "{bytes} Bytes nicht angezeigt: die Anzeige kam nicht mit"
+
+#: crates/gtkterm-gui/src/gui/terminal.rs:125
 msgid "Search text, regex or hex bytes"
 msgstr "Text, regulären Ausdruck oder Hex-Bytes suchen"
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:77
+#: crates/gtkterm-gui/src/gui/terminal.rs:128
 msgid "Case"
 msgstr "Groß/klein"
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:78
+#: crates/gtkterm-gui/src/gui/terminal.rs:129
 msgid "Regex"
 msgstr "Regex"
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:79
+#: crates/gtkterm-gui/src/gui/terminal.rs:130
 msgid "Hex"
 msgstr "Hex"
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:81
+#: crates/gtkterm-gui/src/gui/terminal.rs:132
 msgid "Previous match"
 msgstr "Vorheriger Treffer"
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:83
+#: crates/gtkterm-gui/src/gui/terminal.rs:134
 msgid "Next match (Enter)"
 msgstr "Nächster Treffer (Eingabe)"
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:91
+#: crates/gtkterm-gui/src/gui/terminal.rs:142
 msgid "Search options"
 msgstr "Suchoptionen"
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:192
+#: crates/gtkterm-gui/src/gui/terminal.rs:244
 msgid "Select All"
 msgstr "Alles auswählen"
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:194
+#: crates/gtkterm-gui/src/gui/terminal.rs:246
 #: crates/gtkterm-gui/src/gui/window.rs:2126
 msgid "Clear Screen"
 msgstr "Bildschirm leeren"
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:195
+#: crates/gtkterm-gui/src/gui/terminal.rs:247
 msgid "Search…"
 msgstr "Suchen …"
 
@@ -1492,9 +1496,7 @@ msgstr "{tool} erlauben?"
 msgid ""
 "{client} wants to run {tool} with {arguments}.\n"
 "It can send data to the device, change the connection or write files."
-msgstr ""
-"{client} möchte {tool} mit {arguments} ausführen.\n"
-"Das kann Daten an das Gerät senden, die Verbindung ändern oder Dateien schreiben."
+msgstr "{client} möchte {tool} mit {arguments} ausführen.\nDas kann Daten an das Gerät senden, die Verbindung ändern oder Dateien schreiben."
 
 #: crates/gtkterm-gui/src/gui/window.rs:2237
 msgid "Deny"
@@ -1512,9 +1514,7 @@ msgstr "Erlauben, bis der Server stoppt"
 msgid ""
 "Serial, TCP and UDP terminal with live Sunshine data plots and an MCP server for AI agents.\n"
 "Rust rewrite of the GTKTerm fork."
-msgstr ""
-"Seriell-, TCP- und UDP-Terminal mit Live-Diagrammen für Sunshine-Daten und einem MCP-Server für KI-Agenten.\n"
-"Rust-Neufassung des GTKTerm-Forks."
+msgstr "Seriell-, TCP- und UDP-Terminal mit Live-Diagrammen für Sunshine-Daten und einem MCP-Server für KI-Agenten.\nRust-Neufassung des GTKTerm-Forks."
 
 #: crates/gtkterm-gui/src/gui/window.rs:2285
 msgid "© 2025-2026 Philipp; GTKTerm © Julien Schmitt and contributors"

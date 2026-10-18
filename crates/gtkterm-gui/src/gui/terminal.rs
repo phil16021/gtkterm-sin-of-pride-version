@@ -18,6 +18,56 @@ use super::i18n::gettext;
 const PCRE2_CASELESS: u32 = 0x0000_0008;
 const PCRE2_MULTILINE: u32 = 0x0000_0400;
 
+/// How often queued output is handed to VTE.
+const FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
+/// Bytes fed to VTE per flush; the rest waits for the next one.
+const FEED_BUDGET: usize = 256 * 1024;
+/// Queued output beyond this is dropped (oldest first) with a notice: the display cannot keep
+/// up, but the session history, logs and MCP still have every byte.
+const MAX_PENDING: usize = 4 * 1024 * 1024;
+
+/// Output waiting for the next flush.
+#[derive(Default)]
+struct Pending {
+    bytes: RefCell<Vec<u8>>,
+    scheduled: std::cell::Cell<bool>,
+    skipped: std::cell::Cell<usize>,
+}
+
+impl Pending {
+    fn push(&self, data: &[u8]) {
+        let mut b = self.bytes.borrow_mut();
+        b.extend_from_slice(data);
+        if b.len() > MAX_PENDING {
+            // Keep the newest half, starting at a line break.
+            let cut = b.len() - MAX_PENDING / 2;
+            let cut = b[cut..]
+                .iter()
+                .position(|&c| c == b'\n')
+                .map_or(cut, |i| cut + i + 1);
+            b.drain(..cut);
+            self.skipped.set(self.skipped.get() + cut);
+        }
+    }
+
+    /// Feed up to [`FEED_BUDGET`] bytes; true if more is waiting.
+    fn flush(&self, term: &vte::Terminal) -> bool {
+        let skipped = self.skipped.replace(0);
+        if skipped > 0 {
+            let text = super::i18n::gettext_f(
+                "{bytes} bytes not shown: the display could not keep up",
+                &[("bytes", &skipped)],
+            );
+            term.feed(format!("\r\n\x1b[2m[{text}]\x1b[0m\r\n").as_bytes());
+        }
+        let mut b = self.bytes.borrow_mut();
+        let n = b.len().min(FEED_BUDGET);
+        term.feed(&b[..n]);
+        b.drain(..n);
+        !b.is_empty()
+    }
+}
+
 /// Terminal widget with its formatting state.
 pub struct TerminalView {
     /// Top-level widget (search bar + terminal + scrollbar).
@@ -34,6 +84,7 @@ pub struct TerminalView {
     pub on_input: RefCell<Option<Box<dyn Fn(&[u8])>>>,
     formatter: RefCell<ViewFormatter>,
     transform: RefCell<Transform>,
+    pending: Rc<Pending>,
 }
 
 fn rgba(c: gtkterm_core::config::Rgba) -> gtk::gdk::RGBA {
@@ -123,6 +174,7 @@ impl TerminalView {
             on_input: RefCell::new(None),
             formatter: RefCell::new(ViewFormatter::default()),
             transform: RefCell::new(transform_for(config)),
+            pending: Rc::default(),
         });
         view.apply_config(config);
 
@@ -258,8 +310,36 @@ impl TerminalView {
         self.config.borrow_mut().view_mode = mode;
         self.update_view_settings();
         if mode != ViewMode::Ascii {
-            self.term.feed(b"\r\n");
+            self.output(b"\r\n");
         }
+    }
+
+    /// Queue `data` for the terminal; it is fed on the next flush (at most every 16 ms), so
+    /// fast input costs one VTE update per frame instead of one per chunk.
+    fn output(&self, data: &[u8]) {
+        self.pending.push(data);
+        if self.pending.scheduled.replace(true) {
+            return;
+        }
+        let pending = Rc::clone(&self.pending);
+        let term = self.term.downgrade();
+        glib::timeout_add_local(FLUSH_INTERVAL, move || {
+            let Some(term) = term.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            if pending.flush(&term) {
+                glib::ControlFlow::Continue
+            } else {
+                pending.scheduled.set(false);
+                glib::ControlFlow::Break
+            }
+        });
+    }
+
+    /// Feed everything queued now.
+    #[cfg(test)]
+    pub fn flush_output(&self) {
+        while self.pending.flush(&self.term) {}
     }
 
     /// Show a chunk (TX only with local echo).
@@ -275,17 +355,18 @@ impl TerminalView {
             self.update_view_settings();
             self.formatter.borrow_mut().format(&chunk.data)
         };
-        self.term.feed(&out);
+        self.output(&out);
     }
 
     /// Write an informational line in a distinct style.
     pub fn notice(&self, text: &str) {
-        self.term
-            .feed(format!("\r\n\x1b[2m[{text}]\x1b[0m\r\n").as_bytes());
+        self.output(format!("\r\n\x1b[2m[{text}]\x1b[0m\r\n").as_bytes());
     }
 
     /// Clear the screen (and optionally the scrollback).
     pub fn clear(&self, scrollback: bool) {
+        self.pending.bytes.borrow_mut().clear();
+        self.pending.skipped.set(0);
         self.term.reset(true, scrollback);
         self.formatter.borrow_mut().reset();
         self.transform.borrow_mut().reset();

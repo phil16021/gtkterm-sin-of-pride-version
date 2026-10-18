@@ -45,43 +45,43 @@ msgstr ""
 msgid "Clear data"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/charts.rs:327
+#: crates/gtkterm-gui/src/gui/charts.rs:333
 msgid "PNG export failed: {error}"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/charts.rs:363
+#: crates/gtkterm-gui/src/gui/charts.rs:369
 msgid "Export"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/charts.rs:373
+#: crates/gtkterm-gui/src/gui/charts.rs:379
 #: crates/gtkterm-gui/src/gui/scripts.rs:362
 msgid "Saved {path}"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/charts.rs:377
+#: crates/gtkterm-gui/src/gui/charts.rs:383
 #: crates/gtkterm-gui/src/gui/scripts.rs:364
 msgid "Cannot save {path}: {error}"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/charts.rs:400
+#: crates/gtkterm-gui/src/gui/charts.rs:406
 msgid "No Sunshine data yet"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/charts.rs:401
+#: crates/gtkterm-gui/src/gui/charts.rs:407
 msgid ""
 "Lines like <tt>{temp|Inside|21.5}</tt> are plotted here.\n"
 "Prefixes B:, P: and S: select bar, pie and scatter charts."
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/charts.rs:478
+#: crates/gtkterm-gui/src/gui/charts.rs:484
 msgid "Packet ID {id}"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/charts.rs:516
+#: crates/gtkterm-gui/src/gui/charts.rs:522
 msgid "{packets} packets · {rejected} rejected"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/charts.rs:521
+#: crates/gtkterm-gui/src/gui/charts.rs:527
 msgid " · last: {error}"
 msgstr ""
 
@@ -694,6 +694,10 @@ msgstr ""
 msgid "Scripts: menu → Scripts… (Ctrl+Shift+J). The language reference is in the editor's help."
 msgstr ""
 
+#: crates/gtkterm-gui/src/gui/rt.rs:61
+msgid "{n} updates skipped: the window could not keep up"
+msgstr ""
+
 #: crates/gtkterm-gui/src/gui/scripts.rs:135
 msgid "Ready"
 msgstr ""
@@ -756,12 +760,12 @@ msgid "Failed at {at}: {message}"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:11
-#: crates/gtkterm-gui/src/gui/terminal.rs:190
+#: crates/gtkterm-gui/src/gui/terminal.rs:242
 msgid "Copy"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:17
-#: crates/gtkterm-gui/src/gui/terminal.rs:191
+#: crates/gtkterm-gui/src/gui/terminal.rs:243
 msgid "Paste"
 msgstr ""
 
@@ -986,44 +990,48 @@ msgstr ""
 msgid "MCP server listening on {url}"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:74
+#: crates/gtkterm-gui/src/gui/terminal.rs:58
+msgid "{bytes} bytes not shown: the display could not keep up"
+msgstr ""
+
+#: crates/gtkterm-gui/src/gui/terminal.rs:125
 msgid "Search text, regex or hex bytes"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:77
+#: crates/gtkterm-gui/src/gui/terminal.rs:128
 msgid "Case"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:78
+#: crates/gtkterm-gui/src/gui/terminal.rs:129
 msgid "Regex"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:79
+#: crates/gtkterm-gui/src/gui/terminal.rs:130
 msgid "Hex"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:81
+#: crates/gtkterm-gui/src/gui/terminal.rs:132
 msgid "Previous match"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:83
+#: crates/gtkterm-gui/src/gui/terminal.rs:134
 msgid "Next match (Enter)"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:91
+#: crates/gtkterm-gui/src/gui/terminal.rs:142
 msgid "Search options"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:192
+#: crates/gtkterm-gui/src/gui/terminal.rs:244
 msgid "Select All"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:194
+#: crates/gtkterm-gui/src/gui/terminal.rs:246
 #: crates/gtkterm-gui/src/gui/window.rs:2126
 msgid "Clear Screen"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:195
+#: crates/gtkterm-gui/src/gui/terminal.rs:247
 msgid "Search…"
 msgstr ""
 

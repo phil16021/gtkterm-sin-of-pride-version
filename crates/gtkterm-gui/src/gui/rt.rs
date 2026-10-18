@@ -42,21 +42,30 @@ where
     rt().spawn(fut);
 }
 
-/// Forward session events to the GTK main thread. Lagged receivers resync with `Cleared`-like
-/// semantics handled by the consumer (it simply continues).
+/// Events queued for the GTK thread. When it falls behind, the session's broadcast drops
+/// the oldest events instead of this queue growing without bound.
+const GUI_QUEUE: usize = 1024;
+
+/// Forward session events to the GTK main thread. If the window cannot keep up, skipped
+/// events are reported as an `Info` notice (the session history, logs and MCP keep the data).
 pub fn events(session: &Session) -> async_channel::Receiver<SessionEvent> {
-    let (tx, rx) = async_channel::unbounded();
+    let (tx, rx) = async_channel::bounded(GUI_QUEUE);
     let mut sub = session.subscribe();
     rt().spawn(async move {
         loop {
-            match sub.recv().await {
-                Ok(ev) => {
-                    if tx.send(ev).await.is_err() {
-                        break;
-                    }
+            let ev = match sub.recv().await {
+                Ok(ev) => ev,
+                Err(RecvError::Lagged(n)) => {
+                    tracing::warn!(n, "GUI lagged behind session events");
+                    SessionEvent::Info(super::i18n::gettext_f(
+                        "{n} updates skipped: the window could not keep up",
+                        &[("n", &n)],
+                    ))
                 }
-                Err(RecvError::Lagged(n)) => tracing::warn!(n, "GUI lagged behind session events"),
                 Err(RecvError::Closed) => break,
+            };
+            if tx.send(ev).await.is_err() {
+                break;
             }
         }
     });
