@@ -25,9 +25,19 @@ pangocairo = { workspace = true, optional = true }
 jiff.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 proptest.workspace = true
 tempfile.workspace = true
 
 [[example]]
 name = "render_samples"
+required-features = ["render"]
+
+# cairo-rs is used as `cairo`.
+[package.metadata.cargo-machete]
+ignored = ["cairo-rs"]
+
+[[bench]]
+name = "render"
+harness = false
 required-features = ["render"]

@@ -19,6 +19,11 @@ crc.workspace = true
 jiff.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 proptest.workspace = true
 insta.workspace = true
 rstest.workspace = true
+
+[[bench]]
+name = "pipeline"
+harness = false

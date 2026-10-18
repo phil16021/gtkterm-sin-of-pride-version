@@ -145,6 +145,7 @@ struct TransferResult {
     /// Protocol.
     protocol: String,
     /// Files sent or received, with local paths for received files.
+    #[schemars(with = "Vec<serde_json::Map<String, serde_json::Value>>")]
     files: Vec<serde_json::Value>,
     /// Bytes transferred.
     bytes: u64,
@@ -197,9 +198,31 @@ struct PortList {
     /// Serial devices found on this machine.
     ports: Vec<PortEntry>,
     /// Existing sessions with their state.
+    #[schemars(with = "Vec<serde_json::Map<String, serde_json::Value>>")]
     sessions: Vec<serde_json::Value>,
     /// Saved profile names usable with open_port.
     profiles: Vec<String>,
+}
+
+/// A JSON object whose fields depend on the data (a profile, a report). MCP requires output
+/// schemas to describe an object; `serde_json::Value` alone says nothing, and clients then drop
+/// the tool.
+#[derive(Debug, Serialize)]
+#[serde(transparent)]
+struct AnyObject(serde_json::Value);
+
+impl JsonSchema for AnyObject {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "AnyObject".into()
+    }
+
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({ "type": "object", "additionalProperties": true })
+    }
 }
 
 /// Generic acknowledgement.
@@ -208,6 +231,7 @@ struct Done {
     /// What happened.
     message: String,
     /// Session status afterwards.
+    #[schemars(with = "serde_json::Map<String, serde_json::Value>")]
     status: serde_json::Value,
 }
 
@@ -347,6 +371,7 @@ struct SearchOut {
 
 /// Prompt argument with a free-form focus.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(transform = crate::params::plain_optionals)]
 struct FocusArgs {
     /// Optional focus, e.g. a device name, a packet ID or a symptom.
     #[serde(default)]
@@ -371,12 +396,16 @@ struct FrameOut {
     /// One-line decoding.
     summary: String,
     /// none, ok or failed (with received/computed).
+    #[schemars(with = "serde_json::Map<String, serde_json::Value>")]
     check: serde_json::Value,
     /// Decoded fields.
     fields: serde_json::Map<String, serde_json::Value>,
     /// Frame bytes as hex.
     #[serde(skip_serializing_if = "Option::is_none")]
     bytes: Option<String>,
+    /// With a TCP server: the client whose data completed the frame.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    peer: Option<String>,
 }
 
 fn frame_out(f: &DecodedFrame, bytes: bool) -> FrameOut {
@@ -397,6 +426,7 @@ fn frame_out(f: &DecodedFrame, bytes: bool) -> FrameOut {
             .map(|x| (x.name.clone(), serde_json::Value::String(x.value.clone())))
             .collect(),
         bytes: bytes.then(|| gtkterm_protocols::hex::to_hex(&f.frame.bytes)),
+        peer: f.peer.map(|p| p.to_string()),
     }
 }
 
@@ -410,6 +440,7 @@ struct FramesResult {
     /// Frames that were requested but already dropped from the ring.
     dropped: u64,
     /// Decoder state.
+    #[schemars(with = "serde_json::Map<String, serde_json::Value>")]
     decoder: serde_json::Value,
 }
 
@@ -428,6 +459,7 @@ struct ModbusResult {
     summary: Option<String>,
     /// Parsed response: bits, registers, written or exception.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<serde_json::Map<String, serde_json::Value>>")]
     response: Option<serde_json::Value>,
     /// Round trip in ms.
     elapsed_ms: u64,
@@ -461,6 +493,44 @@ fn expect_regex(pattern: &str, encoding: Option<Encoding>) -> Result<Regex, Stri
         }
     };
     Regex::new(&source).map_err(|e| format!("invalid pattern: {e}"))
+}
+
+/// See [`crate::fuzzing::tool_arguments`].
+pub(crate) fn fuzz_arguments(json: &str) {
+    use crate::params::{ConnectionSpec, ExpectParams, OpenPortParams, SendParams};
+    let _ = RxQuery::parse(json);
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+        return;
+    };
+    if let Ok(p) = serde_json::from_value::<SendParams>(value.clone()) {
+        let _ = p.encoding.decode(&p.data);
+    }
+    if let Ok(p) = serde_json::from_value::<ExpectParams>(value.clone()) {
+        let _ = expect_regex(&p.pattern, p.pattern_encoding);
+        if let Some(send) = &p.send {
+            let _ = p.encoding.decode(send);
+        }
+    }
+    if let Ok(p) = serde_json::from_value::<OpenPortParams>(value.clone())
+        && let Some(c) = p.connection
+        && let Ok(conn) = c.into_connection()
+    {
+        let _ = conn.validate();
+    }
+    if let Ok(c) = serde_json::from_value::<ConnectionSpec>(value.clone()) {
+        let _ = c.into_connection();
+    }
+    if let Ok(p) = serde_json::from_value::<ConfigurePortParams>(value.clone()) {
+        let mut cfg = gtkterm_core::config::SerialConfig::default();
+        if p.apply(&mut cfg).is_ok() {
+            let _ = gtkterm_core::config::Connection::Serial(cfg).validate();
+        }
+    }
+    for encoding in [Encoding::Text, Encoding::Hex, Encoding::Base64] {
+        if let Some(s) = value.as_str() {
+            let _ = encoding.decode(s).map(|b| encoding.encode(&b));
+        }
+    }
 }
 
 /// Query of `gtkterm://session/{id}/rx?since=…&encoding=…`.
@@ -868,11 +938,8 @@ impl GtkTermMcp {
 
     /// Connection state, endpoint, byte counters, modem lines and logging state.
     #[tool(annotations(title = "Get status", read_only_hint = true))]
-    async fn get_status(
-        &self,
-        Parameters(p): Parameters<SessionArg>,
-    ) -> Result<Json<serde_json::Value>, String> {
-        Ok(Json(status_json(&self.session(p.session)?.status())))
+    async fn get_status(&self, Parameters(p): Parameters<SessionArg>) -> Result<Json<AnyObject>, String> {
+        Ok(Json(AnyObject(status_json(&self.session(p.session)?.status()))))
     }
 
     /// Send data to the device. Returns an rx_cursor to read the reply from.
@@ -915,6 +982,7 @@ impl GtkTermMcp {
                     data: p.encoding.encode(&r.data),
                     next_cursor: r.next_cursor,
                     lost: r.lost,
+                    peers: r.peers.iter().map(Into::into).collect(),
                 }));
             }
             tokio::select! {
@@ -992,13 +1060,10 @@ impl GtkTermMcp {
 
     /// Read the modem lines (DTR, RTS, CTS, DSR, DCD, RI) of a serial port.
     #[tool(annotations(title = "Get signals", read_only_hint = true))]
-    async fn get_signals(
-        &self,
-        Parameters(p): Parameters<SessionArg>,
-    ) -> Result<Json<serde_json::Value>, String> {
+    async fn get_signals(&self, Parameters(p): Parameters<SessionArg>) -> Result<Json<AnyObject>, String> {
         let st = self.session(p.session)?.status();
         st.modem
-            .map(|m| Json(serde_json::to_value(m).unwrap_or_default()))
+            .map(|m| Json(AnyObject(serde_json::to_value(m).unwrap_or_default())))
             .ok_or_else(|| {
                 "no modem lines available (port closed, not serial, or a pseudo terminal)".to_owned()
             })
@@ -1190,7 +1255,7 @@ impl GtkTermMcp {
 
     /// List macros with their shortcuts and steps (in the editor syntax accepted by macro_save).
     #[tool(annotations(title = "List macros", read_only_hint = true))]
-    async fn macro_list(&self) -> Result<Json<serde_json::Value>, String> {
+    async fn macro_list(&self) -> Result<Json<AnyObject>, String> {
         let macros: Vec<serde_json::Value> = self.manager.with_macros(|s| {
             s.list()
                 .iter()
@@ -1203,7 +1268,7 @@ impl GtkTermMcp {
                 })
                 .collect()
         });
-        Ok(Json(serde_json::json!({ "macros": macros })))
+        Ok(Json(AnyObject(serde_json::json!({ "macros": macros }))))
     }
 
     /// Run a macro in a session and wait until it finishes (expect steps fail on timeout).
@@ -1212,7 +1277,7 @@ impl GtkTermMcp {
         &self,
         Parameters(p): Parameters<MacroRunParams>,
         ct: CancellationToken,
-    ) -> Result<Json<serde_json::Value>, String> {
+    ) -> Result<Json<AnyObject>, String> {
         let session = self.session(p.session)?;
         let id = session.id();
         let run = self.manager.run_macro(&session, &p.name);
@@ -1225,7 +1290,7 @@ impl GtkTermMcp {
             }
         };
         match result {
-            Ok(report) => Ok(Json(serde_json::to_value(report).unwrap_or_default())),
+            Ok(report) => Ok(Json(AnyObject(serde_json::to_value(report).unwrap_or_default()))),
             Err(gtkterm_core::macros::MacroError::Step {
                 step,
                 message,
@@ -1244,7 +1309,7 @@ impl GtkTermMcp {
     async fn macro_save(
         &self,
         Parameters(p): Parameters<MacroSaveParams>,
-    ) -> Result<Json<serde_json::Value>, String> {
+    ) -> Result<Json<AnyObject>, String> {
         let commands = gtkterm_core::macros::parse_text(&p.text).map_err(err)?;
         let m = gtkterm_core::macros::Macro {
             name: p.name.trim().to_owned(),
@@ -1256,12 +1321,14 @@ impl GtkTermMcp {
         self.manager
             .update_macros(|s| s.upsert(Some(&name), m))
             .map_err(err)?;
-        Ok(Json(serde_json::json!({ "saved": name, "steps": steps })))
+        Ok(Json(AnyObject(
+            serde_json::json!({ "saved": name, "steps": steps }),
+        )))
     }
 
     /// List serial presets (built-in and user defined).
     #[tool(annotations(title = "List presets", read_only_hint = true))]
-    async fn preset_list(&self) -> Result<Json<serde_json::Value>, String> {
+    async fn preset_list(&self) -> Result<Json<AnyObject>, String> {
         let presets: Vec<serde_json::Value> = self.manager.with_config(|c| {
             gtkterm_core::presets::all_presets(&c.presets)
                 .into_iter()
@@ -1276,7 +1343,7 @@ impl GtkTermMcp {
                 })
                 .collect()
         });
-        Ok(Json(serde_json::json!({ "presets": presets })))
+        Ok(Json(AnyObject(serde_json::json!({ "presets": presets }))))
     }
 
     /// Apply a preset's line settings to the session's serial port (reopens it).
@@ -1303,27 +1370,24 @@ impl GtkTermMcp {
 
     /// List saved profiles.
     #[tool(annotations(title = "List profiles", read_only_hint = true))]
-    async fn profile_list(&self) -> Result<Json<serde_json::Value>, String> {
+    async fn profile_list(&self) -> Result<Json<AnyObject>, String> {
         let profiles: Vec<serde_json::Value> = self.manager.with_config(|c| {
             c.profiles
                 .iter()
                 .map(|(n, p)| serde_json::json!({ "name": n, "endpoint": p.connection.summary() }))
                 .collect()
         });
-        Ok(Json(serde_json::json!({ "profiles": profiles })))
+        Ok(Json(AnyObject(serde_json::json!({ "profiles": profiles }))))
     }
 
     /// Get a profile's settings (connection and terminal).
     #[tool(annotations(title = "Get profile", read_only_hint = true))]
-    async fn profile_get(
-        &self,
-        Parameters(p): Parameters<ProfileParams>,
-    ) -> Result<Json<serde_json::Value>, String> {
+    async fn profile_get(&self, Parameters(p): Parameters<ProfileParams>) -> Result<Json<AnyObject>, String> {
         let profile = self
             .manager
             .with_config(|c| c.profile(&p.name).cloned())
             .map_err(err)?;
-        Ok(Json(serde_json::to_value(profile).map_err(err)?))
+        Ok(Json(AnyObject(serde_json::to_value(profile).map_err(err)?)))
     }
 
     /// Save the session's current connection and terminal settings as a profile.
@@ -1331,7 +1395,7 @@ impl GtkTermMcp {
     async fn profile_save(
         &self,
         Parameters(p): Parameters<ProfileSaveParams>,
-    ) -> Result<Json<serde_json::Value>, String> {
+    ) -> Result<Json<AnyObject>, String> {
         let session = self.session(p.session)?;
         let connection = session
             .connection()
@@ -1352,7 +1416,7 @@ impl GtkTermMcp {
             .with_config_mut(|c| c.profile_mut(&p.name).map(|slot| *slot = profile))
             .map_err(err)?;
         self.manager.save_config().map_err(err)?;
-        Ok(Json(serde_json::json!({ "saved": p.name })))
+        Ok(Json(AnyObject(serde_json::json!({ "saved": p.name }))))
     }
 
     /// Delete a saved profile. Deleting "default" resets it to the defaults.
@@ -1360,12 +1424,12 @@ impl GtkTermMcp {
     async fn profile_delete(
         &self,
         Parameters(p): Parameters<ProfileParams>,
-    ) -> Result<Json<serde_json::Value>, String> {
+    ) -> Result<Json<AnyObject>, String> {
         self.manager
             .with_config_mut(|c| c.remove_profile(&p.name))
             .map_err(err)?;
         self.manager.save_config().map_err(err)?;
-        Ok(Json(serde_json::json!({ "deleted": p.name })))
+        Ok(Json(AnyObject(serde_json::json!({ "deleted": p.name }))))
     }
 
     /// Change the line settings (baud rate, data bits, parity, stop bits, flow control) of an
@@ -1399,14 +1463,14 @@ impl GtkTermMcp {
     async fn decoder_set(
         &self,
         Parameters(p): Parameters<DecoderSetParams>,
-    ) -> Result<Json<serde_json::Value>, String> {
+    ) -> Result<Json<AnyObject>, String> {
         let session = self.session(p.session)?;
         let mode: DecoderMode = p.mode.parse()?;
         if p.clear {
             session.clear_frames();
         }
         let status = session.set_decoder(mode, p.signals);
-        Ok(Json(serde_json::to_value(status).map_err(err)?))
+        Ok(Json(AnyObject(serde_json::to_value(status).map_err(err)?)))
     }
 
     /// Decoded protocol frames (Modbus, NMEA, AT, CAN, EtherCAT, ...) with checksum results.
@@ -1629,7 +1693,7 @@ impl GtkTermMcp {
         &self,
         Parameters(p): Parameters<ScriptRunParams>,
         ctx: RequestContext<RoleServer>,
-    ) -> Result<Json<serde_json::Value>, String> {
+    ) -> Result<Json<AnyObject>, String> {
         let session = self.session(p.session)?;
         let allowed = self.file_dirs();
         let script = match (&p.script, &p.path) {
@@ -1699,7 +1763,7 @@ impl GtkTermMcp {
         };
         let _ = forward.await;
         match result {
-            Ok(report) => Ok(Json(serde_json::to_value(report).map_err(err)?)),
+            Ok(report) => Ok(Json(AnyObject(serde_json::to_value(report).map_err(err)?))),
             Err(ScriptError::Failed { at, message, report }) => Err(format!(
                 "{at}: {message}\nlog: {:?}\nreceived (tail): {:?}",
                 report.log,
@@ -1722,7 +1786,7 @@ impl GtkTermMcp {
     async fn script_check(
         &self,
         Parameters(p): Parameters<ScriptCheckParams>,
-    ) -> Result<Json<serde_json::Value>, String> {
+    ) -> Result<Json<AnyObject>, String> {
         let allowed = self.file_dirs();
         let s = Script::parse_with(
             "<script>",
@@ -1731,11 +1795,11 @@ impl GtkTermMcp {
             Some(&allowed),
         )
         .map_err(err)?;
-        Ok(Json(serde_json::json!({
+        Ok(Json(AnyObject(serde_json::json!({
             "statements": s.len(),
             "uses_exec": s.uses_exec(),
             "exec_allowed": self.options.allow_exec,
-        })))
+        }))))
     }
 
     /// Stop the script or macro running in a session.
@@ -1756,18 +1820,20 @@ impl GtkTermMcp {
     async fn signal_history(
         &self,
         Parameters(p): Parameters<SignalHistoryParams>,
-    ) -> Result<Json<serde_json::Value>, String> {
+    ) -> Result<Json<AnyObject>, String> {
         let session = self.session(p.session)?;
         if p.csv {
-            return Ok(Json(serde_json::json!({ "csv": session.signals_csv() })));
+            return Ok(Json(AnyObject(
+                serde_json::json!({ "csv": session.signals_csv() }),
+            )));
         }
         let secs = p.seconds.unwrap_or(60).clamp(1, 300);
         let since =
             jiff::Timestamp::now() - jiff::SignedDuration::from_secs(i64::try_from(secs).unwrap_or(60));
         let samples = session.signal_history(Some(since));
-        Ok(Json(
+        Ok(Json(AnyObject(
             serde_json::json!({ "samples": samples, "count": samples.len() }),
-        ))
+        )))
     }
 
     /// Discard data waiting in the serial driver's input and output buffers.
@@ -1785,7 +1851,7 @@ impl GtkTermMcp {
         &self,
         Parameters(p): Parameters<AutoBaudParams>,
         ct: CancellationToken,
-    ) -> Result<Json<serde_json::Value>, String> {
+    ) -> Result<Json<AnyObject>, String> {
         let session = self.session(p.session)?;
         let candidates = p
             .candidates
@@ -1794,7 +1860,7 @@ impl GtkTermMcp {
         let r = gtkterm_core::autobaud::auto_baud(&session, &candidates, listen, &ct)
             .await
             .map_err(err)?;
-        Ok(Json(serde_json::to_value(r).map_err(err)?))
+        Ok(Json(AnyObject(serde_json::to_value(r).map_err(err)?)))
     }
 
     /// Pause or resume a Sunshine chart.
@@ -1834,10 +1900,7 @@ impl GtkTermMcp {
 
     /// Start logging received (and, except for raw logs, sent) data to a file in the log directory.
     #[tool(annotations(title = "Start log"))]
-    async fn log_start(
-        &self,
-        Parameters(p): Parameters<LogStartParams>,
-    ) -> Result<Json<serde_json::Value>, String> {
+    async fn log_start(&self, Parameters(p): Parameters<LogStartParams>) -> Result<Json<AnyObject>, String> {
         let session = self.session(p.session)?;
         let format = match p.format.as_deref() {
             Some(f) => LogFormat::parse(f)
@@ -1854,30 +1917,24 @@ impl GtkTermMcp {
             })
             .await
             .map_err(err)?;
-        Ok(Json(serde_json::to_value(st).unwrap_or_default()))
+        Ok(Json(AnyObject(serde_json::to_value(st).unwrap_or_default())))
     }
 
     /// Stop logging and close the log file.
     #[tool(annotations(title = "Stop log"))]
-    async fn log_stop(
-        &self,
-        Parameters(p): Parameters<SessionArg>,
-    ) -> Result<Json<serde_json::Value>, String> {
+    async fn log_stop(&self, Parameters(p): Parameters<SessionArg>) -> Result<Json<AnyObject>, String> {
         let session = self.session(p.session)?;
         let st = session.log(LogOp::Stop).await.map_err(err)?;
-        Ok(Json(serde_json::to_value(st).unwrap_or_default()))
+        Ok(Json(AnyObject(serde_json::to_value(st).unwrap_or_default())))
     }
 
     /// Current log file, format and size.
     #[tool(annotations(title = "Log status", read_only_hint = true))]
-    async fn log_status(
-        &self,
-        Parameters(p): Parameters<SessionArg>,
-    ) -> Result<Json<serde_json::Value>, String> {
+    async fn log_status(&self, Parameters(p): Parameters<SessionArg>) -> Result<Json<AnyObject>, String> {
         let st = self.session(p.session)?.status();
-        Ok(Json(
+        Ok(Json(AnyObject(
             serde_json::json!({ "log": st.log, "log_dir": self.options.log_dir }),
-        ))
+        )))
     }
 }
 

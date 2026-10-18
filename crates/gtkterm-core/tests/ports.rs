@@ -26,7 +26,7 @@ async fn recv_bytes(port: &mut OpenPort, n: usize) -> Vec<u8> {
             .await
             .expect("timed out waiting for data")
         {
-            Some(PortRx::Data(b)) => out.extend_from_slice(&b),
+            Some(PortRx::Data(b) | PortRx::DataFrom(b, _)) => out.extend_from_slice(&b),
             Some(PortRx::Info(_)) => {}
             other => panic!("unexpected {other:?} after {} bytes", out.len()),
         }
@@ -41,7 +41,7 @@ async fn next_info(port: &mut OpenPort) -> String {
             .expect("timed out waiting for info")
         {
             Some(PortRx::Info(s)) => return s,
-            Some(PortRx::Data(_)) => {}
+            Some(PortRx::Data(_) | PortRx::DataFrom(..)) => {}
             other => panic!("unexpected {other:?}"),
         }
     }
@@ -224,11 +224,20 @@ async fn tcp_server_merges_clients_and_survives_disconnects() {
     for (i, c) in clients.iter_mut().enumerate() {
         c.write_all(format!("c{i};").as_bytes()).await.unwrap();
     }
-    let mut got = recv_bytes(&mut port, 9).await;
-    got.sort_unstable();
-    let mut want = b"c0;c1;c2;".to_vec();
-    want.sort_unstable();
-    assert_eq!(got, want);
+    // Every client's data is tagged with its address.
+    let mut from = std::collections::BTreeMap::new();
+    while from.values().map(Vec::len).sum::<usize>() < 9 {
+        match timeout(T, port.rx.recv()).await.expect("data") {
+            Some(PortRx::DataFrom(b, peer)) => {
+                from.entry(peer).or_insert_with(Vec::new).extend_from_slice(&b);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    for (i, c) in clients.iter().enumerate() {
+        let me = c.local_addr().unwrap();
+        assert_eq!(from[&me], format!("c{i};").as_bytes(), "data of {me}");
+    }
 
     drop(clients.remove(1));
     assert!(next_info(&mut port).await.contains("disconnected"));
@@ -301,6 +310,7 @@ async fn udp_learns_remote_and_resolves_hostnames() {
         local_port: 0,
         remote_host: Some("localhost".into()),
         remote_port: peer_port,
+        max_datagram: 0,
     };
     let mut port = port::open(&fixed).await.unwrap();
     port.writer.write_all(b"hi").await.unwrap();
@@ -315,6 +325,7 @@ async fn udp_learns_remote_and_resolves_hostnames() {
         local_port: 0,
         remote_host: None,
         remote_port: 0,
+        max_datagram: 0,
     };
     let mut port = port::open(&learn).await.unwrap();
     assert!(matches!(
@@ -348,6 +359,7 @@ async fn udp_ipv6_loopback() {
         local_port: 0,
         remote_host: Some("::1".into()),
         remote_port: peer.local_addr().unwrap().port(),
+        max_datagram: 0,
     };
     let mut port = port::open(&conn).await.unwrap();
     port.writer.write_all(b"v6").await.unwrap();
@@ -367,4 +379,35 @@ async fn loopback_pair() {
     assert_eq!(dev.recv().await.unwrap(), &b"xyz"[..]);
     dev.disconnect().await;
     assert!(matches!(port.rx.recv().await, Some(PortRx::Closed(None))));
+}
+
+/// Long UDP writes are split at the configured datagram size.
+#[tokio::test]
+async fn udp_splits_writes_at_max_datagram() {
+    let peer = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let conn = Connection::Udp {
+        bind: "127.0.0.1".into(),
+        local_port: 0,
+        remote_host: Some("127.0.0.1".into()),
+        remote_port: peer.local_addr().unwrap().port(),
+        max_datagram: 100,
+    };
+    conn.validate().unwrap();
+    let mut port = port::open(&conn).await.unwrap();
+    port.writer.write_all(&pattern(250)).await.unwrap();
+    let mut buf = [0u8; 1024];
+    let mut sizes = Vec::new();
+    for _ in 0..3 {
+        let (n, _) = timeout(T, peer.recv_from(&mut buf)).await.unwrap().unwrap();
+        sizes.push(n);
+    }
+    assert_eq!(sizes, [100, 100, 50]);
+    let too_big = Connection::Udp {
+        bind: "0.0.0.0".into(),
+        local_port: 0,
+        remote_host: None,
+        remote_port: 0,
+        max_datagram: 65_508,
+    };
+    assert!(too_big.validate().is_err());
 }

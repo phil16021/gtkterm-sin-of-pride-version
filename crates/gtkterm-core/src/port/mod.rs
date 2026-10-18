@@ -111,6 +111,8 @@ impl PortError {
 pub enum PortRx {
     /// Received bytes.
     Data(Bytes),
+    /// Received bytes from one client of a TCP server.
+    DataFrom(Bytes, std::net::SocketAddr),
     /// Informational event, e.g. "client 10.0.0.2:5123 connected".
     Info(String),
     /// The port closed; `Some` if because of an error.
@@ -189,8 +191,6 @@ pub trait SerialControl: Send + Sync + fmt::Debug {
     fn counters(&self) -> Result<LineCounters, PortError>;
     /// Discard data in the driver's input and output buffers.
     fn flush(&self) -> Result<(), PortError>;
-    /// Block until a modem input line changes (`TIOCMIWAIT`). Call from a blocking thread.
-    fn wait_modem_change(&self) -> Result<(), PortError>;
 }
 
 /// An open port.
@@ -326,6 +326,16 @@ pub async fn open(connection: &Connection) -> Result<OpenPort, PortError> {
             local_port,
             remote_host,
             remote_port,
-        } => udp::open(bind, *local_port, remote_host.as_deref(), *remote_port).await,
+            max_datagram,
+        } => {
+            udp::open(
+                bind,
+                *local_port,
+                remote_host.as_deref(),
+                *remote_port,
+                *max_datagram,
+            )
+            .await
+        }
     }
 }

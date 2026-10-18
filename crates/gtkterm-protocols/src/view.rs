@@ -94,13 +94,28 @@ impl Radix {
     }
 
     fn push(self, out: &mut Vec<u8>, byte: u8) {
-        use std::io::Write as _;
-        // Writing into a Vec cannot fail.
-        let _ = match self {
-            Self::Hex => write!(out, "{byte:02X} "),
-            Self::Binary => write!(out, "{byte:08b} "),
-            Self::Decimal => write!(out, "{byte:3} "),
-        };
+        const HEX: &[u8; 16] = b"0123456789ABCDEF";
+        match self {
+            Self::Hex => {
+                out.extend_from_slice(&[HEX[usize::from(byte >> 4)], HEX[usize::from(byte & 15)], b' ']);
+            }
+            Self::Binary => {
+                let mut cell = [b' '; 9];
+                for (i, c) in cell[..8].iter_mut().enumerate() {
+                    *c = if byte & (0x80 >> i) == 0 { b'0' } else { b'1' };
+                }
+                out.extend_from_slice(&cell);
+            }
+            Self::Decimal => {
+                let digit = |d: u8| b'0' + d;
+                let cell = match byte {
+                    0..=9 => [b' ', b' ', digit(byte), b' '],
+                    10..=99 => [b' ', digit(byte / 10), digit(byte % 10), b' '],
+                    _ => [digit(byte / 100), digit(byte / 10 % 10), digit(byte % 10), b' '],
+                };
+                out.extend_from_slice(&cell);
+            }
+        }
     }
 }
 
@@ -273,6 +288,22 @@ mod tests {
         // A line continued by the next chunk keeps its first stamp.
         let out = String::from_utf8(f.format_stamped(b"d", Some("12:00:01.000"))).unwrap();
         assert_eq!(out, "64 \r\n");
+    }
+
+    #[test]
+    fn cells_match_the_c_printf_formats() {
+        for byte in 0..=255u8 {
+            for (radix, want) in [
+                (Radix::Hex, format!("{byte:02X} ")),
+                (Radix::Binary, format!("{byte:08b} ")),
+                (Radix::Decimal, format!("{byte:3} ")),
+            ] {
+                let mut out = Vec::new();
+                radix.push(&mut out, byte);
+                assert_eq!(String::from_utf8(out).unwrap(), want);
+                assert_eq!(want.len(), radix.cell_width());
+            }
+        }
     }
 
     #[test]

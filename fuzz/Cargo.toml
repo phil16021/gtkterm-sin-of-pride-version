@@ -14,6 +14,7 @@ members = ["."]
 libfuzzer-sys = "0.4"
 gtkterm-protocols = { path = "../crates/gtkterm-protocols" }
 gtkterm-core = { path = "../crates/gtkterm-core" }
+gtkterm-mcp = { path = "../crates/gtkterm-mcp", default-features = false }
 jiff = "0.2"
 bytes = "1"
 
@@ -76,6 +77,20 @@ bench = false
 [[bin]]
 name = "script_parse"
 path = "fuzz_targets/script_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "presets_import"
+path = "fuzz_targets/presets_import.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mcp_arguments"
+path = "fuzz_targets/mcp_arguments.rs"
 test = false
 doc = false
 bench = false

@@ -496,6 +496,7 @@ async fn undeliverable_udp_writes_keep_the_port_open() {
         local_port: 0,
         remote_host: None,
         remote_port: 0,
+        max_datagram: 0,
     })
     .await
     .unwrap();

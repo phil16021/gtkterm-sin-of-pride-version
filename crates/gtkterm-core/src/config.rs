@@ -346,8 +346,20 @@ pub enum Connection {
         /// Remote port.
         #[serde(default)]
         remote_port: u16,
+        /// Largest datagram sent; longer writes are split (0 = 65 507, the IPv4 maximum). Lower
+        /// it, e.g. to 1472, for links that drop fragmented packets.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        max_datagram: u16,
     },
 }
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde passes a reference
+fn is_zero(v: &u16) -> bool {
+    *v == 0
+}
+
+/// Largest UDP payload over IPv4 (65 535 − 20 IP − 8 UDP header bytes).
+pub const MAX_UDP_PAYLOAD: u16 = 65_507;
 
 fn default_connect_timeout() -> u64 {
     5_000
@@ -376,6 +388,7 @@ impl Connection {
                 local_port,
                 remote_host,
                 remote_port,
+                ..
             } => format!(
                 "UDP:{bind}:{local_port}->{}:{remote_port}",
                 remote_host.as_deref().unwrap_or("*")
@@ -420,8 +433,15 @@ impl Connection {
             Self::Udp {
                 remote_host,
                 remote_port,
+                max_datagram,
                 ..
             } => {
+                if *max_datagram > MAX_UDP_PAYLOAD {
+                    return Err(invalid(
+                        "max_datagram",
+                        format!("{max_datagram} exceeds {MAX_UDP_PAYLOAD} bytes"),
+                    ));
+                }
                 if remote_host.is_some() && *remote_port == 0 {
                     return Err(invalid("remote_port", "required when remote_host is set"));
                 }
@@ -1079,6 +1099,7 @@ mod tests {
                     local_port: 9000,
                     remote_host: Some("localhost".into()),
                     remote_port: 9001,
+                    max_datagram: 0,
                 },
                 terminal: TerminalConfig {
                     view_mode: ViewMode::DecimalMixed,
@@ -1171,6 +1192,7 @@ mod tests {
             local_port: 1,
             remote_host: None,
             remote_port: 0,
+            max_datagram: 0,
         };
         assert_eq!(udp.summary(), "UDP:0.0.0.0:1->*:0");
     }

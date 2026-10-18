@@ -12,22 +12,47 @@ use std::process::ExitCode;
 
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::prelude::*;
 
 use crate::cli::{Cli, run_config_op};
 
-fn init_tracing(verbose: u8) {
+/// What `--trace-file` records unless `GTKTERM_TRACE` says otherwise.
+const TRACE_FILE_FILTER: &str = "info,gtkterm_core=debug,gtkterm_mcp=debug,gtkterm_sunshine=debug";
+
+fn init_tracing(verbose: u8, trace_file: Option<&std::path::Path>) -> std::io::Result<()> {
     let default = match verbose {
         0 => "warn",
         1 => "info,gtkterm_core=info,gtkterm_mcp=info",
-        2 => "info,gtkterm_core=debug,gtkterm_mcp=debug,gtkterm_gui=debug",
-        _ => "debug,gtkterm_core=trace,gtkterm_mcp=trace,gtkterm_gui=trace",
+        2 => "info,gtkterm_core=debug,gtkterm_mcp=debug,gtkterm_sunshine=debug",
+        _ => "debug,gtkterm_core=trace,gtkterm_mcp=trace,gtkterm_sunshine=trace",
     };
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default));
     // Always stderr: stdout carries terminal data or the MCP stdio protocol.
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
+    let stderr = tracing_subscriber::fmt::layer()
         .with_writer(std::io::stderr)
-        .init();
+        .with_filter(filter);
+    // JSON lines with the session/port spans of every event, for later analysis (jq).
+    let file = match trace_file {
+        Some(path) => {
+            let file = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
+            let filter = EnvFilter::try_from_env("GTKTERM_TRACE")
+                .unwrap_or_else(|_| EnvFilter::new(TRACE_FILE_FILTER));
+            Some(
+                tracing_subscriber::fmt::layer()
+                    .json()
+                    .with_current_span(true)
+                    .with_span_list(true)
+                    .with_writer(std::sync::Mutex::new(file))
+                    .with_filter(filter),
+            )
+        }
+        None => None,
+    };
+    let registry = tracing_subscriber::registry().with(stderr).with(file);
+    #[cfg(feature = "console")]
+    let registry = registry.with(console_subscriber::spawn());
+    registry.init();
+    Ok(())
 }
 
 fn runtime() -> std::io::Result<tokio::runtime::Runtime> {
@@ -47,7 +72,10 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     }
-    init_tracing(cli.verbose);
+    if let Err(e) = init_tracing(cli.verbose, cli.trace_file.as_deref()) {
+        eprintln!("gtkterm-sunshine: cannot write the trace file: {e}");
+        return ExitCode::FAILURE;
+    }
     if let Some(addr) = cli.mcp_http.filter(|a| !a.ip().is_loopback()) {
         eprintln!(
             "gtkterm-sunshine: warning: the MCP endpoint listens on {addr}; anyone on the network who \

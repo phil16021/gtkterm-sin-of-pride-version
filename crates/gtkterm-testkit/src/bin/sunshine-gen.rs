@@ -7,6 +7,8 @@
 //! sunshine-gen /tmp/ttyB --device modbus-rtu --unit 1    # Modbus slave
 //! sunshine-gen /tmp/ttyB --device at                     # AT modem
 //! sunshine-gen /tmp/ttyB --device nmea --rate 1          # GPS
+//! sunshine-gen /tmp/ttyB --rate 10 --burst 200            # 200 rounds at once, 10 times a second
+//! sunshine-gen /tmp/ttyB --special-every 7                # NaN/inf values (must be rejected)
 //! ```
 //!
 //! Targets: a device path, `tcp://HOST:PORT` (connects), `tcp-listen://PORT` or `udp://HOST:PORT`.
@@ -62,6 +64,13 @@ struct Args {
     /// Every Nth line is garbage or an invalid packet (0 = never).
     #[arg(long, default_value_t = 0)]
     garbage_every: u64,
+    /// Send this many rounds back to back per tick (bursts with pauses between them).
+    #[arg(long, default_value_t = 1)]
+    burst: u32,
+    /// Every Nth packet carries a NaN, infinite or overflowing value instead of a number; the
+    /// receiver must reject and count it (0 = never).
+    #[arg(long, default_value_t = 0)]
+    special_every: u64,
     /// Also print plain log lines between packets, like real firmware.
     #[arg(long)]
     chatter: bool,
@@ -122,6 +131,16 @@ fn packet(id: &str, t: f64, rng: &mut Rng) -> String {
     }
 }
 
+/// `packet` with its last value replaced by NaN, an infinity or a number that overflows `f64`.
+fn special(packet: &str, n: u64) -> String {
+    const VALUES: [&str; 5] = ["nan", "NaN", "inf", "-inf", "1e999"];
+    let value = VALUES[(n % VALUES.len() as u64) as usize];
+    match packet.rfind('|') {
+        Some(i) => format!("{}|{value}}}", &packet[..i]),
+        None => packet.to_owned(),
+    }
+}
+
 fn connection(target: &str, baudrate: u32) -> Result<Connection> {
     let host_port = |s: &str| -> Result<(String, u16)> {
         let (h, p) = s.rsplit_once(':').context("expected HOST:PORT")?;
@@ -146,6 +165,7 @@ fn connection(target: &str, baudrate: u32) -> Result<Connection> {
             local_port: 0,
             remote_host: Some(host),
             remote_port: port,
+            max_datagram: 0,
         }
     } else if target.contains("://") {
         bail!("unknown target scheme in {target}");
@@ -164,6 +184,9 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     if args.rate <= 0.0 {
         bail!("--rate must be positive");
+    }
+    if args.burst == 0 {
+        bail!("--burst must be at least 1");
     }
     let mut port = port::open(&connection(&args.target, args.baudrate)?)
         .await
@@ -209,30 +232,41 @@ async fn main() -> Result<()> {
     let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
     let mut ticker = tokio::time::interval(Duration::from_secs_f64(1.0 / args.rate));
     let mut line_no = 0u64;
-    for round in 0.. {
-        if args.count != 0 && round >= args.count {
-            break;
-        }
+    let mut round = 0u64;
+    let mut done = false;
+    while !done {
         ticker.tick().await;
-        let t = round as f64 / args.rate;
         let mut out = String::new();
-        if args.chatter && round % 10 == 0 {
-            let _ = writeln!(out, "[{t:8.2}] heap free: {} bytes\r", 20_000 + rng.next() % 500);
-        }
-        for id in &ids {
-            line_no += 1;
-            if args.garbage_every != 0 && line_no.is_multiple_of(args.garbage_every) {
-                out.push_str(
-                    [
-                        "{oops|x|1,5}\r\n",
-                        "{broken|y|\r\n",
-                        "\u{1}\u{2}garbage\r\n",
-                        "{}\r\n",
-                    ][(line_no % 4) as usize],
-                );
+        for _ in 0..args.burst {
+            if args.count != 0 && round >= args.count {
+                done = true;
+                break;
             }
-            out.push_str(&packet(id, t, &mut rng));
-            out.push_str("\r\n");
+            let t = round as f64 / args.rate;
+            if args.chatter && round.is_multiple_of(10) {
+                let _ = writeln!(out, "[{t:8.2}] heap free: {} bytes\r", 20_000 + rng.next() % 500);
+            }
+            for id in &ids {
+                line_no += 1;
+                if args.garbage_every != 0 && line_no.is_multiple_of(args.garbage_every) {
+                    out.push_str(
+                        [
+                            "{oops|x|1,5}\r\n",
+                            "{broken|y|\r\n",
+                            "\u{1}\u{2}garbage\r\n",
+                            "{}\r\n",
+                        ][(line_no % 4) as usize],
+                    );
+                }
+                let p = packet(id, t, &mut rng);
+                if args.special_every != 0 && line_no.is_multiple_of(args.special_every) {
+                    out.push_str(&special(&p, line_no));
+                } else {
+                    out.push_str(&p);
+                }
+                out.push_str("\r\n");
+            }
+            round += 1;
         }
         let bytes = out.into_bytes();
         if args.split && bytes.len() > 1 {
@@ -253,7 +287,7 @@ async fn respond(mut port: OpenPort, mut f: impl FnMut(&[u8], i64) -> Vec<Vec<u8
     let start = std::time::Instant::now();
     while let Some(rx) = port.rx.recv().await {
         match rx {
-            PortRx::Data(d) => {
+            PortRx::Data(d) | PortRx::DataFrom(d, _) => {
                 let us = i64::try_from(start.elapsed().as_micros()).unwrap_or(i64::MAX);
                 for reply in f(&d, us) {
                     if !reply.is_empty() {
@@ -303,6 +337,15 @@ mod tests {
                 let p = parse_packet(&line).unwrap_or_else(|e| panic!("{line}: {e}"));
                 assert_eq!(p.kind, kind);
             }
+        }
+    }
+
+    #[test]
+    fn special_values_are_rejected_by_the_parser() {
+        let mut rng = Rng(7);
+        for n in 0..10 {
+            let line = special(&packet("env", 0.5, &mut rng), n);
+            assert!(parse_packet(&line).is_err(), "{line} must be rejected");
         }
     }
 

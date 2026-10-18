@@ -10,9 +10,11 @@ retries = 1
 [test-groups]
 gui-windows = { max-threads = 1 }
 
+# Some of them drive dozens of dialogs; on a loaded machine they take minutes.
 [[profile.default.overrides]]
 filter = 'package(gtkterm-gui) and test(/^gui::window::tests::/)'
 test-group = 'gui-windows'
+slow-timeout = { period = "60s", terminate-after = 4 }
 
 # lrzsz interop runs real sx/rx/sz/rz with their own timeouts; on a loaded machine they retry
 # a lot (each retry waits seconds), so allow more time before terminating.

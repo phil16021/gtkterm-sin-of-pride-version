@@ -151,6 +151,7 @@ mod tests {
 
     fn chunk(dir: Direction, data: &'static [u8]) -> Chunk {
         Chunk {
+            peer: None,
             seq: 0,
             offset: 0,
             ts: Timestamp::from_millisecond(1_000).unwrap(),

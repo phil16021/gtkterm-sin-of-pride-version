@@ -18,6 +18,8 @@ path = "src/main.rs"
 [features]
 default = ["gui"]
 # The GTK user interface. Without it the binary still offers --headless and the MCP server.
+# tokio-console support: build with RUSTFLAGS="--cfg tokio_unstable" and run `tokio-console`.
+console = ["dep:console-subscriber"]
 gui = ["dep:gtk", "dep:adw", "dep:vte", "dep:glib", "dep:gio", "dep:gtkterm-charts", "dep:async-channel", "dep:glib-build-tools", "dep:pango", "dep:sourceview", "dep:gettext-rs", "gtkterm-mcp/png"]
 
 [dependencies]
@@ -35,13 +37,13 @@ async-channel = { workspace = true, optional = true }
 pango = { workspace = true, optional = true }
 gettext-rs = { workspace = true, optional = true }
 tokio.workspace = true
+console-subscriber = { version = "0.5", optional = true }
 clap.workspace = true
 clap_mangen.workspace = true
 clap_complete.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true
-bytes.workspace = true
 jiff.workspace = true
 tokio-util.workspace = true
 nix.workspace = true
@@ -58,3 +60,7 @@ rmcp = { workspace = true, features = ["client", "transport-child-process"] }
 
 [build-dependencies]
 glib-build-tools = { workspace = true, optional = true }
+
+# gettext-rs is used as `gettextrs`.
+[package.metadata.cargo-machete]
+ignored = ["gettext-rs"]

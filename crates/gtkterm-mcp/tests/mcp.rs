@@ -1142,12 +1142,19 @@ async fn listen_reports_updates_and_new_sessions() {
     let (port, dev2) = loopback::pair("loop2");
     s2.attach(port).await.unwrap();
     dev2.send(&b"other\n"[..]).await.unwrap();
-    assert!(
-        tokio::time::timeout(Duration::from_millis(400), sub.next())
-            .await
-            .is_err(),
-        "nothing for unsubscribed resources"
-    );
+    // Late updates of session 1 may still arrive; nothing comes for session 2.
+    let quiet = tokio::time::Instant::now() + Duration::from_millis(400);
+    while let Ok(n) = tokio::time::timeout_at(quiet, sub.next()).await {
+        match n.unwrap().expect("subscription open") {
+            ServerNotification::ResourceUpdatedNotification(n) => {
+                assert_eq!(
+                    n.params.uri, "gtkterm://session/1/rx",
+                    "nothing for unsubscribed resources"
+                );
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
 }
 
 #[tokio::test]
@@ -1351,6 +1358,7 @@ async fn profiles_can_be_deleted() {
             local_port: 0,
             remote_host: None,
             remote_port: 0,
+            max_datagram: 0,
         })
         .await
         .unwrap();
@@ -1513,4 +1521,37 @@ async fn http_clients_can_listen_for_updates() {
     drop(sub);
     client.cancel().await.unwrap();
     handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn tcp_server_reads_name_the_client() {
+    use tokio::io::AsyncWriteExt as _;
+    let f = fixture(ServerOptions::default()).await;
+    let conn = gtkterm_core::config::Connection::TcpServer {
+        bind: "127.0.0.1".into(),
+        port: 0,
+    };
+    let port = gtkterm_core::port::open(&conn).await.unwrap();
+    let local: u16 = port.description.rsplit(':').next().unwrap().parse().unwrap();
+    let session = f.manager.first_or_create();
+    session.attach(port).await.unwrap();
+    let mut a = tokio::net::TcpStream::connect(("127.0.0.1", local))
+        .await
+        .unwrap();
+    let mut b = tokio::net::TcpStream::connect(("127.0.0.1", local))
+        .await
+        .unwrap();
+    a.write_all(b"from-a;").await.unwrap();
+    eventually("a's data", || session.rx_cursor() == 7).await;
+    b.write_all(b"from-b;").await.unwrap();
+    eventually("b's data", || session.rx_cursor() == 14).await;
+    let r = ok(&f.client, "read", json!({"cursor": 0})).await;
+    assert_eq!(r["data"], "from-a;from-b;");
+    assert_eq!(
+        r["peers"],
+        json!([
+            {"offset": 0, "bytes": 7, "peer": a.local_addr().unwrap().to_string()},
+            {"offset": 7, "bytes": 7, "peer": b.local_addr().unwrap().to_string()},
+        ])
+    );
 }

@@ -131,6 +131,9 @@ pub struct DecodedFrame {
     pub time: Timestamp,
     /// Direction.
     pub source: FrameSource,
+    /// The TCP client whose data completed the frame (TCP server connections).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer: Option<std::net::SocketAddr>,
     /// The decoded frame.
     #[serde(flatten)]
     pub frame: Frame,
@@ -149,10 +152,11 @@ pub fn frames_to_csv(frames: &[DecodedFrame], tz: &jiff::tz::TimeZone) -> String
                 format!("failed (received {received}, computed {computed})")
             }
         };
-        let dir = match f.source {
-            FrameSource::Rx => "rx",
-            FrameSource::Tx => "tx",
-            FrameSource::Lines => "lines",
+        let dir = match (f.source, f.peer) {
+            (FrameSource::Rx, Some(peer)) => format!("rx {peer}"),
+            (FrameSource::Rx, None) => "rx".into(),
+            (FrameSource::Tx, _) => "tx".into(),
+            (FrameSource::Lines, _) => "lines".into(),
         };
         let hex = f
             .frame
@@ -193,6 +197,8 @@ pub struct FrameStore {
     capacity: usize,
     next_seq: u64,
     check_failures: u64,
+    /// TCP client of the data being decoded; stamped on the frames it completes.
+    peer: Option<std::net::SocketAddr>,
 }
 
 impl Default for FrameStore {
@@ -209,6 +215,7 @@ impl FrameStore {
             capacity: capacity.max(1),
             next_seq: 0,
             check_failures: 0,
+            peer: None,
         }
     }
 
@@ -221,6 +228,7 @@ impl FrameStore {
             seq: self.next_seq,
             time,
             source,
+            peer: self.peer,
             frame,
         };
         self.next_seq += 1;
@@ -404,6 +412,20 @@ impl Decoding {
         self.protocol() == Some(Protocol::ModbusRtu)
     }
 
+    /// [`Decoding::feed`] for data from a known TCP client; frames it completes name the client.
+    pub fn feed_from(
+        &mut self,
+        source: FrameSource,
+        data: &[u8],
+        ts: Timestamp,
+        peer: Option<std::net::SocketAddr>,
+    ) -> Vec<DecodedFrame> {
+        self.store.peer = peer;
+        let frames = self.feed(source, data, ts);
+        self.store.peer = None;
+        frames
+    }
+
     /// Feed transmitted or received data; returns frames added to the store.
     pub fn feed(&mut self, source: FrameSource, data: &[u8], ts: Timestamp) -> Vec<DecodedFrame> {
         let mut out = Vec::new();
@@ -537,6 +559,7 @@ mod tests {
             seq: 7,
             time: Timestamp::from_millisecond(1_700_000_000_123).unwrap(),
             source: FrameSource::Tx,
+            peer: None,
             frame: Frame {
                 protocol: Protocol::ModbusRtu,
                 bytes: vec![0x01, 0x03],

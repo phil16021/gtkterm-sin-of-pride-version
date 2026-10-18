@@ -162,6 +162,10 @@ pub fn show(
 
     // ---------- Connection ----------
     let serial = profile.connection.serial().cloned().unwrap_or_default();
+    let udp_max = match &profile.connection {
+        Connection::Udp { max_datagram, .. } => *max_datagram,
+        _ => 0,
+    };
     let (kind_idx, host, tcp_port, bind, udp_local, udp_host, udp_port) = match &profile.connection {
         Connection::Serial(_) => (0, String::new(), 23, "0.0.0.0".to_owned(), 0, String::new(), 0),
         Connection::TcpClient { host, port, .. } => {
@@ -173,6 +177,7 @@ pub fn show(
             local_port,
             remote_host,
             remote_port,
+            ..
         } => (
             3,
             String::new(),
@@ -396,6 +401,15 @@ pub fn show(
     let udp_host_row = entry(&gettext("Remote host (empty: first sender)"), &udp_host);
     let udp_port_row = spin(&gettext("Remote port"), 0.0, 65_535.0, f64::from(udp_port));
     let udp_bind_row = entry(&gettext("Bind address"), &bind);
+    let udp_max_row = spin(
+        &gettext("Largest datagram (bytes)"),
+        0.0,
+        f64::from(gtkterm_core::config::MAX_UDP_PAYLOAD),
+        f64::from(udp_max),
+    );
+    udp_max_row.set_subtitle(&gettext(
+        "Longer sends are split; 0: 65507. 1472 avoids IP fragmentation",
+    ));
     let udp_group = group(
         "UDP",
         &[
@@ -403,6 +417,7 @@ pub fn show(
             udp_local_row.upcast_ref(),
             udp_host_row.upcast_ref(),
             udp_port_row.upcast_ref(),
+            udp_max_row.upcast_ref(),
         ],
     );
 
@@ -767,6 +782,7 @@ pub fn show(
                     local_port: udp_local_row.value() as u16,
                     remote_host: (!h.is_empty()).then_some(h),
                     remote_port: udp_port_row.value() as u16,
+                    max_datagram: udp_max_row.value() as u16,
                 }
             }
             _ => Connection::Serial(SerialConfig {

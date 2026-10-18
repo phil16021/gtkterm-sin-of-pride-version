@@ -132,7 +132,12 @@ impl FramesView {
                     FrameSource::Tx => Some("accent"),
                     FrameSource::Lines => Some("dim-label"),
                 };
-                (source_label(f.source).to_owned(), class)
+                // With a TCP server, which client sent it.
+                let label = match f.peer {
+                    Some(peer) => format!("{} {peer}", source_label(f.source)),
+                    None => source_label(f.source).to_owned(),
+                };
+                (label, class)
             },
             false,
         ));
@@ -306,6 +311,9 @@ impl FramesView {
             f.frame.protocol.label(),
             f.time
         );
+        if let Some(peer) = f.peer {
+            let _ = writeln!(text, "{} {peer}", gettext("from"));
+        }
         for field in &f.frame.fields {
             let _ = writeln!(text, "{} = {}", field.name, field.value);
         }

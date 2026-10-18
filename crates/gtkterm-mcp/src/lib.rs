@@ -10,6 +10,17 @@ mod params;
 mod server;
 pub mod transport;
 
+/// Entry points for the fuzz targets (not a stable API).
+#[doc(hidden)]
+pub mod fuzzing {
+    /// Deserialize `json` as the arguments of every tool and run the pure conversions that
+    /// follow (decoding data, building connections and patterns, resource queries). Must never
+    /// panic, whatever the input.
+    pub fn tool_arguments(json: &str) {
+        crate::server::fuzz_arguments(json);
+    }
+}
+
 pub use guard::{Approval, ApprovalRequest, Approver, ToolCall};
 pub use server::{
     DEFAULT_WRITES_PER_SECOND, GtkTermMcp, ServerOptions, WRITE_TOOLS, default_audit_path, default_log_dir,

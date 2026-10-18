@@ -525,6 +525,8 @@ impl Win {
     }
 
     fn toast(&self, text: &str) {
+        #[cfg(test)]
+        TOASTS.with(|t| t.borrow_mut().push(text.to_owned()));
         self.toast
             .add_toast(adw::Toast::builder().title(text).timeout(4).build());
     }
@@ -3198,6 +3200,12 @@ Safety:
 • Agents can send files only from the transfer folder or folders given with --mcp-allow-dir."
 );
 
+#[cfg(test)]
+thread_local! {
+    /// Every toast message shown (tests).
+    static TOASTS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
 /// How long an agent's write waits for the user before it is denied.
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -3989,6 +3997,63 @@ mod tests {
             .unwrap();
         assert_eq!(kind, gtkterm_protocols::sunshine::ChartKind::Bar);
         assert_eq!(cap, 50);
+        assert_eq!(UNEXPECTED_LOGS.load(Ordering::SeqCst), 0, "GTK warnings");
+    }
+
+    /// Regression S3 (C `window.c:2454` re-scanned the history on every panel reopen and
+    /// doubled the points): toggling the panel three times keeps the point counts.
+    #[gtk::test]
+    fn c_s3_panel_toggles_keep_point_counts() {
+        if std::env::var_os("GTKTERM_GUI_TESTS").is_none() {
+            return;
+        }
+        let (win, dev, _dir) = setup();
+        rt().block_on(dev.send(&b"{s3|a|1}\n{s3|a|2}\n{s3|a|3}\n"[..]))
+            .unwrap();
+        let points = |w: &Rc<Win>| {
+            w.session
+                .with_sunshine(|s| s.chart("s3").map_or(0, |c| c.series[0].samples.len()))
+        };
+        assert!(pump_until(Duration::from_secs(2), || points(&win) == 3));
+        for _ in 0..3 {
+            gio::prelude::ActionGroupExt::activate_action(&win.window, "visualization", None);
+            pump_until(Duration::from_millis(50), || false);
+            gio::prelude::ActionGroupExt::activate_action(&win.window, "visualization", None);
+            pump_until(Duration::from_millis(50), || false);
+        }
+        assert_eq!(points(&win), 3);
+        assert_eq!(win.panel.len(), 1);
+        assert_eq!(UNEXPECTED_LOGS.load(Ordering::SeqCst), 0, "GTK warnings");
+    }
+
+    /// Regression P5 (C `window.c:1464` reported a failure after closing successfully): the
+    /// Close action closes without an error message.
+    #[gtk::test]
+    fn c_p5_close_reports_success() {
+        if std::env::var_os("GTKTERM_GUI_TESTS").is_none() {
+            return;
+        }
+        let (win, _dev, _dir) = setup();
+        assert!(pump_until(Duration::from_secs(2), || win.session.status().state
+            == PortState::Open));
+        TOASTS.with(|t| t.borrow_mut().clear());
+        gio::prelude::ActionGroupExt::activate_action(&win.window, "close-port", None);
+        assert!(pump_until(Duration::from_secs(2), || win.session.status().state
+            == PortState::Closed));
+        pump_until(Duration::from_millis(100), || false);
+        assert!(!win.banner.is_revealed(), "no error banner");
+        assert!(!win.connect.is_active());
+        assert_eq!(win.connect.label().as_deref(), Some(gettext("Connect").as_str()));
+        TOASTS.with(|t| {
+            let t = t.borrow();
+            assert!(
+                !t.iter().any(|m| {
+                    let m = m.to_lowercase();
+                    m.contains("error") || m.contains("fail") || m.contains("could not")
+                }),
+                "{t:?}"
+            );
+        });
         assert_eq!(UNEXPECTED_LOGS.load(Ordering::SeqCst), 0, "GTK warnings");
     }
 

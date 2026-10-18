@@ -19,7 +19,7 @@ use regex::bytes::Regex;
 use serde::Serialize;
 use thiserror::Error;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
-use tracing::{debug, info, trace, warn};
+use tracing::{Instrument as _, debug, info, trace, warn};
 
 use crate::chunks::{Chunk, ChunkStore, Direction, RxRead};
 use crate::config::{Connection, TerminalConfig};
@@ -281,11 +281,13 @@ impl Pacing {
 impl Session {
     /// Create a session and spawn its actor. Must run inside a tokio runtime.
     pub fn spawn(id: SessionId, name: impl Into<String>, terminal: TerminalConfig) -> Self {
+        let name: String = name.into();
+        let span = tracing::info_span!("session", id, profile = %name);
         let pacing = Pacing::from_terminal(&terminal);
         let shared = Arc::new(Shared {
             status: Mutex::new(SessionStatus {
                 id,
-                name: name.into(),
+                name,
                 state: PortState::Closed,
                 description: String::new(),
                 kind: None,
@@ -325,7 +327,7 @@ impl Session {
             transfer_emitted: std::time::Instant::now(),
             opening: None,
         };
-        tokio::spawn(actor.run(cmd_rx));
+        tokio::spawn(actor.run(cmd_rx).instrument(span));
         Self {
             shared,
             cmd,
@@ -980,7 +982,7 @@ impl Actor {
         lock(&self.shared.decoding).set_baud(conn.serial().map(|s| s.baudrate));
         *lock(&self.shared.connection) = Some(conn.clone());
         self.set_state(PortState::Opening);
-        let task = tokio::spawn(async move { port::open(&conn).await });
+        let task = tokio::spawn(async move { port::open(&conn).await }.in_current_span());
         self.opening = Some(Opening { task, reply });
     }
 
@@ -1022,14 +1024,17 @@ impl Actor {
         let modem = control.as_ref().and_then(|c| c.modem_lines().ok());
         let (jobs, jobs_rx) = mpsc::unbounded_channel();
         let (written_tx, written) = mpsc::channel(64);
-        let writer_task = tokio::spawn(writer_loop(
-            writer,
-            jobs_rx,
-            written_tx,
-            self.pacing.clone(),
-            self.events.subscribe(),
-            Arc::clone(&self.shared),
-        ));
+        let writer_task = tokio::spawn(
+            writer_loop(
+                writer,
+                jobs_rx,
+                written_tx,
+                self.pacing.clone(),
+                self.events.subscribe(),
+                Arc::clone(&self.shared),
+            )
+            .instrument(tracing::info_span!("writer", port = %description)),
+        );
         {
             let mut st = lock(&self.shared.status);
             st.description.clone_from(&description);
@@ -1105,7 +1110,7 @@ impl Actor {
 
     async fn on_port_rx(&mut self, rx: Option<PortRx>) {
         match rx {
-            Some(PortRx::Data(data)) if self.transfer.is_some() => {
+            Some(PortRx::Data(data) | PortRx::DataFrom(data, _)) if self.transfer.is_some() => {
                 lock(&self.shared.status).rx_bytes += data.len() as u64;
                 trace!(held = self.transfer_writes > 0, data = %preview(&data), "transfer rx");
                 if self.transfer_writes > 0 {
@@ -1115,13 +1120,18 @@ impl Actor {
                     self.transfer_step(step);
                 }
             }
-            Some(PortRx::Data(data)) => {
+            Some(rx @ (PortRx::Data(_) | PortRx::DataFrom(..))) => {
+                let (data, peer) = match rx {
+                    PortRx::DataFrom(d, p) => (d, Some(p)),
+                    PortRx::Data(d) => (d, None),
+                    _ => return,
+                };
                 let ts = Timestamp::now();
                 let updates = lock(&self.shared.sunshine).feed(&data, ts);
-                let chunk = lock(&self.shared.chunks).push(Direction::Rx, data, ts);
+                let chunk = lock(&self.shared.chunks).push_from(Direction::Rx, data, ts, peer);
                 lock(&self.shared.status).rx_bytes += chunk.data.len() as u64;
                 self.log_chunk(&chunk);
-                let frames = self.decode(FrameSource::Rx, &chunk.data, ts);
+                let frames = self.decode_from(FrameSource::Rx, &chunk.data, ts, peer);
                 self.emit(SessionEvent::Data(chunk));
                 for u in updates {
                     self.emit(SessionEvent::Sunshine(u));
@@ -1271,9 +1281,19 @@ impl Actor {
     }
 
     fn decode(&self, source: FrameSource, data: &[u8], ts: Timestamp) -> Vec<DecodedFrame> {
+        self.decode_from(source, data, ts, None)
+    }
+
+    fn decode_from(
+        &self,
+        source: FrameSource,
+        data: &[u8],
+        ts: Timestamp,
+        peer: Option<std::net::SocketAddr>,
+    ) -> Vec<DecodedFrame> {
         let mut d = lock(&self.shared.decoding);
         let detecting = d.status().detecting;
-        let frames = d.feed(source, data, ts);
+        let frames = d.feed_from(source, data, ts, peer);
         if detecting && let Some(p) = d.protocol() {
             let status = d.status();
             drop(d);

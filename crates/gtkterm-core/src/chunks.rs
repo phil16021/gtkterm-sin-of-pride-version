@@ -6,6 +6,7 @@
 //! evicted. Eviction never shifts indices that readers rely on (ROADMAP defect S1).
 
 use std::collections::VecDeque;
+use std::net::SocketAddr;
 
 use bytes::Bytes;
 use jiff::Timestamp;
@@ -34,6 +35,19 @@ pub struct Chunk {
     pub dir: Direction,
     /// Payload.
     pub data: Bytes,
+    /// The TCP client that sent it (TCP server connections), if known.
+    pub peer: Option<SocketAddr>,
+}
+
+/// Received bytes of one TCP client within an [`RxRead`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PeerSpan {
+    /// Stream offset of the first byte.
+    pub offset: u64,
+    /// Number of bytes.
+    pub len: usize,
+    /// The client.
+    pub peer: SocketAddr,
 }
 
 /// Result of [`ChunkStore::read_rx`].
@@ -45,6 +59,8 @@ pub struct RxRead {
     pub next_cursor: u64,
     /// Bytes between the requested cursor and the oldest retained data that were evicted.
     pub lost: u64,
+    /// Which TCP client sent which bytes (empty unless the data came from a TCP server's clients).
+    pub peers: Vec<PeerSpan>,
 }
 
 /// Bounded chunk history.
@@ -84,6 +100,17 @@ impl ChunkStore {
 
     /// Append a chunk and evict old ones as needed. Returns the stored chunk.
     pub fn push(&mut self, dir: Direction, data: Bytes, ts: Timestamp) -> Chunk {
+        self.push_from(dir, data, ts, None)
+    }
+
+    /// [`ChunkStore::push`] for data from a known TCP client.
+    pub fn push_from(
+        &mut self,
+        dir: Direction,
+        data: Bytes,
+        ts: Timestamp,
+        peer: Option<SocketAddr>,
+    ) -> Chunk {
         let offset = match dir {
             Direction::Rx => &mut self.rx_total,
             Direction::Tx => &mut self.tx_total,
@@ -94,6 +121,7 @@ impl ChunkStore {
             ts,
             dir,
             data,
+            peer,
         };
         *offset += chunk.data.len() as u64;
         self.next_seq += 1;
@@ -156,6 +184,7 @@ impl ChunkStore {
     /// Read up to `max` received bytes starting at byte `cursor` of the RX stream.
     pub fn read_rx(&self, cursor: u64, max: usize) -> RxRead {
         let mut data = Vec::new();
+        let mut peers: Vec<PeerSpan> = Vec::new();
         let mut pos = cursor.min(self.rx_total);
         // The oldest retained RX byte: the first chunk's offset, or the RX position after a
         // leading TX chunk.
@@ -179,12 +208,25 @@ impl ChunkStore {
             let skip = (pos - c.offset) as usize;
             let take = (c.data.len() - skip).min(max - data.len());
             data.extend_from_slice(&c.data[skip..skip + take]);
+            if let Some(peer) = c.peer {
+                match peers.last_mut() {
+                    Some(span) if span.peer == peer && span.offset + span.len as u64 == pos => {
+                        span.len += take;
+                    }
+                    _ => peers.push(PeerSpan {
+                        offset: pos,
+                        len: take,
+                        peer,
+                    }),
+                }
+            }
             pos += take as u64;
         }
         RxRead {
             data,
             next_cursor: pos,
             lost,
+            peers,
         }
     }
 
@@ -201,6 +243,37 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
+
+    #[test]
+    fn reads_report_which_tcp_client_sent_what() {
+        let a: SocketAddr = "10.0.0.2:5000".parse().unwrap();
+        let b: SocketAddr = "10.0.0.3:5001".parse().unwrap();
+        let mut s = ChunkStore::new(1 << 20, 100);
+        s.push_from(Direction::Rx, Bytes::from_static(b"aa"), ts(), Some(a));
+        s.push_from(Direction::Rx, Bytes::from_static(b"aaa"), ts(), Some(a));
+        s.push(Direction::Tx, Bytes::from_static(b"tx"), ts());
+        s.push_from(Direction::Rx, Bytes::from_static(b"bb"), ts(), Some(b));
+        let r = s.read_rx(1, 100);
+        assert_eq!(r.data, b"aaaabb");
+        assert_eq!(
+            r.peers,
+            [
+                PeerSpan {
+                    offset: 1,
+                    len: 4,
+                    peer: a
+                },
+                PeerSpan {
+                    offset: 5,
+                    len: 2,
+                    peer: b
+                }
+            ]
+        );
+        let mut plain = ChunkStore::new(1 << 20, 100);
+        plain.push(Direction::Rx, Bytes::from_static(b"x"), ts());
+        assert!(plain.read_rx(0, 10).peers.is_empty());
+    }
 
     fn ts() -> Timestamp {
         Timestamp::UNIX_EPOCH
@@ -322,7 +395,7 @@ mod tests {
                 data.extend_from_slice(&c.data[skip..skip + take]);
                 pos += take as u64;
             }
-            prop_assert_eq!(s.read_rx(cursor, max), RxRead { data, next_cursor: pos, lost });
+            prop_assert_eq!(s.read_rx(cursor, max), RxRead { data, next_cursor: pos, lost, peers: Vec::new() });
         }
     }
 }

@@ -90,6 +90,7 @@ insta = { version = "1.49", features = ["yaml"] }
 rstest = "0.27"
 tempfile = "3"
 assert_cmd = "2"
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

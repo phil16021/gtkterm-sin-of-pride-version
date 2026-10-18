@@ -7,6 +7,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use tracing::Instrument as _;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -31,10 +32,13 @@ pub(crate) async fn connect(host: &str, port: u16, timeout: Duration) -> Result<
     let cancel = CancellationToken::new();
     let (tx, rx) = mpsc::channel(RX_CHANNEL);
     let token = cancel.clone();
-    let task = tokio::spawn(async move {
-        let reason = read_stream(read, &tx, &token, None).await;
-        let _ = tx.send(PortRx::Closed(reason.map(Arc::new))).await;
-    });
+    let task = tokio::spawn(
+        async move {
+            let reason = read_stream(read, &tx, &token, None).await;
+            let _ = tx.send(PortRx::Closed(reason.map(Arc::new))).await;
+        }
+        .in_current_span(),
+    );
     Ok(OpenPort::new(
         PortKind::TcpClient,
         format!("TCP:{endpoint}"),
@@ -63,11 +67,12 @@ async fn read_stream(
                 Err(e) => return Some(PortError::io(peer.map_or_else(|| "TCP read".into(), |p| format!("TCP read from {p}")), e)),
             },
         };
-        if tx
-            .send(PortRx::Data(Bytes::copy_from_slice(&buf[..n])))
-            .await
-            .is_err()
-        {
+        let data = Bytes::copy_from_slice(&buf[..n]);
+        let rx = match peer {
+            Some(p) => PortRx::DataFrom(data, p),
+            None => PortRx::Data(data),
+        };
+        if tx.send(rx).await.is_err() {
             return None;
         }
     }
@@ -116,12 +121,9 @@ pub(crate) async fn listen(bind: &str, port: u16) -> Result<OpenPort, PortError>
     let clients: Clients = Arc::default();
     let cancel = CancellationToken::new();
     let (tx, rx) = mpsc::channel(RX_CHANNEL);
-    let task = tokio::spawn(accept_loop(
-        listener,
-        Arc::clone(&clients),
-        tx.clone(),
-        cancel.clone(),
-    ));
+    let task = tokio::spawn(
+        accept_loop(listener, Arc::clone(&clients), tx.clone(), cancel.clone()).in_current_span(),
+    );
     Ok(OpenPort::new(
         PortKind::TcpServer,
         format!("TCP-Server:{}", local.port()),
@@ -177,18 +179,21 @@ async fn accept_loop(
         {
             return;
         }
-        tokio::spawn(client_writer(write, pending, client_cancel.clone()));
+        tokio::spawn(client_writer(write, pending, client_cancel.clone()).in_current_span());
         let (tx, clients) = (tx.clone(), Arc::clone(&clients));
-        tokio::spawn(async move {
-            let reason = read_stream(read, &tx, &client_cancel, Some(peer)).await;
-            client_cancel.cancel();
-            lock_clients(&clients).retain(|c| c.peer != peer);
-            let msg = match reason {
-                Some(e) => format!("client {peer} disconnected: {e}"),
-                None => format!("client {peer} disconnected"),
-            };
-            let _ = tx.send(PortRx::Info(msg)).await;
-        });
+        tokio::spawn(
+            async move {
+                let reason = read_stream(read, &tx, &client_cancel, Some(peer)).await;
+                client_cancel.cancel();
+                lock_clients(&clients).retain(|c| c.peer != peer);
+                let msg = match reason {
+                    Some(e) => format!("client {peer} disconnected: {e}"),
+                    None => format!("client {peer} disconnected"),
+                };
+                let _ = tx.send(PortRx::Info(msg)).await;
+            }
+            .in_current_span(),
+        );
     }
 }
 

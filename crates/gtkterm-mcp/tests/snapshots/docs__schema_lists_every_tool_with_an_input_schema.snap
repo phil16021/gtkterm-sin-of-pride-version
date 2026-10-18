@@ -10,13 +10,10 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       session:
-        default: ~
         description: "Session id from `list_ports` / `get_status`; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     type: object
   name: clear_buffer
   outputSchema:
@@ -26,7 +23,9 @@ expression: "schema[\"tools\"]"
         description: What happened.
         type: string
       status:
+        additionalProperties: true
         description: Session status afterwards.
+        type: object
     required:
       - message
       - status
@@ -39,13 +38,10 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       session:
-        default: ~
         description: "Session id from `list_ports` / `get_status`; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     type: object
   name: close_port
   outputSchema:
@@ -55,7 +51,9 @@ expression: "schema[\"tools\"]"
         description: What happened.
         type: string
       status:
+        additionalProperties: true
         description: Session status afterwards.
+        type: object
     required:
       - message
       - status
@@ -68,51 +66,33 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       baudrate:
-        default: ~
         description: "Baud rate (any rate, e.g. 250000)."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       bits:
-        default: ~
         description: Data bits 5-8.
         format: uint8
         maximum: 255
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       flow_control:
-        default: ~
         description: "none, xon, rts or rs485."
-        type:
-          - string
-          - "null"
+        type: string
       parity:
-        default: ~
         description: "none, odd, even, mark or space."
-        type:
-          - string
-          - "null"
+        type: string
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       stopbits:
-        default: ~
         description: 1 or 2.
         format: uint8
         maximum: 255
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     type: object
   name: configure_port
   outputSchema:
@@ -122,7 +102,9 @@ expression: "schema[\"tools\"]"
         description: What happened.
         type: string
       status:
+        additionalProperties: true
         description: Session status afterwards.
+        type: object
     required:
       - message
       - status
@@ -135,43 +117,28 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       include_bytes:
-        default: ~
         description: "Include each frame's bytes as hex (default true)."
-        type:
-          - boolean
-          - "null"
+        type: boolean
       max:
-        default: ~
         description: "Maximum number of frames (default 100, at most 1000)."
         format: uint
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       since:
-        default: ~
         description: "First sequence number to return (use `next_seq` of the previous call); default: the newest `max` frames."
         format: uint64
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       timeout_ms:
-        default: ~
         description: "Wait up to this many ms for a frame when none is available (default 0, at most 60000)."
         format: uint64
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     type: object
   name: decoder_get_frames
   outputSchema:
@@ -185,11 +152,18 @@ expression: "schema[\"tools\"]"
               - string
               - "null"
           check:
+            additionalProperties: true
             description: "none, ok or failed (with received/computed)."
+            type: object
           fields:
             additionalProperties: true
             description: Decoded fields.
             type: object
+          peer:
+            description: "With a TCP server: the client whose data completed the frame."
+            type:
+              - string
+              - "null"
           protocol:
             description: Protocol id.
             type: string
@@ -219,7 +193,9 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       decoder:
+        additionalProperties: true
         description: Decoder state.
+        type: object
       dropped:
         description: Frames that were requested but already dropped from the ring.
         format: uint64
@@ -256,13 +232,10 @@ expression: "schema[\"tools\"]"
         description: "off, auto, raw, at, nmea, modbus_rtu, modbus_ascii, modbus_tcp, can (candump text), slcan,\nethercat or rs232 (modem line changes only)."
         type: string
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       signals:
         default: false
         description: Also record modem line changes (DTR/RTS/CTS/DSR/DCD/RI) as frames.
@@ -273,6 +246,8 @@ expression: "schema[\"tools\"]"
   name: decoder_set
   outputSchema:
     $schema: "https://json-schema.org/draft/2020-12/schema"
+    additionalProperties: true
+    type: object
 - annotations:
     openWorldHint: true
     title: Expect
@@ -309,13 +284,10 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       cursor:
-        default: ~
         description: "Start matching at this cursor; default: data arriving after the call starts."
         format: uint64
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       encoding:
         $ref: "#/$defs/Encoding"
         default: text
@@ -328,33 +300,21 @@ expression: "schema[\"tools\"]"
         description: "Regular expression (Rust regex syntax) matched against received bytes, or literal bytes\nwhen `pattern_encoding` is given."
         type: string
       pattern_encoding:
-        anyOf:
-          - $ref: "#/$defs/Encoding"
-          - type: "null"
-        default: ~
+        $ref: "#/$defs/Encoding"
         description: "Treat `pattern` as literal bytes in this encoding instead of a regular expression, e.g.\n`hex` with \"AA 55\" waits for the bytes 0xAA 0x55."
       send:
-        default: ~
         description: "Optional data to send first (same encoding rules as `send`)."
-        type:
-          - string
-          - "null"
+        type: string
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       timeout_ms:
-        default: ~
         description: "Timeout in ms (default 5000, at most 600000)."
         format: uint64
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     required:
       - pattern
     type: object
@@ -394,13 +354,10 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       session:
-        default: ~
         description: "Session id from `list_ports` / `get_status`; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     type: object
   name: file_cancel
   outputSchema:
@@ -410,7 +367,9 @@ expression: "schema[\"tools\"]"
         description: What happened.
         type: string
       status:
+        additionalProperties: true
         description: Session status afterwards.
+        type: object
     required:
       - message
       - status
@@ -442,11 +401,8 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       name:
-        default: ~
         description: "File name for XMODEM, which carries none (default: xmodem-<time>.bin)."
-        type:
-          - string
-          - "null"
+        type: string
       overwrite:
         default: false
         description: "Replace existing files instead of saving as \"name (1).ext\"."
@@ -455,19 +411,13 @@ expression: "schema[\"tools\"]"
         $ref: "#/$defs/TransferProtocolArg"
         description: Protocol. Start the transfer on the device right after (or just before) this call.
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       subdir:
-        default: ~
         description: Subdirectory of the transfer directory to save into (created if missing).
-        type:
-          - string
-          - "null"
+        type: string
     required:
       - protocol
     type: object
@@ -487,7 +437,9 @@ expression: "schema[\"tools\"]"
         type: integer
       files:
         description: "Files sent or received, with local paths for received files."
-        items: true
+        items:
+          additionalProperties: true
+          type: object
         type: array
       message:
         description: "Note about the end of the transfer, if any."
@@ -548,13 +500,10 @@ expression: "schema[\"tools\"]"
         $ref: "#/$defs/TransferProtocolArg"
         description: "Protocol. The device must already be waiting to receive (e.g. after `rx`/`rb`/`rz` or a\nbootloader's \"send file now\" prompt)."
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     required:
       - protocol
       - paths
@@ -575,7 +524,9 @@ expression: "schema[\"tools\"]"
         type: integer
       files:
         description: "Files sent or received, with local paths for received files."
-        items: true
+        items:
+          additionalProperties: true
+          type: object
         type: array
       message:
         description: "Note about the end of the transfer, if any."
@@ -609,17 +560,16 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       session:
-        default: ~
         description: "Session id from `list_ports` / `get_status`; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     type: object
   name: get_signals
   outputSchema:
     $schema: "https://json-schema.org/draft/2020-12/schema"
+    additionalProperties: true
+    type: object
 - annotations:
     readOnlyHint: true
     title: Get status
@@ -628,17 +578,16 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       session:
-        default: ~
         description: "Session id from `list_ports` / `get_status`; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     type: object
   name: get_status
   outputSchema:
     $schema: "https://json-schema.org/draft/2020-12/schema"
+    additionalProperties: true
+    type: object
 - annotations:
     readOnlyHint: true
     title: List ports
@@ -680,7 +629,9 @@ expression: "schema[\"tools\"]"
         type: array
       sessions:
         description: Existing sessions with their state.
-        items: true
+        items:
+          additionalProperties: true
+          type: object
         type: array
     required:
       - ports
@@ -694,29 +645,22 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       file_name:
-        default: ~
         description: "File name inside the log directory; default: <timestamp>_<port>_<profile>.<ext>."
-        type:
-          - string
-          - "null"
+        type: string
       format:
-        default: ~
         description: "raw (default), text, csv, json or xml."
-        type:
-          - string
-          - "null"
+        type: string
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     type: object
   name: log_start
   outputSchema:
     $schema: "https://json-schema.org/draft/2020-12/schema"
+    additionalProperties: true
+    type: object
 - annotations:
     readOnlyHint: true
     title: Log status
@@ -725,17 +669,16 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       session:
-        default: ~
         description: "Session id from `list_ports` / `get_status`; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     type: object
   name: log_status
   outputSchema:
     $schema: "https://json-schema.org/draft/2020-12/schema"
+    additionalProperties: true
+    type: object
 - annotations:
     title: Stop log
   description: Stop logging and close the log file.
@@ -743,17 +686,16 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       session:
-        default: ~
         description: "Session id from `list_ports` / `get_status`; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     type: object
   name: log_stop
   outputSchema:
     $schema: "https://json-schema.org/draft/2020-12/schema"
+    additionalProperties: true
+    type: object
 - annotations:
     readOnlyHint: true
     title: List macros
@@ -764,6 +706,8 @@ expression: "schema[\"tools\"]"
   name: macro_list
   outputSchema:
     $schema: "https://json-schema.org/draft/2020-12/schema"
+    additionalProperties: true
+    type: object
 - annotations:
     openWorldHint: true
     title: Run macro
@@ -775,19 +719,18 @@ expression: "schema[\"tools\"]"
         description: Macro name (see macro_list).
         type: string
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     required:
       - name
     type: object
   name: macro_run
   outputSchema:
     $schema: "https://json-schema.org/draft/2020-12/schema"
+    additionalProperties: true
+    type: object
 - annotations:
     idempotentHint: true
     title: Save macro
@@ -799,11 +742,8 @@ expression: "schema[\"tools\"]"
         description: Macro name; an existing macro with this name is replaced.
         type: string
       shortcut:
-        default: ~
         description: "Optional keyboard shortcut in GTK syntax, e.g. `F9` or `<Control><Shift>1`."
-        type:
-          - string
-          - "null"
+        type: string
       text:
         description: "Steps, one per line: `send: ATZ\\r`, `send[250]: text` (pause first), `wait: 500 ms`,\n`expect: OK` or `expect[2000]: regex` (timeout in ms). `#` starts a comment."
         type: string
@@ -814,6 +754,8 @@ expression: "schema[\"tools\"]"
   name: macro_save
   outputSchema:
     $schema: "https://json-schema.org/draft/2020-12/schema"
+    additionalProperties: true
+    type: object
 - annotations:
     openWorldHint: true
     title: Modbus request
@@ -1012,30 +954,21 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       framing:
-        anyOf:
-          - $ref: "#/$defs/ModbusFraming"
-          - type: "null"
-        default: ~
+        $ref: "#/$defs/ModbusFraming"
         description: "Framing; default: the session's Modbus decoder, else rtu."
       request:
         $ref: "#/$defs/ModbusRequestSpec"
         description: The request.
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       timeout_ms:
-        default: ~
         description: "Response timeout in ms (default 1000, at most 60000)."
         format: uint64
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       unit:
         description: Unit (slave) ID 1-247; 0 broadcasts (no response is awaited).
         format: uint8
@@ -1078,7 +1011,11 @@ expression: "schema[\"tools\"]"
         description: "Bytes sent, as hex."
         type: string
       response:
+        additionalProperties: true
         description: "Parsed response: bits, registers, written or exception."
+        type:
+          - object
+          - "null"
       response_bytes:
         description: "Bytes of the response frame, as hex (absent for broadcasts)."
         type:
@@ -1108,46 +1045,31 @@ expression: "schema[\"tools\"]"
           - description: A serial device.
             properties:
               baudrate:
-                default: ~
                 description: "Baud rate, default 115200. Any rate is accepted (e.g. 250000)."
                 format: uint32
                 minimum: 0
-                type:
-                  - integer
-                  - "null"
+                type: integer
               bits:
-                default: ~
                 description: "Data bits 5-8, default 8."
                 format: uint8
                 maximum: 255
                 minimum: 0
-                type:
-                  - integer
-                  - "null"
+                type: integer
               flow_control:
-                default: ~
                 description: "none (default), xon, rts or rs485."
-                type:
-                  - string
-                  - "null"
+                type: string
               parity:
-                default: ~
                 description: "none (default), odd, even, mark or space."
-                type:
-                  - string
-                  - "null"
+                type: string
               port:
                 description: "Device path, e.g. /dev/ttyUSB0 (see list_ports)."
                 type: string
               stopbits:
-                default: ~
                 description: 1 (default) or 2.
                 format: uint8
                 maximum: 255
                 minimum: 0
-                type:
-                  - integer
-                  - "null"
+                type: integer
               type:
                 const: serial
                 type: string
@@ -1177,11 +1099,8 @@ expression: "schema[\"tools\"]"
           - description: Listen for TCP clients.
             properties:
               bind:
-                default: ~
                 description: "Bind address, default 0.0.0.0."
-                type:
-                  - string
-                  - "null"
+                type: string
               port:
                 description: TCP port to listen on.
                 format: uint16
@@ -1204,12 +1123,15 @@ expression: "schema[\"tools\"]"
                 maximum: 65535
                 minimum: 0
                 type: integer
+              max_datagram:
+                description: "Largest datagram sent, in bytes (default and maximum 65507); longer data is split."
+                format: uint16
+                maximum: 65535
+                minimum: 0
+                type: integer
               remote_host:
-                default: ~
                 description: "Remote host; if omitted, the first sender becomes the remote."
-                type:
-                  - string
-                  - "null"
+                type: string
               remote_port:
                 default: 0
                 description: Remote port.
@@ -1226,24 +1148,16 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       connection:
-        anyOf:
-          - $ref: "#/$defs/ConnectionSpec"
-          - type: "null"
+        $ref: "#/$defs/ConnectionSpec"
         description: "Connection to open. Either this or `profile` is required."
       profile:
-        default: ~
         description: "Name of a saved profile to open instead of `connection`."
-        type:
-          - string
-          - "null"
+        type: string
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     type: object
   name: open_port
   outputSchema:
@@ -1253,7 +1167,9 @@ expression: "schema[\"tools\"]"
         description: What happened.
         type: string
       status:
+        additionalProperties: true
         description: Session status afterwards.
+        type: object
     required:
       - message
       - status
@@ -1266,35 +1182,28 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       candidates:
-        default: ~
         description: "Rates to try (default: common rates from 2400 to 1000000)."
         items:
           format: uint32
           minimum: 0
           type: integer
-        type:
-          - array
-          - "null"
+        type: array
       listen_ms:
-        default: ~
         description: Listen time per rate in ms (default 400).
         format: uint64
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     type: object
   name: port_auto_baud
   outputSchema:
     $schema: "https://json-schema.org/draft/2020-12/schema"
+    additionalProperties: true
+    type: object
 - annotations:
     idempotentHint: true
     title: Flush port
@@ -1303,13 +1212,10 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       session:
-        default: ~
         description: "Session id from `list_ports` / `get_status`; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     type: object
   name: port_flush
   outputSchema:
@@ -1319,7 +1225,9 @@ expression: "schema[\"tools\"]"
         description: What happened.
         type: string
       status:
+        additionalProperties: true
         description: Session status afterwards.
+        type: object
     required:
       - message
       - status
@@ -1334,13 +1242,10 @@ expression: "schema[\"tools\"]"
         description: "Preset name (see preset_list), e.g. \"Modbus RTU\"."
         type: string
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     required:
       - name
     type: object
@@ -1352,7 +1257,9 @@ expression: "schema[\"tools\"]"
         description: What happened.
         type: string
       status:
+        additionalProperties: true
         description: Session status afterwards.
+        type: object
     required:
       - message
       - status
@@ -1367,6 +1274,8 @@ expression: "schema[\"tools\"]"
   name: preset_list
   outputSchema:
     $schema: "https://json-schema.org/draft/2020-12/schema"
+    additionalProperties: true
+    type: object
 - annotations:
     destructiveHint: true
     idempotentHint: true
@@ -1384,6 +1293,8 @@ expression: "schema[\"tools\"]"
   name: profile_delete
   outputSchema:
     $schema: "https://json-schema.org/draft/2020-12/schema"
+    additionalProperties: true
+    type: object
 - annotations:
     readOnlyHint: true
     title: Get profile
@@ -1400,6 +1311,8 @@ expression: "schema[\"tools\"]"
   name: profile_get
   outputSchema:
     $schema: "https://json-schema.org/draft/2020-12/schema"
+    additionalProperties: true
+    type: object
 - annotations:
     readOnlyHint: true
     title: List profiles
@@ -1410,6 +1323,8 @@ expression: "schema[\"tools\"]"
   name: profile_list
   outputSchema:
     $schema: "https://json-schema.org/draft/2020-12/schema"
+    additionalProperties: true
+    type: object
 - annotations:
     idempotentHint: true
     title: Save profile
@@ -1421,19 +1336,18 @@ expression: "schema[\"tools\"]"
         description: Profile name (created or replaced).
         type: string
       session:
-        default: ~
         description: "Session whose current connection and terminal settings are saved; default: the first."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     required:
       - name
     type: object
   name: profile_save
   outputSchema:
     $schema: "https://json-schema.org/draft/2020-12/schema"
+    additionalProperties: true
+    type: object
 - annotations:
     readOnlyHint: true
     title: Read data
@@ -1455,44 +1369,54 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       cursor:
-        default: ~
         description: "Byte cursor from a previous call (`next_cursor`). Omit to read only data arriving from now on."
         format: uint64
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       encoding:
         $ref: "#/$defs/Encoding"
         default: text
         description: "text (default), hex or base64."
       max_bytes:
-        default: ~
         description: "Maximum bytes to return (default 4096, at most 1048576)."
         format: uint
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       timeout_ms:
-        default: ~
         description: "If no data is available yet, wait up to this long for some (default 0, at most 60000)."
         format: uint64
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     type: object
   name: read
   outputSchema:
+    $defs:
+      PeerSpanOut:
+        description: "Bytes of one TCP client within a `read` result."
+        properties:
+          bytes:
+            description: Number of bytes.
+            format: uint
+            minimum: 0
+            type: integer
+          offset:
+            description: Stream offset (cursor) of the first byte.
+            format: uint64
+            minimum: 0
+            type: integer
+          peer:
+            description: "Client address, e.g. 10.0.0.2:51234."
+            type: string
+        required:
+          - offset
+          - bytes
+          - peer
+        type: object
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       bytes:
@@ -1513,11 +1437,17 @@ expression: "schema[\"tools\"]"
         format: uint64
         minimum: 0
         type: integer
+      peers:
+        description: "With a TCP server: which client sent which bytes (absent otherwise)."
+        items:
+          $ref: "#/$defs/PeerSpanOut"
+        type: array
     required:
       - data
       - bytes
       - next_cursor
       - lost
+      - peers
     type: object
 - annotations:
     readOnlyHint: true
@@ -1535,6 +1465,8 @@ expression: "schema[\"tools\"]"
   name: script_check
   outputSchema:
     $schema: "https://json-schema.org/draft/2020-12/schema"
+    additionalProperties: true
+    type: object
 - annotations:
     openWorldHint: true
     title: Run script
@@ -1543,33 +1475,21 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       path:
-        default: ~
         description: Script file inside the transfer directory or an --mcp-allow-dir directory.
-        type:
-          - string
-          - "null"
+        type: string
       script:
-        default: ~
         description: "Script text (see the resource gtkterm://docs/script-language). Give this or `path`."
-        type:
-          - string
-          - "null"
+        type: string
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       timeout_ms:
-        default: ~
         description: Give up after this many ms (default 600000).
         format: uint64
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       vars:
         additionalProperties:
           type: string
@@ -1580,6 +1500,8 @@ expression: "schema[\"tools\"]"
   name: script_run
   outputSchema:
     $schema: "https://json-schema.org/draft/2020-12/schema"
+    additionalProperties: true
+    type: object
 - annotations:
     idempotentHint: true
     title: Stop script
@@ -1588,13 +1510,10 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       session:
-        default: ~
         description: "Session id from `list_ports` / `get_status`; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     type: object
   name: script_stop
   outputSchema:
@@ -1604,7 +1523,9 @@ expression: "schema[\"tools\"]"
         description: What happened.
         type: string
       status:
+        additionalProperties: true
         description: Session status afterwards.
+        type: object
     required:
       - message
       - status
@@ -1617,24 +1538,18 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       max_matches:
-        default: ~
         description: "Maximum matches (default 50, at most 1000)."
         format: uint
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       pattern:
         description: Regular expression searched in the retained received data.
         type: string
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     required:
       - pattern
     type: object
@@ -1710,13 +1625,10 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       char_delay_ms:
-        default: ~
         description: "Pause after every byte, 0-1000 ms (slow bootloaders); default: the profile's character delay."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       data:
         description: "Data to send, interpreted according to `encoding`."
         type: string
@@ -1729,13 +1641,10 @@ expression: "schema[\"tools\"]"
         default: none
         description: "Line ending appended after the data: none (default), cr, lf or crlf."
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     required:
       - data
     type: object
@@ -1764,21 +1673,15 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       duration_ms:
-        default: ~
         description: "Break duration in ms (default 250, at most 5000)."
         format: uint64
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     type: object
   name: send_break
   outputSchema:
@@ -1788,7 +1691,9 @@ expression: "schema[\"tools\"]"
         description: What happened.
         type: string
       status:
+        additionalProperties: true
         description: Session status afterwards.
+        type: object
     required:
       - message
       - status
@@ -1801,25 +1706,16 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       dtr:
-        default: ~
         description: Set DTR high (true) or low (false); omit to leave unchanged.
-        type:
-          - boolean
-          - "null"
+        type: boolean
       rts:
-        default: ~
         description: Set RTS high (true) or low (false); omit to leave unchanged.
-        type:
-          - boolean
-          - "null"
+        type: boolean
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     type: object
   name: set_signals
   outputSchema:
@@ -1829,7 +1725,9 @@ expression: "schema[\"tools\"]"
         description: What happened.
         type: string
       status:
+        additionalProperties: true
         description: Session status afterwards.
+        type: object
     required:
       - message
       - status
@@ -1846,25 +1744,21 @@ expression: "schema[\"tools\"]"
         description: "Return CSV (Timestamp,DTR,RTS,CTS,DSR,DCD,RI,Changed Signals) instead of samples."
         type: boolean
       seconds:
-        default: ~
         description: "Look back this many seconds (default 60, at most 300)."
         format: uint64
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     type: object
   name: signal_history
   outputSchema:
     $schema: "https://json-schema.org/draft/2020-12/schema"
+    additionalProperties: true
+    type: object
 - annotations:
     destructiveHint: true
     title: Clear charts
@@ -1873,19 +1767,13 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       id:
-        default: ~
         description: Packet ID to clear; omit to remove all charts.
-        type:
-          - string
-          - "null"
+        type: string
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     type: object
   name: sunshine_clear
   outputSchema:
@@ -1895,7 +1783,9 @@ expression: "schema[\"tools\"]"
         description: What happened.
         type: string
       status:
+        additionalProperties: true
         description: Session status afterwards.
+        type: object
     required:
       - message
       - status
@@ -1911,13 +1801,10 @@ expression: "schema[\"tools\"]"
         description: Packet ID (chart) as shown by sunshine_list_series.
         type: string
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     required:
       - id
     type: object
@@ -1943,30 +1830,21 @@ expression: "schema[\"tools\"]"
         description: Dark theme instead of light.
         type: boolean
       height:
-        default: ~
         description: "Image height in pixels (default 450, 150-1500)."
         format: int32
-        type:
-          - integer
-          - "null"
+        type: integer
       id:
         description: Packet ID (chart).
         type: string
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       width:
-        default: ~
         description: "Image width in pixels (default 800, 200-2000)."
         format: int32
-        type:
-          - integer
-          - "null"
+        type: integer
     required:
       - id
     type: object
@@ -1982,44 +1860,29 @@ expression: "schema[\"tools\"]"
         description: Packet ID (chart).
         type: string
       last_n:
-        default: ~
         description: Only the most recent N samples of each series.
         format: uint
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       last_seconds:
-        default: ~
         description: Only samples from the last N seconds (counted back from the newest sample of the chart).
         format: double
-        type:
-          - number
-          - "null"
+        type: number
       max_points:
-        default: ~
         description: "Downsample (LTTB) to at most this many points per series (default 200, at most 5000)."
         format: uint
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
       series:
-        default: ~
         description: "Only these series (default: all)."
         items:
           type: string
-        type:
-          - array
-          - "null"
+        type: array
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     required:
       - id
     type: object
@@ -2091,13 +1954,10 @@ expression: "schema[\"tools\"]"
     $schema: "https://json-schema.org/draft/2020-12/schema"
     properties:
       session:
-        default: ~
         description: "Session id from `list_ports` / `get_status`; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     type: object
   name: sunshine_list_series
   outputSchema:
@@ -2245,13 +2105,10 @@ expression: "schema[\"tools\"]"
         description: "true to freeze the chart, false to continue."
         type: boolean
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     required:
       - id
       - paused
@@ -2264,7 +2121,9 @@ expression: "schema[\"tools\"]"
         description: What happened.
         type: string
       status:
+        additionalProperties: true
         description: Session status afterwards.
+        type: object
     required:
       - message
       - status
@@ -2283,13 +2142,10 @@ expression: "schema[\"tools\"]"
         description: "line, bar, pie or scatter."
         type: string
       session:
-        default: ~
         description: "Session to use; default: the first session."
         format: uint32
         minimum: 0
-        type:
-          - integer
-          - "null"
+        type: integer
     required:
       - id
       - kind
@@ -2302,7 +2158,9 @@ expression: "schema[\"tools\"]"
         description: What happened.
         type: string
       status:
+        additionalProperties: true
         description: Session status afterwards.
+        type: object
     required:
       - message
       - status

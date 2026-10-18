@@ -1,0 +1,47 @@
+---
+source: crates/gtkterm-protocols/tests/snapshots.rs
+expression: out
+---
+=== Raw ===
+OK\u{d}
+\u{0}\u{fffd}<&>"
+
+=== Text ===
+[2026-10-18T12:00:00.125+02:00] T: AT<0D>
+[2026-10-18T12:00:00.250+02:00] R: OK<0D><0A><00><FF><&>"
+
+
+=== Csv ===
+Timestamp,Direction,Length,Data_Hex,Data_ASCII
+2026-10-18T12:00:00.125+02:00,TX,3,"41 54 0D","AT."
+2026-10-18T12:00:00.250+02:00,RX,10,"4F 4B 0D 0A 00 FF 3C 26 3E 22","OK....<&>"""
+
+
+=== Json ===
+{
+  "session": {
+    "start_time": "2026-10-18T12:00:00+02:00",
+    "port": "/dev/ttyUSB0 115200-8-N-1",
+    "profile": "lab \"bench\" <1>"
+  },
+  "data": [
+    {"timestamp": "2026-10-18T12:00:00.125+02:00", "direction": "tx", "length": 3, "hex": [65, 84, 13]},
+    {"timestamp": "2026-10-18T12:00:00.250+02:00", "direction": "rx", "length": 10, "hex": [79, 75, 13, 10, 0, 255, 60, 38, 62, 34]}
+  ]
+}
+
+
+=== Xml ===
+<?xml version="1.0" encoding="UTF-8"?>
+<gtkterm_log version="1.0" start_time="2026-10-18T12:00:00+02:00" port="/dev/ttyUSB0 115200-8-N-1" profile="lab &quot;bench&quot; &lt;1&gt;">
+  <packets>
+    <packet timestamp="2026-10-18T12:00:00.125+02:00" direction="tx" length="3">
+      <hex>41 54 0D</hex>
+      <ascii><![CDATA[AT.]]></ascii>
+    </packet>
+    <packet timestamp="2026-10-18T12:00:00.250+02:00" direction="rx" length="10">
+      <hex>4F 4B 0D 0A 00 FF 3C 26 3E 22</hex>
+      <ascii><![CDATA[OK....<&>"]]></ascii>
+    </packet>
+  </packets>
+</gtkterm_log>

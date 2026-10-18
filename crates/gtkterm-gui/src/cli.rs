@@ -70,6 +70,7 @@ fn udp_spec(s: &str) -> Result<Connection, String> {
         local_port,
         remote_host,
         remote_port,
+        max_datagram: 0,
     })
 }
 
@@ -277,6 +278,10 @@ pub struct Cli {
     /// More diagnostics on stderr (-v info, -vv debug, -vvv trace). RUST_LOG overrides.
     #[arg(short = 'v', long, action = ArgAction::Count, help_heading = "Logging")]
     pub verbose: u8,
+    /// Append diagnostics as JSON lines (with session and port spans) to this file; the
+    /// level is debug for GTKTerm, GTKTERM_TRACE overrides.
+    #[arg(long = "trace-file", value_name = "FILE", help_heading = "Logging")]
+    pub trace_file: Option<PathBuf>,
 
     /// Write the man page into DIR and exit (packaging).
     #[arg(long = "generate-man", hide = true, value_name = "DIR")]
@@ -648,7 +653,8 @@ mod tests {
                 bind: "0.0.0.0".into(),
                 local_port: 9000,
                 remote_host: Some("localhost".into()),
-                remote_port: 9001
+                remote_port: 9001,
+                max_datagram: 0,
             })
         );
         assert!(

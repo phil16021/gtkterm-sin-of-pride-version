@@ -24,10 +24,10 @@ The HTTP endpoint binds to `127.0.0.1` by default, requires the bearer token (`-
 | Tool | Purpose |
 |---|---|
 | `list_ports` | serial devices (udev: vendor, model, serial number), sessions, saved profiles |
-| `open_port` | open `{"type":"serial","port":...,"baudrate":...}`, `tcp_client`, `tcp_server`, `udp`, or a saved `profile` |
+| `open_port` | open `{"type":"serial","port":...,"baudrate":...}`, `tcp_client`, `tcp_server`, `udp` (optional `max_datagram`), or a saved `profile` |
 | `close_port`, `get_status` | connection state, endpoint, byte counters, modem lines, log state |
 | `send` | data as `text`, `hex` or `base64`, optional `line_ending` (`cr`, `lf`, `crlf`) and `char_delay_ms` (pause after every byte, for slow bootloaders); returns an `rx_cursor` |
-| `read` | received data from a byte `cursor`, optionally waiting `timeout_ms`; returns `next_cursor` and `lost` |
+| `read` | received data from a byte `cursor`, optionally waiting `timeout_ms`; returns `next_cursor` and `lost`, and with a TCP server `peers` (which client sent which bytes) |
 | `expect` | optionally send, then wait for a regex, or for literal bytes with `pattern_encoding` (`hex`: `"AA 55"`); returns match, captures and preceding text |
 | `send_break`, `set_signals`, `get_signals` | serial break, DTR/RTS, modem lines |
 | `clear_buffer`, `search_buffer` | history management and regex search |
@@ -42,7 +42,7 @@ The HTTP endpoint binds to `127.0.0.1` by default, requires the bearer token (`-
 | `profile_list`, `profile_get`, `profile_save`, `profile_delete` | saved profiles; `profile_save` stores the session's current settings |
 | `configure_port` | change baud rate, data bits, parity, stop bits or flow control of an open serial port (it is reopened; history is kept) |
 | `decoder_set` | protocol decoder: `off`, `auto`, `raw`, `at`, `nmea`, `modbus_rtu`, `modbus_ascii`, `modbus_tcp`, `can`, `slcan`, `ethercat`, `rs232`; `signals` adds modem line changes |
-| `decoder_get_frames` | decoded frames since a sequence number (`next_seq`), with source (rx/tx/lines), summary, fields, checksum result and bytes; can wait `timeout_ms` |
+| `decoder_get_frames` | decoded frames since a sequence number (`next_seq`), with source (rx/tx/lines), the TCP client (`peer`) when there is one, summary, fields, checksum result and bytes; can wait `timeout_ms` |
 | `modbus_request` | build a Modbus request (RTU/ASCII/TCP framing incl. CRC/LRC/MBAP), send it, wait for the matching response and return registers, bits, the write echo or the exception |
 | `file_send` | upload files with `xmodem`, `xmodem_1k`, `ymodem`, `ymodem_g` or `zmodem` (lrzsz); reports progress notifications, cancelling the call aborts the transfer |
 | `file_receive` | download into the transfer directory (optional `subdir`; XMODEM takes a `name`) |
@@ -53,6 +53,9 @@ The HTTP endpoint binds to `127.0.0.1` by default, requires the bearer token (`-
 | `port_flush`, `port_auto_baud` | discard driver buffers; try baud rates and reopen at the one where the device's output is readable |
 
 Write tools (marked in the [reference](#tool-reference) below) are hidden in read-only mode.
+Every tool has an object output schema and plain (non-nullable) optional parameters, so clients
+that map schemas onto a single-`type` dialect list all tools; `cargo xtask inspector` checks this
+with the official MCP Inspector.
 Wrong arguments are tool errors that name the problem, so the agent can correct the call; an
 unknown tool is a protocol error (-32602). `gtkterm-sunshine --mcp-dump-schema` prints all tools,
 prompts and resources with their JSON schemas.
@@ -163,7 +166,7 @@ directory, and file names sent by the device are reduced to plain names.
 | `macro_save` | yes | `name`* string, `shortcut` string, `text`* string | Create or replace a macro from editor text. |
 | `modbus_request` | yes | `framing` ModbusFraming, `request`* ModbusRequestSpec, `session` integer, `timeout_ms` integer, `unit`* integer | Send a Modbus request (RTU, ASCII or TCP framing built with CRC/LRC/MBAP) and wait for the decoded response. |
 | `open_port` | yes | `connection` ConnectionSpec, `profile` string, `session` integer | Open a serial device, TCP or UDP connection (reopens if already open). |
-| `port_auto_baud` | yes | `candidates` array, `listen_ms` integer, `session` integer | Experimental: find the baud rate of a device that is sending text by trying common rates; the port is reopened at the best one. |
+| `port_auto_baud` | yes | `candidates` integer[], `listen_ms` integer, `session` integer | Experimental: find the baud rate of a device that is sending text by trying common rates; the port is reopened at the best one. |
 | `port_flush` | yes | `session` integer | Discard data waiting in the serial driver's input and output buffers. |
 | `preset_apply` | yes | `name`* string, `session` integer | Apply a preset's line settings to the session's serial port (reopens it). |
 | `preset_list` |  |  | List serial presets (built-in and user defined). |
@@ -183,7 +186,7 @@ directory, and file names sent by the device are reduced to plain names.
 | `sunshine_clear` | yes | `id` string, `session` integer | Clear one Sunshine chart's samples, or remove all charts. |
 | `sunshine_export_csv` |  | `id`* string, `session` integer | Export a Sunshine chart as CSV (timestamp, elapsed seconds, series, index, values). |
 | `sunshine_export_png` |  | `dark` boolean, `height` integer, `id`* string, `session` integer, `width` integer | Render a Sunshine chart as a PNG image, to look at the data the way the user sees it. |
-| `sunshine_get_series` |  | `id`* string, `last_n` integer, `last_seconds` number, `max_points` integer, `series` array, `session` integer | Get the samples of a Sunshine chart, downsampled for the context window. |
+| `sunshine_get_series` |  | `id`* string, `last_n` integer, `last_seconds` number, `max_points` integer, `series` string[], `session` integer | Get the samples of a Sunshine chart, downsampled for the context window. |
 | `sunshine_list_series` |  | `session` integer | List Sunshine charts with per-series statistics (min/max/mean/last). |
 | `sunshine_pause` | yes | `id`* string, `paused`* boolean, `session` integer | Pause or resume a Sunshine chart. |
 | `sunshine_set_chart_type` | yes | `id`* string, `kind`* string, `session` integer | Choose the chart type (line, bar, pie, scatter) for a packet ID. |

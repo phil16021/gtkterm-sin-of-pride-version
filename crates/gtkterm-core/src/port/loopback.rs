@@ -47,10 +47,6 @@ impl SerialControl for FakeLines {
     fn flush(&self) -> Result<(), PortError> {
         Ok(())
     }
-
-    fn wait_modem_change(&self) -> Result<(), PortError> {
-        Err(PortError::Unsupported("loopback lines are polled".into()))
-    }
 }
 
 /// The far end of a loopback port.

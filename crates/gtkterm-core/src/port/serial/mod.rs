@@ -10,6 +10,7 @@ pub(crate) mod sys;
 use std::os::fd::{AsFd, OwnedFd};
 use std::sync::Arc;
 use std::time::Duration;
+use tracing::Instrument as _;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -202,7 +203,7 @@ pub(crate) fn open(cfg: &SerialConfig) -> Result<OpenPort, PortError> {
     });
     let cancel = CancellationToken::new();
     let (tx, rx) = mpsc::channel(RX_CHANNEL);
-    let task = tokio::spawn(read_loop(Arc::clone(&device), tx, cancel.clone()));
+    let task = tokio::spawn(read_loop(Arc::clone(&device), tx, cancel.clone()).in_current_span());
 
     Ok(OpenPort::new(
         PortKind::Serial,
@@ -300,29 +301,44 @@ impl SerialWriter {
 #[async_trait]
 impl PortWriter for SerialWriter {
     async fn write_all(&mut self, data: &[u8]) -> Result<(), PortError> {
-        let Some(SoftRs485 {
-            before,
-            after,
-            active_low,
-        }) = self.rs485_soft
-        else {
+        let Some(soft) = self.rs485_soft else {
             return self.write_raw(data).await;
         };
-        let fd = self.device.fd.get_ref().as_fd();
-        sys::tiocm_set(fd, libc::TIOCM_RTS, !active_low)
-            .map_err(|e| PortError::io("cannot assert RTS", e))?;
-        tokio::time::sleep(before).await;
-        let result = async {
+        let device = Arc::clone(&self.device);
+        rs485_send(device.as_ref(), soft, async {
             self.write_raw(data).await?;
             self.drain().await
-        }
-        .await;
-        tokio::time::sleep(after).await;
-        let fd = self.device.fd.get_ref().as_fd();
-        sys::tiocm_set(fd, libc::TIOCM_RTS, active_low)
-            .map_err(|e| PortError::io("cannot release RTS", e))?;
-        result
+        })
+        .await
     }
+}
+
+/// Sets the RTS line (`TIOCMBIS`/`TIOCMBIC`); a seam for testing the RS485 sequence.
+trait RtsLine {
+    fn set_rts(&self, on: bool) -> std::io::Result<()>;
+}
+
+impl RtsLine for Device {
+    fn set_rts(&self, on: bool) -> std::io::Result<()> {
+        sys::tiocm_set(self.fd.get_ref().as_fd(), libc::TIOCM_RTS, on)
+    }
+}
+
+/// Software RS485 around one write: drive RTS, wait the lead time, `send` (written and
+/// drained), wait the tail time, release RTS. RTS is released also when `send` fails.
+async fn rs485_send(
+    line: &impl RtsLine,
+    soft: SoftRs485,
+    send: impl std::future::Future<Output = Result<(), PortError>>,
+) -> Result<(), PortError> {
+    line.set_rts(!soft.active_low)
+        .map_err(|e| PortError::io("cannot assert RTS", e))?;
+    tokio::time::sleep(soft.before).await;
+    let result = send.await;
+    tokio::time::sleep(soft.after).await;
+    line.set_rts(soft.active_low)
+        .map_err(|e| PortError::io("cannot release RTS", e))?;
+    result
 }
 
 /// RS485 direction control in software (drivers without `TIOCSRS485`).
@@ -400,12 +416,6 @@ impl SerialControl for SerialCtl {
         tcflush(self.device.fd.get_ref(), FlushArg::TCIOFLUSH)
             .map_err(|e| PortError::io("flush failed", std::io::Error::from(e)))
     }
-
-    fn wait_modem_change(&self) -> Result<(), PortError> {
-        let mask = libc::TIOCM_CTS | libc::TIOCM_DSR | libc::TIOCM_CAR | libc::TIOCM_RNG;
-        sys::tiocmiwait(self.device.fd.get_ref().as_fd(), mask)
-            .map_err(|e| modem_err("wait for modem lines", e))
-    }
 }
 
 /// Raw termios flags and output speed of a tty, for tests and diagnostics.
@@ -438,6 +448,74 @@ pub fn read_termios(fd: impl AsFd) -> std::io::Result<TermiosSnapshot> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression P1 (C `serial_port.c:874` toggled RTS instead of setting it, and slept on
+    /// the UI thread): the software RS485 sequence on a recording line.
+    #[derive(Default)]
+    struct Recorder(std::sync::Mutex<Vec<(tokio::time::Instant, &'static str)>>);
+
+    impl Recorder {
+        fn note(&self, what: &'static str) {
+            self.0.lock().unwrap().push((tokio::time::Instant::now(), what));
+        }
+    }
+
+    impl RtsLine for Recorder {
+        fn set_rts(&self, on: bool) -> std::io::Result<()> {
+            self.note(if on { "rts on" } else { "rts off" });
+            Ok(())
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn c_p1_rs485_sets_rts_around_each_write() {
+        let rec = Recorder::default();
+        let soft = SoftRs485 {
+            before: Duration::from_millis(3),
+            after: Duration::from_millis(5),
+            active_low: false,
+        };
+        let t0 = tokio::time::Instant::now();
+        rs485_send(&rec, soft, async {
+            rec.note("write");
+            Ok(())
+        })
+        .await
+        .unwrap();
+        // Twice: the line is set each time, never toggled from a stale state.
+        rs485_send(&rec, soft, async { Ok(()) }).await.unwrap();
+        let log = rec.0.lock().unwrap().clone();
+        let what: Vec<_> = log.iter().map(|(_, w)| *w).collect();
+        assert_eq!(what, ["rts on", "write", "rts off", "rts on", "rts off"]);
+        assert_eq!(
+            log[1].0 - t0,
+            Duration::from_millis(3),
+            "lead time before the data"
+        );
+        assert_eq!(
+            log[2].0 - log[1].0,
+            Duration::from_millis(5),
+            "tail time after the drain"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn c_p1_rs485_releases_rts_after_a_failed_write_and_honours_polarity() {
+        let rec = Recorder::default();
+        let soft = SoftRs485 {
+            before: Duration::ZERO,
+            after: Duration::ZERO,
+            active_low: true,
+        };
+        let r = rs485_send(&rec, soft, async { Err(PortError::Closed) }).await;
+        assert!(r.is_err());
+        let what: Vec<_> = rec.0.lock().unwrap().iter().map(|(_, w)| *w).collect();
+        assert_eq!(
+            what,
+            ["rts off", "rts on"],
+            "active low: drive = clear, release = set"
+        );
+    }
 
     #[test]
     fn lines_at_open_change_both_at_once() {

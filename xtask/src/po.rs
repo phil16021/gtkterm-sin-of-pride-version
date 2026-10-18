@@ -13,7 +13,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 use proc_macro2::{Delimiter, TokenStream, TokenTree};
 
-const DOMAIN: &str = "gtkterm-sunshine";
+pub(crate) const DOMAIN: &str = "gtkterm-sunshine";
 const SOURCES: &str = "crates/gtkterm-gui/src";
 const DATA: [&str; 2] = [
     "data/at.philipp.GtkTermSunshine.desktop",
@@ -225,7 +225,7 @@ pub(crate) fn template(root: &Path) -> Result<String> {
 }
 
 /// Languages listed in `po/LINGUAS`.
-fn languages(root: &Path) -> Vec<String> {
+pub(crate) fn languages(root: &Path) -> Vec<String> {
     let text = std::fs::read_to_string(root.join("po/LINGUAS")).unwrap_or_default();
     text.lines()
         .map(|l| l.split('#').next().unwrap_or("").trim())

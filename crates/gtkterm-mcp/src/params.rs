@@ -4,9 +4,69 @@ use base64::Engine as _;
 use gtkterm_core::config::{Connection, FlowControl, Parity, SerialConfig};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/// Optional parameters (absent = default) as plain types instead of `["integer", "null"]` or
+/// `anyOf [.., null]`: single-`type` schema dialects (e.g. Gemini function declarations)
+/// reject those, and `null` means the same as leaving the parameter out.
+pub(crate) fn plain_optionals(schema: &mut schemars::Schema) {
+    fn strip(p: &mut Value) {
+        let Some(obj) = p.as_object_mut() else { return };
+        if obj.get("default") == Some(&Value::Null) {
+            obj.remove("default");
+        }
+        if let Some(Value::Array(types)) = obj.get_mut("type") {
+            types.retain(|t| t != "null");
+            if types.len() == 1 {
+                let only = types.remove(0);
+                obj.insert("type".into(), only);
+            }
+        }
+        if let Some(Value::Array(alts)) = obj.get_mut("anyOf") {
+            alts.retain(|a| a.get("type").and_then(Value::as_str) != Some("null"));
+            if alts.len() == 1 {
+                let only = alts.remove(0);
+                obj.remove("anyOf");
+                if let Value::Object(fields) = only {
+                    for (k, v) in fields {
+                        obj.entry(k).or_insert(v);
+                    }
+                }
+            }
+        }
+    }
+    fn walk(v: &mut Value) {
+        let Some(obj) = v.as_object_mut() else { return };
+        let required: Vec<String> = obj
+            .get("required")
+            .and_then(Value::as_array)
+            .map(|r| r.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+            .unwrap_or_default();
+        if let Some(Value::Object(props)) = obj.get_mut("properties") {
+            for (name, p) in props.iter_mut() {
+                if !required.contains(name) {
+                    strip(p);
+                }
+            }
+        }
+        for key in ["oneOf", "anyOf"] {
+            if let Some(Value::Array(alts)) = obj.get_mut(key) {
+                alts.iter_mut().for_each(walk);
+            }
+        }
+    }
+    if let Some(obj) = schema.as_object_mut() {
+        let mut v = Value::Object(std::mem::take(obj));
+        walk(&mut v);
+        if let Value::Object(o) = v {
+            *obj = o;
+        }
+    }
+}
 
 /// How bytes are represented in tool arguments and results.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum Encoding {
     /// UTF-8 text (invalid bytes are replaced when reading). Escapes like \n are NOT interpreted.
@@ -40,6 +100,7 @@ impl Encoding {
 
 /// Line ending appended to sent data.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum LineEnding {
     /// Nothing appended.
@@ -66,6 +127,7 @@ impl LineEnding {
 
 /// Which session to act on. Omit to use the default (first) session.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct SessionArg {
     /// Session id from `list_ports` / `get_status`; default: the first session.
     #[serde(default)]
@@ -74,6 +136,7 @@ pub(crate) struct SessionArg {
 
 /// Connection to open.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum ConnectionSpec {
     /// A serial device.
@@ -122,6 +185,9 @@ pub(crate) enum ConnectionSpec {
         /// Remote port.
         #[serde(default)]
         remote_port: u16,
+        /// Largest datagram sent, in bytes (default and maximum 65507); longer data is split.
+        #[serde(default)]
+        max_datagram: Option<u16>,
     },
 }
 
@@ -168,11 +234,13 @@ impl ConnectionSpec {
                 local_port,
                 remote_host,
                 remote_port,
+                max_datagram,
             } => Connection::Udp {
                 bind: "0.0.0.0".into(),
                 local_port,
                 remote_host,
                 remote_port,
+                max_datagram: max_datagram.unwrap_or(0),
             },
         })
     }
@@ -180,6 +248,7 @@ impl ConnectionSpec {
 
 /// `open_port` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct OpenPortParams {
     /// Session to use; default: the first session.
     #[serde(default)]
@@ -194,6 +263,7 @@ pub(crate) struct OpenPortParams {
 
 /// `send` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct SendParams {
     /// Session to use; default: the first session.
     #[serde(default)]
@@ -213,6 +283,7 @@ pub(crate) struct SendParams {
 
 /// `read` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct ReadParams {
     /// Session to use; default: the first session.
     #[serde(default)]
@@ -242,10 +313,35 @@ pub(crate) struct ReadResult {
     pub(crate) next_cursor: u64,
     /// Bytes that were evicted from history before they could be read.
     pub(crate) lost: u64,
+    /// With a TCP server: which client sent which bytes (absent otherwise).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) peers: Vec<PeerSpanOut>,
+}
+
+/// Bytes of one TCP client within a `read` result.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub(crate) struct PeerSpanOut {
+    /// Stream offset (cursor) of the first byte.
+    pub(crate) offset: u64,
+    /// Number of bytes.
+    pub(crate) bytes: usize,
+    /// Client address, e.g. 10.0.0.2:51234.
+    pub(crate) peer: String,
+}
+
+impl From<&gtkterm_core::chunks::PeerSpan> for PeerSpanOut {
+    fn from(p: &gtkterm_core::chunks::PeerSpan) -> Self {
+        Self {
+            offset: p.offset,
+            bytes: p.len,
+            peer: p.peer.to_string(),
+        }
+    }
 }
 
 /// `expect` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct ExpectParams {
     /// Session to use; default: the first session.
     #[serde(default)]
@@ -276,6 +372,7 @@ pub(crate) struct ExpectParams {
 
 /// `send_break` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct BreakParams {
     /// Session to use; default: the first session.
     #[serde(default)]
@@ -287,6 +384,7 @@ pub(crate) struct BreakParams {
 
 /// `set_signals` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct SignalParams {
     /// Session to use; default: the first session.
     #[serde(default)]
@@ -301,6 +399,7 @@ pub(crate) struct SignalParams {
 
 /// `search_buffer` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct SearchParams {
     /// Session to use; default: the first session.
     #[serde(default)]
@@ -325,6 +424,7 @@ pub(crate) struct SearchHit {
 
 /// Chart selection for Sunshine tools.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct ChartParams {
     /// Session to use; default: the first session.
     #[serde(default)]
@@ -335,6 +435,7 @@ pub(crate) struct ChartParams {
 
 /// `sunshine_get_series` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct GetSeriesParams {
     /// Session to use; default: the first session.
     #[serde(default)]
@@ -357,6 +458,7 @@ pub(crate) struct GetSeriesParams {
 
 /// `sunshine_set_chart_type` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct ChartTypeParams {
     /// Session to use; default: the first session.
     #[serde(default)]
@@ -369,6 +471,7 @@ pub(crate) struct ChartTypeParams {
 
 /// `sunshine_pause` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct PauseParams {
     /// Session to use; default: the first session.
     #[serde(default)]
@@ -381,6 +484,7 @@ pub(crate) struct PauseParams {
 
 /// `sunshine_clear` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct ClearChartParams {
     /// Session to use; default: the first session.
     #[serde(default)]
@@ -392,6 +496,7 @@ pub(crate) struct ClearChartParams {
 
 /// `log_start` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct LogStartParams {
     /// Session to use; default: the first session.
     #[serde(default)]
@@ -406,6 +511,7 @@ pub(crate) struct LogStartParams {
 
 /// `sunshine_export_png` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct PngParams {
     /// Session to use; default: the first session.
     #[serde(default)]
@@ -425,6 +531,7 @@ pub(crate) struct PngParams {
 
 /// `macro_run` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct MacroRunParams {
     /// Session to use; default: the first session.
     #[serde(default)]
@@ -435,6 +542,7 @@ pub(crate) struct MacroRunParams {
 
 /// `macro_save` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct MacroSaveParams {
     /// Macro name; an existing macro with this name is replaced.
     pub(crate) name: String,
@@ -448,6 +556,7 @@ pub(crate) struct MacroSaveParams {
 
 /// `preset_apply` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct PresetApplyParams {
     /// Session to use; default: the first session.
     #[serde(default)]
@@ -458,6 +567,7 @@ pub(crate) struct PresetApplyParams {
 
 /// Profile selection.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct ProfileParams {
     /// Profile name.
     pub(crate) name: String,
@@ -465,6 +575,7 @@ pub(crate) struct ProfileParams {
 
 /// `configure_port` arguments: the serial settings to change; omitted ones stay.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct ConfigurePortParams {
     /// Session to use; default: the first session.
     #[serde(default)]
@@ -510,6 +621,7 @@ impl ConfigurePortParams {
 
 /// `profile_save` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct ProfileSaveParams {
     /// Session whose current connection and terminal settings are saved; default: the first.
     #[serde(default)]
@@ -520,6 +632,7 @@ pub(crate) struct ProfileSaveParams {
 
 /// `decoder_set` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct DecoderSetParams {
     /// Session to use; default: the first session.
     #[serde(default)]
@@ -537,6 +650,7 @@ pub(crate) struct DecoderSetParams {
 
 /// `decoder_get_frames` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct GetFramesParams {
     /// Session to use; default: the first session.
     #[serde(default)]
@@ -557,6 +671,7 @@ pub(crate) struct GetFramesParams {
 
 /// Modbus framing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum ModbusFraming {
     /// Binary RTU with CRC-16 (serial lines).
@@ -569,6 +684,7 @@ pub(crate) enum ModbusFraming {
 
 /// A Modbus request.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 #[serde(tag = "function", rename_all = "snake_case")]
 pub(crate) enum ModbusRequestSpec {
     /// 0x01: read coils.
@@ -647,6 +763,7 @@ impl From<ModbusRequestSpec> for gtkterm_protocols::decode::modbus::Request {
 
 /// `modbus_request` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct ModbusRequestParams {
     /// Session to use; default: the first session.
     #[serde(default)]
@@ -665,6 +782,7 @@ pub(crate) struct ModbusRequestParams {
 
 /// File transfer protocol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum TransferProtocolArg {
     /// 128-byte blocks, CRC or checksum (one file).
@@ -693,6 +811,7 @@ impl From<TransferProtocolArg> for gtkterm_core::transfer::TransferProtocol {
 
 /// `file_send` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct FileSendParams {
     /// Session to use; default: the first session.
     #[serde(default)]
@@ -707,6 +826,7 @@ pub(crate) struct FileSendParams {
 
 /// `file_receive` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct FileReceiveParams {
     /// Session to use; default: the first session.
     #[serde(default)]
@@ -726,6 +846,7 @@ pub(crate) struct FileReceiveParams {
 
 /// `script_run` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct ScriptRunParams {
     /// Session to use; default: the first session.
     #[serde(default)]
@@ -746,6 +867,7 @@ pub(crate) struct ScriptRunParams {
 
 /// `script_check` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct ScriptCheckParams {
     /// Script text to validate.
     pub(crate) script: String,
@@ -753,6 +875,7 @@ pub(crate) struct ScriptCheckParams {
 
 /// `signal_history` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct SignalHistoryParams {
     /// Session to use; default: the first session.
     #[serde(default)]
@@ -767,6 +890,7 @@ pub(crate) struct SignalHistoryParams {
 
 /// `port_auto_baud` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(transform = plain_optionals)]
 pub(crate) struct AutoBaudParams {
     /// Session to use; default: the first session.
     #[serde(default)]

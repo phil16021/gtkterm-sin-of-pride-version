@@ -130,6 +130,29 @@ fn schema_lists_every_tool_with_an_input_schema() {
             t["name"]
         );
     }
+    for t in tools {
+        // MCP requires object output schemas; clients drop tools whose schema is anything else
+        // (the Inspector listed only 26 of 44 tools while 18 returned a bare `Value`).
+        if let Some(out) = t.get("outputSchema") {
+            assert_eq!(out["type"], "object", "{} output schema: {out}", t["name"]);
+        }
+        // Optional parameters are plain types, not `[type, null]` (portable to single-type dialects).
+        let required: Vec<&Value> = t["inputSchema"]["required"]
+            .as_array()
+            .map(|r| r.iter().collect())
+            .unwrap_or_default();
+        for (name, p) in t["inputSchema"]["properties"].as_object().unwrap() {
+            if required.iter().any(|r| r.as_str() == Some(name)) {
+                continue;
+            }
+            let text = p.to_string();
+            assert!(
+                !text.contains("\"null\""),
+                "{}.{name} is nullable: {text}",
+                t["name"]
+            );
+        }
+    }
     for w in schema["write_tools"].as_array().unwrap() {
         assert!(
             tools.iter().any(|t| t["name"] == *w),

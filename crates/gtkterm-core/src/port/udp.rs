@@ -2,6 +2,7 @@
 
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+use tracing::Instrument as _;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -13,8 +14,6 @@ use super::{OpenPort, PortError, PortKind, PortRx, PortWriter, RX_CHANNEL};
 
 /// Largest datagram received in one piece.
 const MAX_DATAGRAM: usize = 65_535;
-/// Largest payload sent in one datagram (IPv4: 65 535 − 20 IP − 8 UDP header bytes).
-const MAX_SEND: usize = 65_507;
 
 /// Bind `bind:local_port`, optionally fixing the remote.
 pub(crate) async fn open(
@@ -22,7 +21,12 @@ pub(crate) async fn open(
     local_port: u16,
     remote_host: Option<&str>,
     remote_port: u16,
+    max_datagram: u16,
 ) -> Result<OpenPort, PortError> {
+    let max_send = usize::from(match max_datagram {
+        0 => crate::config::MAX_UDP_PAYLOAD,
+        n => n.min(crate::config::MAX_UDP_PAYLOAD),
+    });
     let remote = match remote_host {
         Some(host) => Some(
             lookup_host((host, remote_port))
@@ -84,7 +88,7 @@ pub(crate) async fn open(
                 return;
             }
         }
-    });
+    }.in_current_span());
 
     let remote_desc = remote
         .lock()
@@ -94,7 +98,11 @@ pub(crate) async fn open(
         PortKind::Udp,
         format!("UDP:{local}->{remote_desc}"),
         rx,
-        Box::new(UdpWriter { socket, remote }),
+        Box::new(UdpWriter {
+            socket,
+            remote,
+            max_send,
+        }),
         None,
         cancel,
         Some(task),
@@ -105,13 +113,15 @@ pub(crate) async fn open(
 struct UdpWriter {
     socket: Arc<UdpSocket>,
     remote: Arc<Mutex<Option<SocketAddr>>>,
+    /// Largest datagram payload.
+    max_send: usize,
 }
 
 #[async_trait]
 impl PortWriter for UdpWriter {
     async fn write_all(&mut self, data: &[u8]) -> Result<(), PortError> {
         let remote = (*self.remote.lock().expect("remote mutex poisoned")).ok_or(PortError::NoRemote)?;
-        for chunk in data.chunks(MAX_SEND) {
+        for chunk in data.chunks(self.max_send) {
             self.socket
                 .send_to(chunk, remote)
                 .await

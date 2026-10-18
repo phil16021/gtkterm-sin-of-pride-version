@@ -78,12 +78,6 @@ pub(crate) fn set_break(fd: BorrowedFd<'_>, on: bool) -> io::Result<()> {
     check(unsafe { libc::ioctl(fd.as_raw_fd(), request) })
 }
 
-/// `TIOCMIWAIT`: block until one of the given modem input lines changes.
-pub(crate) fn tiocmiwait(fd: BorrowedFd<'_>, mask: libc::c_int) -> io::Result<()> {
-    // SAFETY: fd is open; TIOCMIWAIT takes the mask by value.
-    check(unsafe { libc::ioctl(fd.as_raw_fd(), libc::TIOCMIWAIT, libc::c_ulong::from(mask as u32)) })
-}
-
 /// `struct serial_icounter_struct` from `<linux/serial.h>`.
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy)]
