@@ -3741,6 +3741,46 @@ mod tests {
         assert_eq!(UNEXPECTED_LOGS.load(Ordering::SeqCst), 0, "GTK warnings");
     }
 
+    /// Changing the view redraws what was already received (it used to apply to new data
+    /// only); dump views get timestamps too.
+    #[gtk::test]
+    fn view_changes_redraw_the_history() {
+        if std::env::var_os("GTKTERM_GUI_TESTS").is_none() {
+            return;
+        }
+        let (win, dev, _dir) = setup();
+        rt().block_on(dev.send(&b"ABC\r\n"[..])).unwrap();
+        assert!(pump_until(Duration::from_secs(2), || win
+            .session
+            .status()
+            .rx_bytes
+            == 5));
+        pump_until(Duration::from_millis(100), || false);
+        let text = |w: &Rc<Win>| {
+            w.term.flush_output();
+            pump_until(Duration::from_millis(100), || false);
+            w.term
+                .term
+                .text_format(vte::Format::Text)
+                .map(|t| t.to_string())
+                .unwrap_or_default()
+        };
+        assert!(text(&win).contains("ABC"));
+        gio::prelude::ActionGroupExt::activate_action(&win.window, "view-mode", Some(&"hex".to_variant()));
+        let hex = text(&win);
+        assert!(hex.contains("41 42 43 0D 0A"), "{hex}");
+        assert!(!hex.contains("ABC"), "the ASCII rendering is gone: {hex}");
+        gio::prelude::ActionGroupExt::activate_action(&win.window, "timestamps", None);
+        let stamped = text(&win);
+        assert!(
+            regex::Regex::new(r"\[\d\d:\d\d:\d\d\.\d{3}\] 41 42")
+                .unwrap()
+                .is_match(&stamped),
+            "{stamped}"
+        );
+        assert_eq!(UNEXPECTED_LOGS.load(Ordering::SeqCst), 0, "GTK warnings");
+    }
+
     /// Daily-use sending: the send bar (escapes, hex, line ending, history, repeat), Enter
     /// mapping, coloured echo, quick capture to a log file.
     #[gtk::test]

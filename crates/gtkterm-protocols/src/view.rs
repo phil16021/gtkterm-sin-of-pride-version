@@ -179,12 +179,23 @@ impl ViewFormatter {
 
     /// Reset index and line state, e.g. after "clear screen".
     pub fn reset(&mut self) {
-        self.byte_index = 0;
+        self.reset_to(0);
+    }
+
+    /// Start over at byte index `index` (redrawing history that begins there).
+    pub fn reset_to(&mut self, index: u64) {
+        self.byte_index = index;
         self.line.clear();
     }
 
     /// Format `data` and return the bytes to feed to the terminal.
     pub fn format(&mut self, data: &[u8]) -> Vec<u8> {
+        self.format_stamped(data, None)
+    }
+
+    /// Like [`ViewFormatter::format`], starting every new line of this chunk with
+    /// `[stamp] ` (the chunk's arrival time, formatted by the caller).
+    pub fn format_stamped(&mut self, data: &[u8], stamp: Option<&str>) -> Vec<u8> {
         let Some(radix) = self.settings.mode.radix() else {
             return data.to_vec();
         };
@@ -193,9 +204,16 @@ impl ViewFormatter {
         let mut out = Vec::with_capacity(data.len() * (radix.cell_width() + 2));
 
         for &byte in data {
-            if self.line.is_empty() && self.settings.show_index {
-                use std::io::Write as _;
-                let _ = write!(out, "{:08X}: ", self.byte_index);
+            if self.line.is_empty() {
+                if let Some(stamp) = stamp {
+                    out.push(b'[');
+                    out.extend_from_slice(stamp.as_bytes());
+                    out.extend_from_slice(b"] ");
+                }
+                if self.settings.show_index {
+                    use std::io::Write as _;
+                    let _ = write!(out, "{:08X}: ", self.byte_index);
+                }
             }
             self.line.push(byte);
             radix.push(&mut out, byte);
@@ -237,6 +255,24 @@ mod tests {
             columns,
         });
         String::from_utf8(f.format(data)).expect("formatter emits ASCII")
+    }
+
+    #[test]
+    fn timestamps_start_each_dump_line() {
+        let mut f = ViewFormatter::new(ViewSettings {
+            mode: ViewMode::Hex,
+            show_index: true,
+            hex_chars: 2,
+            columns: 80,
+        });
+        let out = String::from_utf8(f.format_stamped(b"abc", Some("12:00:00.000"))).unwrap();
+        assert_eq!(
+            out,
+            "[12:00:00.000] 00000000: 61 62 \r\n[12:00:00.000] 00000002: 63 "
+        );
+        // A line continued by the next chunk keeps its first stamp.
+        let out = String::from_utf8(f.format_stamped(b"d", Some("12:00:01.000"))).unwrap();
+        assert_eq!(out, "64 \r\n");
     }
 
     #[test]

@@ -87,7 +87,14 @@ pub struct TerminalView {
     pending: Rc<Pending>,
     /// When the last "input not sent" notice was shown (one per burst of typing).
     refused_at: std::cell::Cell<Option<std::time::Instant>>,
+    /// Source of the history redrawn when the view changes.
+    session: Session,
+    /// Start of relative timestamps in dump views.
+    started: jiff::Timestamp,
 }
+
+/// Received and sent data redrawn when the view mode or its options change.
+const REPLAY_BYTES: usize = 512 * 1024;
 
 /// Replace every CR in typed or pasted input with what Enter should send.
 fn map_enter(input: &[u8], enter: &[u8]) -> Vec<u8> {
@@ -211,6 +218,8 @@ impl TerminalView {
             transform: RefCell::new(transform_for(config)),
             pending: Rc::default(),
             refused_at: std::cell::Cell::new(None),
+            session: session.clone(),
+            started: jiff::Timestamp::now(),
         });
         view.apply_config(config);
 
@@ -324,14 +333,24 @@ impl TerminalView {
         });
         self.term.set_audible_bell(!c.visual_bell);
         let old = self.config.replace(c.clone());
-        if old.auto_cr != c.auto_cr
+        let transform_changed = old.auto_cr != c.auto_cr
             || old.auto_lf != c.auto_lf
             || old.timestamps != c.timestamps
-            || old.timestamp_format != c.timestamp_format
-        {
+            || old.timestamp_format != c.timestamp_format;
+        if transform_changed {
             self.transform.replace(transform_for(c));
         }
         self.update_view_settings();
+        // Settings that change how the history looks: draw it again.
+        if transform_changed
+            || old.view_mode != c.view_mode
+            || old.show_index != c.show_index
+            || old.hex_chars != c.hex_chars
+            || old.echo != c.echo
+            || old.tx_color != c.tx_color
+        {
+            self.rerender();
+        }
     }
 
     fn update_view_settings(&self) {
@@ -354,8 +373,38 @@ impl TerminalView {
     pub fn set_view_mode(&self, mode: ViewMode) {
         self.config.borrow_mut().view_mode = mode;
         self.update_view_settings();
-        if mode != ViewMode::Ascii {
-            self.output(b"\r\n");
+        self.rerender();
+    }
+
+    /// Clear the screen and draw the recent history again with the current settings (view
+    /// mode, width, index, timestamps, echo), up to [`REPLAY_BYTES`].
+    pub fn rerender(&self) {
+        let chunks: Vec<Chunk> = self.session.with_chunks(|store| {
+            let mut total = 0;
+            let mut recent: Vec<Chunk> = store
+                .iter()
+                .rev()
+                .take_while(|c| {
+                    let keep = total < REPLAY_BYTES;
+                    total += c.data.len();
+                    keep
+                })
+                .cloned()
+                .collect();
+            recent.reverse();
+            recent
+        });
+        self.pending.bytes.borrow_mut().clear();
+        self.pending.skipped.set(0);
+        self.term.reset(true, true);
+        let first = chunks
+            .iter()
+            .find(|c| c.dir == Direction::Rx)
+            .map_or(0, |c| c.offset);
+        self.formatter.borrow_mut().reset_to(first);
+        self.transform.borrow_mut().reset();
+        for c in &chunks {
+            self.show(c);
         }
     }
 
@@ -401,7 +450,20 @@ impl TerminalView {
             self.transform.borrow_mut().apply(&chunk.data, chunk.ts)
         } else {
             self.update_view_settings();
-            self.formatter.borrow_mut().format(&chunk.data)
+            let stamp = {
+                let c = self.config.borrow();
+                c.timestamps.then(|| {
+                    gtkterm_protocols::transform::format_timestamp(
+                        c.timestamp_format,
+                        chunk.ts,
+                        &jiff::tz::TimeZone::system(),
+                        self.started,
+                    )
+                })
+            };
+            self.formatter
+                .borrow_mut()
+                .format_stamped(&chunk.data, stamp.as_deref())
         };
         match tx_color.filter(|_| chunk.dir == Direction::Tx) {
             Some(c) => {

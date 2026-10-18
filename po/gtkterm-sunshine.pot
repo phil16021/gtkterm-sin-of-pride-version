@@ -877,12 +877,12 @@ msgid "Invalid hex: {error}"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:11
-#: crates/gtkterm-gui/src/gui/terminal.rs:287
+#: crates/gtkterm-gui/src/gui/terminal.rs:296
 msgid "Copy"
 msgstr ""
 
 #: crates/gtkterm-gui/src/gui/shortcuts.rs:17
-#: crates/gtkterm-gui/src/gui/terminal.rs:288
+#: crates/gtkterm-gui/src/gui/terminal.rs:297
 msgid "Paste"
 msgstr ""
 
@@ -1124,52 +1124,52 @@ msgstr ""
 msgid "{bytes} bytes not shown: the display could not keep up"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:114
+#: crates/gtkterm-gui/src/gui/terminal.rs:121
 msgid "Not connected: typed input is not sent (F5 connects)"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:120
+#: crates/gtkterm-gui/src/gui/terminal.rs:127
 msgid "A file transfer is running: typed input is not sent"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:160
+#: crates/gtkterm-gui/src/gui/terminal.rs:167
 msgid "Search text, regex or hex bytes"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:163
+#: crates/gtkterm-gui/src/gui/terminal.rs:170
 msgid "Case"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:164
+#: crates/gtkterm-gui/src/gui/terminal.rs:171
 msgid "Regex"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:165
+#: crates/gtkterm-gui/src/gui/terminal.rs:172
 msgid "Hex"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:167
+#: crates/gtkterm-gui/src/gui/terminal.rs:174
 msgid "Previous match"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:169
+#: crates/gtkterm-gui/src/gui/terminal.rs:176
 msgid "Next match (Enter)"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:177
+#: crates/gtkterm-gui/src/gui/terminal.rs:184
 msgid "Search options"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:289
+#: crates/gtkterm-gui/src/gui/terminal.rs:298
 msgid "Select All"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:291
+#: crates/gtkterm-gui/src/gui/terminal.rs:300
 #: crates/gtkterm-gui/src/gui/window.rs:2883
 msgid "Clear Screen"
 msgstr ""
 
-#: crates/gtkterm-gui/src/gui/terminal.rs:292
+#: crates/gtkterm-gui/src/gui/terminal.rs:301
 msgid "Search…"
 msgstr ""
 
