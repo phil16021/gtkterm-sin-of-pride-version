@@ -21,6 +21,13 @@
   </provides>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="2.0.0" date="2026-10-18">
+      <description>
+        <p>The Rust rewrite: every feature of the C version, plus tabs with one connection each,
+          a send bar, live chart controls, a complete MCP server for AI agents (subscriptions,
+          approval, rate limit, activity pane) and one window for every launch.</p>
+      </description>
+    </release>
     <release version="2.0.0~rc3" date="2026-10-18"/>
     <release version="2.0.0~rc2" date="2026-10-18"/>
     <release version="2.0.0~rc1" date="2026-10-18"/>

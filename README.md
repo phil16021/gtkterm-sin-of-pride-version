@@ -6,15 +6,14 @@ and a built-in **MCP server**, so AI agents such as Claude Code can drive your d
 ![Firmware output with live Sunshine charts](docs/screenshots/main.png)
 
 This is a Rust rewrite of the GTKTerm "Sin of Pride" fork (the C version lives at tag
-`legacy-c-v1.99.1`). Status **2.0.0-rc.3**: every feature of the C version is implemented
+`legacy-c-v1.99.1`). Status **2.0.0**: every feature of the C version is implemented
 (including its never-wired modules; see [docs/feature-parity.md](docs/feature-parity.md)): GTK 4 /
 libadwaita application, headless terminal, MCP server, macros, presets, protocol decoders, file
-transfers, automation scripts, port control and the signal monitor. rc.2 adds tabs (one connection
-each), a send bar, DTR/RTS at open, auto-reconnect, quick capture, chart controls and many
-robustness fixes; rc.3 completes the MCP server (subscriptions, completions, rate limit,
-activity pane), the QA tooling and the desktop integration (one instance, script files, new-tab
-action, translated core messages). 2.0.0 follows the hardware checklist; see
-[docs/ROADMAP.md](docs/ROADMAP.md).
+transfers, automation scripts, port control and the signal monitor. On top of that: tabs (one
+connection each), a send bar, DTR/RTS at open, auto-reconnect, quick capture, chart controls,
+a complete MCP server (subscriptions, completions, approval, rate limit, activity pane) and one
+window for every launch. Real-device checks: [docs/testing/hardware.md](docs/testing/hardware.md);
+history and plan: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Sunshine packets
 

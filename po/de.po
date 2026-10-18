@@ -2082,3 +2082,7 @@ msgstr "Philipp"
 #: data/at.philipp.GtkTermSunshine.metainfo.xml:12
 msgid "A terminal for serial ports, TCP and UDP. Lines in the Sunshine format such as {temp|Inside|21.5} are plotted live as line, bar, pie or scatter charts. A built-in Model Context Protocol server lets AI agents read and drive connected devices."
 msgstr "Ein Terminal für serielle Schnittstellen, TCP und UDP. Zeilen im Sunshine-Format wie {temp|Inside|21.5} werden live als Linien-, Balken-, Torten- oder Streudiagramm dargestellt. Ein eingebauter Model-Context-Protocol-Server lässt KI-Agenten angeschlossene Geräte lesen und steuern."
+
+#: data/at.philipp.GtkTermSunshine.metainfo.xml:26
+msgid "The Rust rewrite: every feature of the C version, plus tabs with one connection each, a send bar, live chart controls, a complete MCP server for AI agents (subscriptions, approval, rate limit, activity pane) and one window for every launch."
+msgstr "Die Neufassung in Rust: alle Funktionen der C-Version, dazu Tabs mit je einer Verbindung, eine Sendezeile, Bedienelemente für die Live-Diagramme, ein vollständiger MCP-Server für KI-Agenten (Abonnements, Freigabe, Ratenbegrenzung, Aktivitätsanzeige) und ein Fenster für jeden Start."

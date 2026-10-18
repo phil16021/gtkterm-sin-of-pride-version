@@ -34,7 +34,9 @@
 > installed): one instance per user (a second launch hands its command line to the window and
 > adds a tab), `.script` MIME type and `%F` (files open in the script editor), a *New Tab*
 > desktop action, core error and event messages translated at the GUI boundary, and no
-> homepage URL (removed until a public one exists). 2.0.0-rc.3.
+> homepage URL (removed until a public one exists; later set to the GitHub repo). 2.0.0-rc.3.
+> **2.0.0 tagged 2026-10-18** at the user's request, before the hardware checklist
+> (`docs/testing/hardware.md`, items 1–26) was run; its findings go into 2.0.x releases.
 
 ## Context
 

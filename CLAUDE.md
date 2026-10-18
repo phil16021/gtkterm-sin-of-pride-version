@@ -5,7 +5,7 @@ Guidance for Claude Code in this repository.
 ## Project
 
 GTKTerm Sunshine: a Linux serial/TCP/UDP terminal with live data visualization ("Sunshine" packets)
-and a built-in MCP server, **rewritten in Rust** (on `master` since 2.0.0-rc.1); the
+and a built-in MCP server, **rewritten in Rust** (on `master` since 2.0.0-rc.1, released as 2.0.0); the
 original C/GTK4 code is preserved at tag `legacy-c-v1.99.1` (use `git show legacy-c-v1.99.1:src/...`
 to consult it). The plan, compatibility contract and C-defect regression list are in `docs/ROADMAP.md`.
 Remotes: `origin` = the LAN Forgejo, `github` = the public repo
