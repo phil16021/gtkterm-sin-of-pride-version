@@ -622,16 +622,65 @@ pub fn import_c_macros(text: &str, path: &Path) -> Result<MacroStore, MacroError
     Ok(store)
 }
 
-/// Import the `macros = shortcut;action;...` key of upstream GTKTerm key files (first section
-/// that has one). `\;` is a literal semicolon; actions keep their backslash escapes.
+/// Import the macros of an old GTKTerm configuration (first section that has any):
+/// the C 2.x key `macros = shortcut;action;...` (`\;` is a literal semicolon), or the
+/// upstream 1.x list of `macros = "shortcut::action"` lines. Actions keep their backslash escapes.
 pub fn import_keyfile_macros(text: &str) -> MacroStore {
-    let mut store = MacroStore::default();
-    let Some(value) = text.lines().find_map(|l| {
-        let (k, v) = l.split_once('=')?;
-        (k.trim() == "macros").then(|| v.trim().to_owned())
-    }) else {
-        return store;
+    let mut values = Vec::new();
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('[') && !values.is_empty() {
+            break;
+        }
+        if let Some((k, v)) = line.split_once('=')
+            && k.trim() == "macros"
+        {
+            values.push(v.trim().to_owned());
+        }
+    }
+    let unquote = |v: &str| {
+        let v = v.trim();
+        for q in ['"', '\''] {
+            if let Some(inner) = v.strip_prefix(q).and_then(|v| v.strip_suffix(q)) {
+                return inner.to_owned();
+            }
+        }
+        v.to_owned()
     };
+    let pairs: Vec<(String, String)> = if values.iter().any(|v| unquote(v).contains("::")) {
+        values
+            .iter()
+            .filter_map(|v| {
+                let v = unquote(v);
+                let (shortcut, action) = v.split_once("::")?;
+                Some((shortcut.to_owned(), action.to_owned()))
+            })
+            .collect()
+    } else {
+        values.first().map(|v| split_keyfile_macros(v)).unwrap_or_default()
+    };
+    let mut store = MacroStore::default();
+    for (shortcut, action) in pairs {
+        let shortcut = shortcut.trim();
+        if shortcut.is_empty() || action.is_empty() {
+            continue;
+        }
+        // Keep valid escapes; protect stray backslashes so the action still decodes.
+        let data = if escape::decode(&action).is_ok() {
+            action.clone()
+        } else {
+            action.replace('\\', "\\\\")
+        };
+        store.insert_unique(Macro {
+            name: format!("{shortcut}: {}", action.chars().take(24).collect::<String>()),
+            shortcut: Some(shortcut.to_owned()),
+            commands: vec![MacroCommand::Send { data, delay_ms: 0 }],
+        });
+    }
+    store
+}
+
+/// `shortcut;action;shortcut;action;...` with `\;` as a literal semicolon.
+fn split_keyfile_macros(value: &str) -> Vec<(String, String)> {
     let mut fields = Vec::new();
     let mut cur = String::new();
     let mut chars = value.chars().peekable();
@@ -648,25 +697,13 @@ pub fn import_keyfile_macros(text: &str) -> MacroStore {
     if !cur.is_empty() {
         fields.push(cur);
     }
-    for pair in fields.chunks(2) {
-        let [shortcut, action] = pair else { continue };
-        let shortcut = shortcut.trim();
-        if shortcut.is_empty() || action.is_empty() {
-            continue;
-        }
-        // Keep valid escapes; protect stray backslashes so the action still decodes.
-        let data = if escape::decode(action).is_ok() {
-            action.clone()
-        } else {
-            action.replace('\\', "\\\\")
-        };
-        store.insert_unique(Macro {
-            name: format!("{shortcut}: {}", action.chars().take(24).collect::<String>()),
-            shortcut: Some(shortcut.to_owned()),
-            commands: vec![MacroCommand::Send { data, delay_ms: 0 }],
-        });
-    }
-    store
+    fields
+        .chunks(2)
+        .filter_map(|pair| match pair {
+            [shortcut, action] => Some((shortcut.clone(), action.clone())),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Load the macro store; on first run import the C fork's `~/.config/gtkterm/macros.json` or the
@@ -926,6 +963,31 @@ mod tests {
             }]
         );
         assert!(import_keyfile_macros("[default]\nport=x\n").list().is_empty());
+    }
+
+    #[test]
+    fn imports_upstream_1x_parsecfg_macros() {
+        // parsecfg writes one line per list entry, quoted when it contains spaces.
+        let kf = "[default]\nport\t= /dev/ttyS0\nmacros\t= F1::ATZ\\r\nmacros\t= \"F2::AT I\\r\"\n\
+                  macros\t= 'F3::say \"hi\"'\n\n[other]\nmacros\t= F9::x\n";
+        let s = import_keyfile_macros(kf);
+        let got: Vec<_> = s
+            .list()
+            .iter()
+            .map(|m| (m.shortcut.clone().unwrap(), m.commands[0].clone()))
+            .collect();
+        let send = |d: &str| MacroCommand::Send {
+            data: d.into(),
+            delay_ms: 0,
+        };
+        assert_eq!(
+            got,
+            [
+                ("F1".to_owned(), send("ATZ\\r")),
+                ("F2".to_owned(), send("AT I\\r")),
+                ("F3".to_owned(), send("say \"hi\"")),
+            ]
+        );
     }
 
     #[test]

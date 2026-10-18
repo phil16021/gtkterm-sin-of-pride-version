@@ -18,6 +18,7 @@ use gtkterm_mcp::transport::{HttpHandle, HttpSecurity, random_token, serve_http}
 use gtkterm_mcp::{GtkTermMcp, ServerOptions};
 use gtkterm_protocols::logfmt::{LogFormat, session_file_name};
 use gtkterm_protocols::view::{HEX_WIDTHS, ViewMode};
+use vte::prelude::TerminalExt as _;
 
 use super::charts::{VizPanel, save_dialog};
 use super::frames::FramesView;
@@ -114,6 +115,7 @@ impl Win {
             .default_width(state.width)
             .default_height(state.height)
             .maximized(state.maximized)
+            .fullscreened(state.fullscreen)
             .icon_name(APP_ID)
             .build();
 
@@ -526,6 +528,40 @@ impl Win {
         let s = self.session.clone();
         spawn_io(async move {
             let _ = s.close().await;
+        });
+    }
+
+    /// SIGUSR1 opens and SIGUSR2 closes the port, as in the C GTKTerm.
+    pub fn watch_unix_signals(&self) {
+        use tokio::signal::unix::{SignalKind, signal};
+        // Registered here, not in the task: a signal raised right after this call must not
+        // hit the default action (terminate).
+        let _guard = rt().enter();
+        let (Ok(mut usr1), Ok(mut usr2)) = (
+            signal(SignalKind::user_defined1()),
+            signal(SignalKind::user_defined2()),
+        ) else {
+            tracing::warn!("cannot watch SIGUSR1/SIGUSR2");
+            return;
+        };
+        let (tx, rx) = async_channel::unbounded();
+        spawn_io(async move {
+            loop {
+                let action = tokio::select! {
+                    _ = usr1.recv() => "win.open-port",
+                    _ = usr2.recv() => "win.close-port",
+                };
+                if tx.send(action).await.is_err() {
+                    break;
+                }
+            }
+        });
+        let w = self.window.downgrade();
+        glib::spawn_future_local(async move {
+            while let Ok(action) = rx.recv().await {
+                let Some(w) = w.upgrade() else { break };
+                let _ = WidgetExt::activate_action(&w, action, None);
+            }
         });
     }
 
@@ -1042,6 +1078,36 @@ impl Win {
             Box::new(|w| shortcuts_dialog().present(Some(&w.window))),
         );
         add("about", Box::new(|w| about_dialog().present(Some(&w.window))));
+        // Terminal zoom, like GNOME Terminal (VTE scales the configured font).
+        for (name, step) in [("zoom-in", 1.1), ("zoom-out", 1.0 / 1.1), ("zoom-reset", 0.0)] {
+            add(
+                name,
+                Box::new(move |w| {
+                    let t = &w.term.term;
+                    let scale = if step == 0.0 { 1.0 } else { t.font_scale() * step };
+                    t.set_font_scale(scale.clamp(0.25, 4.0));
+                }),
+            );
+        }
+        self.term.term.set_font_scale(self.state.borrow().font_scale.clamp(0.25, 4.0));
+        let action = gio::SimpleAction::new_stateful(
+            "fullscreen",
+            None,
+            &self.window.is_fullscreen().to_variant(),
+        );
+        let w = self.window.downgrade();
+        action.connect_activate(move |_, _| {
+            if let Some(w) = w.upgrade() {
+                w.set_fullscreened(!w.is_fullscreen());
+            }
+        });
+        let a = action.downgrade();
+        self.window.connect_fullscreened_notify(move |w| {
+            if let Some(a) = a.upgrade() {
+                a.set_state(&w.is_fullscreen().to_variant());
+            }
+        });
+        self.window.add_action(&action);
         add(
             "save-profile",
             Box::new(|w| {
@@ -1855,7 +1921,9 @@ impl Win {
         {
             let mut st = self.state.borrow_mut();
             st.maximized = self.window.is_maximized();
-            if !st.maximized {
+            st.fullscreen = self.window.is_fullscreen();
+            st.font_scale = self.term.term.font_scale();
+            if !st.maximized && !st.fullscreen {
                 st.width = self.window.width();
                 st.height = self.window.height();
             }
@@ -1955,6 +2023,12 @@ fn main_menu() -> gio::Menu {
         widths.append_item(&item);
     }
     view.append_submenu(Some("Hex Width"), &widths);
+    let zoom = gio::Menu::new();
+    zoom.append(Some("Zoom In"), Some("win.zoom-in"));
+    zoom.append(Some("Zoom Out"), Some("win.zoom-out"));
+    zoom.append(Some("Normal Size"), Some("win.zoom-reset"));
+    zoom.append(Some("Fullscreen"), Some("win.fullscreen"));
+    view.append_submenu(Some("Zoom"), &zoom);
     view.append(Some("Clear Screen"), Some("win.clear-screen"));
     view.append(Some("Remove All Charts"), Some("win.clear-charts"));
     menu.append_section(None, &view);
@@ -2041,8 +2115,36 @@ fn shortcuts_dialog() -> adw::ShortcutsDialog {
     dialog
 }
 
+/// Versions and system details for bug reports (About → Troubleshooting).
+fn debug_info() -> String {
+    let os = std::fs::read_to_string("/etc/os-release")
+        .ok()
+        .and_then(|t| {
+            t.lines()
+                .find_map(|l| l.strip_prefix("PRETTY_NAME="))
+                .map(|v| v.trim_matches('"').to_owned())
+        })
+        .unwrap_or_else(|| "unknown".into());
+    let kernel = std::fs::read_to_string("/proc/sys/kernel/osrelease").unwrap_or_default();
+    let kernel = kernel.trim();
+    format!(
+        "GTKTerm Sunshine {}\nOS: {os} (Linux {kernel})\nGTK {}.{}.{}\nlibadwaita {}.{}.{}\nRenderer: {}\nDesktop: {}\n",
+        env!("CARGO_PKG_VERSION"),
+        gtk::major_version(),
+        gtk::minor_version(),
+        gtk::micro_version(),
+        adw::major_version(),
+        adw::minor_version(),
+        adw::micro_version(),
+        std::env::var("GSK_RENDERER").unwrap_or_else(|_| "default".into()),
+        std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_else(|_| "unknown".into()),
+    )
+}
+
 fn about_dialog() -> adw::AboutDialog {
     adw::AboutDialog::builder()
+        .debug_info(debug_info())
+        .debug_info_filename("gtkterm-sunshine-debug.txt")
         .application_name("GTKTerm Sunshine")
         .application_icon(APP_ID)
         .version(env!("CARGO_PKG_VERSION"))
@@ -2061,7 +2163,6 @@ mod tests {
 
     use gtkterm_core::config::Config;
     use gtkterm_core::port::loopback;
-    use vte::prelude::*;
 
     use super::*;
 
@@ -2251,6 +2352,9 @@ mod tests {
             "visualization",
             "shortcuts",
             "about",
+            "zoom-in",
+            "zoom-out",
+            "zoom-reset",
             "send-break",
             "clear-charts",
         ] {
@@ -2480,6 +2584,11 @@ mod tests {
         // contents, but the path must not warn).
         win.term.term.feed_child(b"x");
         pump_until(Duration::from_millis(100), || false);
+
+        // SIGUSR2 closes the port (C GTKTerm compatibility).
+        win.watch_unix_signals();
+        nix::sys::signal::raise(nix::sys::signal::Signal::SIGUSR2).unwrap();
+        assert!(pump_until(Duration::from_secs(5), || !win.is_open()), "SIGUSR2 closes");
 
         win.window.close();
         pump_until(Duration::from_millis(200), || false);

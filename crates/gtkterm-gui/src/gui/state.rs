@@ -43,6 +43,10 @@ pub struct UiState {
     pub height: i32,
     /// Window maximized.
     pub maximized: bool,
+    /// Window fullscreen.
+    pub fullscreen: bool,
+    /// Terminal zoom (VTE font scale).
+    pub font_scale: f64,
     /// Divider position between terminal and charts.
     pub pane_position: Option<i32>,
     /// Chart panel shown.
@@ -73,6 +77,8 @@ impl Default for UiState {
             width: 1180,
             height: 760,
             maximized: false,
+            fullscreen: false,
+            font_scale: 1.0,
             pane_position: None,
             panel_visible: false,
             hex_history: Vec::new(),
@@ -116,8 +122,11 @@ impl UiState {
             .unwrap_or_default()
     }
 
-    /// Save (errors are logged, not fatal).
+    /// Save atomically and readable only by the user: the file holds the MCP token.
+    /// Errors are logged, not fatal.
     pub fn save(&self) {
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt as _;
         let p = path();
         let result = toml::to_string_pretty(self)
             .map_err(std::io::Error::other)
@@ -125,7 +134,16 @@ impl UiState {
                 if let Some(d) = p.parent() {
                     std::fs::create_dir_all(d)?;
                 }
-                std::fs::write(&p, t)
+                let tmp = p.with_extension("toml.tmp");
+                let _ = std::fs::remove_file(&tmp);
+                let mut f = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(&tmp)?;
+                f.write_all(t.as_bytes())?;
+                f.sync_all()?;
+                std::fs::rename(&tmp, &p)
             });
         if let Err(e) = result {
             tracing::warn!(path = %p.display(), error = %e, "cannot save UI state");
@@ -160,5 +178,21 @@ mod tests {
             (partial.width, partial.height, partial.mcp.port),
             (900, 760, 9000)
         );
+    }
+
+    #[test]
+    fn saved_privately() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        set_test_dir(dir.path());
+        let file = dir.path().join("state.toml");
+        std::fs::write(&file, "").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let mut s = UiState::default();
+        s.mcp.token = Some("secret".into());
+        s.save();
+        let mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "the MCP token must not be world-readable");
+        assert_eq!(UiState::load().mcp.token.as_deref(), Some("secret"));
     }
 }

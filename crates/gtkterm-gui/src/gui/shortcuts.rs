@@ -57,6 +57,10 @@ pub const SHORTCUTS: &[(&str, &str, &str, &str)] = &[
         "<Control><Shift>m",
     ),
     ("Data", "Scripts", "win.scripts", "<Control><Shift>j"),
+    ("View", "Zoom in", "win.zoom-in", "<Control>plus"),
+    ("View", "Zoom out", "win.zoom-out", "<Control>minus"),
+    ("View", "Normal size", "win.zoom-reset", "<Control>0"),
+    ("View", "Fullscreen", "win.fullscreen", "F11"),
     ("View", "Keyboard shortcuts", "win.shortcuts", "<Control>question"),
     ("Application", "About", "win.about", "F1"),
     ("Application", "Quit", "app.quit", "<Control><Shift>q"),
@@ -81,7 +85,7 @@ mod tests {
             if accel.starts_with("<Control>") && !accel.contains("<Shift>") {
                 let key = accel.trim_start_matches("<Control>");
                 assert!(
-                    key.len() > 1,
+                    !(key.len() == 1 && key.chars().all(|c| c.is_ascii_alphabetic())),
                     "{accel} would steal a control character from the device"
                 );
             }

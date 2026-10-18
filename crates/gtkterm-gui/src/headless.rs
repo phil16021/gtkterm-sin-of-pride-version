@@ -195,7 +195,7 @@ pub async fn run_headless(cli: Cli, r: Resolved) -> Result<()> {
                 Ok(Some(Err(e))) => break Err(anyhow::anyhow!("script failed: {e}")),
                 _ => break Ok(()),
             },
-                        _ = sigint.recv() => break Ok(()),
+            _ = sigint.recv() => break Ok(()),
             _ = sigterm.recv() => break Ok(()),
             _ = usr1.recv() => {
                 if let Err(e) = session.open(r.profile.connection.clone()).await {

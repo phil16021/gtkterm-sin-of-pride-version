@@ -709,9 +709,16 @@ pub fn config_path() -> PathBuf {
     config_dir().join("config.toml")
 }
 
-/// Path of the legacy GTKTerm key file (`~/.config/.gtktermrc`).
+/// Path of an existing legacy GTKTerm configuration: `~/.config/.gtktermrc` (C GTKTerm 2.x)
+/// or `~/.gtktermrc` (upstream 1.x).
 pub fn legacy_keyfile_path() -> Option<PathBuf> {
-    directories::BaseDirs::new().map(|d| d.config_dir().join(".gtktermrc"))
+    let dirs = directories::BaseDirs::new()?;
+    [
+        dirs.config_dir().join(".gtktermrc"),
+        dirs.home_dir().join(".gtktermrc"),
+    ]
+    .into_iter()
+    .find(|p| p.is_file())
 }
 
 /// Load the configuration; on first run, import the legacy key file if present.

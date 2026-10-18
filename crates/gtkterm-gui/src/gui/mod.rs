@@ -97,6 +97,7 @@ pub fn run(cli: Cli, resolved: Resolved) -> ExitCode {
             resolved.profile.clone(),
             start,
         );
+        win.watch_unix_signals();
         *h.borrow_mut() = Some(win);
     });
     let status = app.run_with_args::<&str>(&["gtkterm-sunshine"]);

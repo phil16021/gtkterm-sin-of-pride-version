@@ -283,6 +283,78 @@ pub struct Cli {
     pub generate_completions: Option<clap_complete::Shell>,
 }
 
+/// Man page sections clap cannot generate.
+const MAN_EXTRA: &str = r#".SH "KEYBOARD"
+Plain Ctrl+letter keys go to the device. Application shortcuts use Ctrl+Shift or function keys:
+F5/F6 open/close the port, F7/F8 toggle DTR/RTS, Ctrl+Shift+B sends a break, Ctrl+Shift+H opens
+hex send, Ctrl+Shift+J the script editor, Ctrl+Shift+M the signal monitor and Ctrl+? lists all of them.
+.SH SIGNALS
+.TP
+.B SIGUSR1
+Open (or reopen) the configured port.
+.TP
+.B SIGUSR2
+Close the port.
+.TP
+.BR SIGINT ", " SIGTERM
+Stop logging, close the port and exit (\fB\-\-headless\fR).
+.SH FILES
+.TP
+.I $XDG_CONFIG_HOME/gtkterm\-sunshine/config.toml
+Profiles (\fB[profiles.<name>]\fR) and settings. On first start \fI~/.config/.gtktermrc\fR of
+the C GTKTerm is imported.
+.TP
+.I $XDG_CONFIG_HOME/gtkterm\-sunshine/macros.json
+Macros; \fI~/.config/gtkterm/macros.json\fR is imported on first start.
+.TP
+.I $XDG_CONFIG_HOME/gtkterm\-sunshine/state.toml
+Window state, recent choices and the embedded MCP server settings (including its token; mode 0600).
+.TP
+.I $XDG_DATA_HOME/gtkterm\-sunshine/logs/
+Default directory of session logs.
+.TP
+.I $XDG_DATA_HOME/gtkterm\-sunshine/transfers/
+Default directory of received files and of files agents may send.
+.TP
+.I /usr/share/gtkterm\-sunshine/examples/
+Example scripts (under the installation prefix).
+.SH ENVIRONMENT
+.TP
+.B RUST_LOG
+Diagnostics filter, e.g. \fBgtkterm_core=debug\fR; overrides \fB\-v\fR.
+.TP
+.B GTKTERM_MCP_TOKEN
+Bearer token of \fB\-\-mcp\-http\fR.
+.TP
+.B GTKTERM_SUNSHINE_CONFIG_DIR
+Use another configuration directory.
+.SH "EXIT STATUS"
+0 on success, 1 on runtime errors (including a failed \fB\-\-script\fR in \fB\-\-headless\fR
+mode), 2 on invalid options.
+.SH EXAMPLES
+.TP
+.B gtkterm\-sunshine \-p /dev/ttyUSB0 \-s 115200
+Open the GUI on a USB serial adapter.
+.TP
+.B gtkterm\-sunshine \-\-tcp 192.168.1.50:23
+Connect to a TCP endpoint (\fB\-\-tcp\-listen 5000\fR accepts clients instead).
+.TP
+.B gtkterm\-sunshine \-\-headless \-p /dev/ttyACM0 \-\-log\-file run.csv
+Print received data on stdout, send stdin, log as CSV.
+.TP
+.B gtkterm\-sunshine \-\-headless \-p /dev/ttyUSB0 \-\-script probe.script
+Run a script and exit with its result.
+.TP
+.B claude mcp add gtkterm \-\- gtkterm\-sunshine \-\-mcp\-stdio
+Register the MCP server with Claude Code.
+.SH "SEE ALSO"
+.BR gtkterm (1),
+.BR socat (1),
+.BR stty (1),
+.BR sz (1),
+.BR rz (1)
+"#;
+
 /// Handle the packaging flags; returns true if one was given.
 pub fn packaging(cli: &Cli) -> std::io::Result<bool> {
     use clap::CommandFactory;
@@ -291,6 +363,7 @@ pub fn packaging(cli: &Cli) -> std::io::Result<bool> {
         let man = clap_mangen::Man::new(Cli::command());
         let mut buf = Vec::new();
         man.render(&mut buf)?;
+        buf.extend_from_slice(MAN_EXTRA.as_bytes());
         std::fs::write(dir.join("gtkterm-sunshine.1"), buf)?;
         return Ok(true);
     }
