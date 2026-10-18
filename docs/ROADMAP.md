@@ -1,16 +1,14 @@
 # GTKTerm Sunshine — Rust Rewrite: Implementation, Test & Debugging Plan
 
-> **Status 2026-10-18:** R0–R8 done; R9 in progress (2.0.0-rc.1). R9 so far:
-> - Feature-parity sign-off against the C inventory ([feature-parity.md](feature-parity.md)), which led to
->   SIGUSR1/2 in the GUI, the `~/.gtktermrc` (1.x) import with macros, F11/zoom, a working visual bell
->   and About troubleshooting info.
-> - Man page sections, gettext translations (template, German, `cargo xtask po`).
-> - MCP approval dialog and JSONL audit log.
-> - Fixes: `state.toml` (MCP token) is now written 0600; TX records are no longer lost when the log
->   stops right after a send.
->
-> Open: the hardware checklist, merging into master, and the optional Flatpak. Deviation: the GUI is
-> built from plain gtk4-rs widgets in Rust instead of composite templates.
+> **Status 2026-10-18:** R0–R9 done (2.0.0-rc.1, on master). After a second audit (plan vs code,
+> robustness, user view) the plan continues with R10–R15 (see the plan file mirrored below):
+> R10 stabilization is **done**: stuck script slot after MCP timeouts, UDP/TCP write handling and
+> slow TCP clients, GUI throughput at high data rates, incremental `expect`, EtherCAT resync,
+> cancellable connect and breaks beside the actor, sysfs UART detection (no DTR glitch), bounded
+> serial close, lag handling, bounded/flushable send queue, streamed raw file send, durable saves,
+> MCP chart notifications, per-client approval, profile autosave and naming, action enabling,
+> hardening (0600 logs, exec paths, token source) and cleanup. Soak: 4 min at ~8000 packets/s,
+> RSS flat at ~190 MB. Next: R11 tabs, R12 daily-use features, then 2.0.0.
 
 ## Context
 
